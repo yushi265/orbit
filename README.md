@@ -17,6 +17,9 @@ Linearライクな個人用プロジェクト管理アプリです。要件定�
 - Tailwind CSS + shadcn/ui
 - TanStack Query / TanStack Form / Zod
 - Vitest + Playwright
+- pnpm（Package manager）
+- oxlint（Lint）
+- oxfmt（Formatter）
 
 ## AI 開発の入口
 
@@ -37,7 +40,16 @@ pnpm -C .claude/aidlc test
 pnpm -C .claude/aidlc typecheck
 ```
 
-ルートのアプリ実装が始まるまでは、アプリの lint・format・test コマンドは未設定です。
+ルートのアプリ実装が始まるまでは、アプリの依存関係とscriptは未設定です。実装開始時はpnpmで依存を導入し、次のscriptを`package.json`へ定義します。
+
+```bash
+pnpm add -D oxlint oxfmt
+pnpm lint          # oxlint
+pnpm format        # oxfmt
+pnpm format:check  # oxfmt --check
+pnpm test
+```
+
 設定後は `.claude/aidlc/referee.config.json` と `lefthook.yml` に反映します。
 
 ## ドキュメント

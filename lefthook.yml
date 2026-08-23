@@ -4,15 +4,16 @@ pre-commit:
     # secret 検知（gitleaks）。スタック非依存の汎用ゲート。維持を推奨。
     gitleaks:
       run: gitleaks git --staged --no-banner
-    # --- プロジェクトの lint / format / test をここに追加する ---
-    #   下は例（コメントアウト）。自分のスタックの linter / formatter に置き換えて有効化する。
-    #   glob でレイヤー別に対象を絞れる（root: でサブディレクトリ基準にできる）。
-    # lint:
-    #   glob: "<対象 glob 例: **/*.ts>"
-    #   run: <lint コマンド 例: eslint --no-warn-ignored {staged_files} / golangci-lint run / ruff check>
-    # format-check:
-    #   glob: "<対象 glob>"
-    #   run: <formatter --check 例: prettier --check {staged_files} / gofmt -l>
+    # --- orbitの lint / format ---
+    # package.json導入前は何もしない。実装開始後はpnpm経由でoxlint/oxfmtを実行する。
+    lint:
+      glob: "**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      run: |
+        if [ -f package.json ]; then pnpm exec oxlint {staged_files}; fi
+    format-check:
+      glob: "**/*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,yaml,yml,md,mdx,css,scss}"
+      run: |
+        if [ -f package.json ]; then pnpm exec oxfmt --check {staged_files}; fi
     # --- AI-DLC ハーネス機構（維持を推奨）---
     # anti-tamper（advisory・非ブロック）: staged な test diff の改ざん（assertion 削除 / skip 追加等）を早期警告する。
     aidlc-anti-tamper:

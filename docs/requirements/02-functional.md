@@ -9,7 +9,7 @@
 | AUTH-03 | 未認証アクセスとセッション失効をCloudflare Accessの再認証へ戻す | 通常NavigationはAccessがWorker到達前に保護し、Server Function / APIは失効時の401を検知して現在URLへTop-level Navigationする |
 | AUTH-04 | 許可メールアドレスをAccess Policyで管理する | App側のClient bundleやログへ値を露出しない |
 | AUTH-05 | SPA / PWAでAccessのセッション失効を回復できる | 同一Originの非同期リクエストへ`X-Requested-With: XMLHttpRequest`と`credentials: 'same-origin'`を付け、401をOffline・Timeout・5xxと区別し、再認証後に元のDeep linkへ戻る |
-| AUTH-06 | HTTP以外のHandlerでも唯一の所有者を安全に解決する | Cronは`OWNER_USER_ID`を使用し、QueueはMessageの`user_id`と`OWNER_USER_ID`の一致を検証する。未設定・形式不正・対応する`users`行なしは更新せず失敗する |
+| AUTH-06 | 手動Runnerでも唯一の所有者を安全に解決する | Access JWTで認証した所有者の`user_id`をRunへ保存し、Chunk実行ごとに同じ所有者を検証する。未認証、所有者不一致、Runのuser_id不一致は外部応答を404または401にして業務データを更新せず、内部Security logだけへ記録する |
 
 Cloudflare Accessの認証画面はアプリ内Routeではない。ログアウトは`/cdn-cgi/access/logout`へのTop-level Navigationで行う。Service Workerは静的公開AssetだけをCacheし、認証済みSSR HTML、Server Function / API応答、Accessの401・Redirect・Login応答、個人データをCacheしない。[Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/) [Cloudflare Access authorization cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)
 
@@ -57,8 +57,8 @@ Issueの依存関係はLinearのblocking、related、duplicateを踏襲する。
 | CYC-01 | Cycleを有効化できる | 無効化しても過去Cycleは保持される |
 | CYC-02 | 期間を1〜8週間で設定できる | 個人設定のタイムゾーン基準で開始・終了する |
 | CYC-03 | 開始曜日を設定できる | 開始日の00:00を境界とする |
-| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と手動Runによる繰越は許可するが、現在Cycleへの割当は行わない。Cron自動繰越は後続Phaseで有効化する |
-| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を保留として表示し、MVPは手動Runで生成する。Cron自動生成は後続Phaseで有効化する |
+| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と手動Runによる繰越は許可するが、現在Cycleへの割当は行わない |
+| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を保留として表示し、手動Runで生成する |
 | CYC-06 | 将来Cycleの開始日・終了日を個別調整できる | 過去Cycleは変更不可、期間重複を禁止し、個別調整したCycleは`schedule_overridden = true`として自動再生成の上書き対象外にする |
 
 ### 6.4.2 Cycleライフサイクル
@@ -76,11 +76,11 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
 | CYC-07 | Cycle状態をUpcoming / Active / Completedで自動判定する | 個人設定のタイムゾーンで境界を一貫して扱う |
-| CYC-08 | 次Cycleを即時開始できる | 確認後、Cronと同じCAS方式で現在Cycleを即時終了し、次Cycleの`starts_at`を現在時刻、`ends_at`を設定期間後へ変更してActiveにする。後続の自動生成Cycleは新しい境界から再生成し、個別調整済みCycleと重複する場合は更新を拒否して解消を求める |
+| CYC-08 | 次Cycleを即時開始できる | 確認後、同じ条件付きCAS方式で現在Cycleを即時終了し、次Cycleの`starts_at`を現在時刻、`ends_at`を設定期間後へ変更してActiveにする。後続の将来Cycleは新しい境界から再計算し、個別調整済みCycleと重複する場合は更新を拒否して解消を求める |
 | CYC-09 | Active終了時に未完了Issueを次Cycleへ繰り越す | Workflow categoryがUnstartedまたはStartedのIssueだけを次Cycleへ移し、Backlog / Completed / Canceledは元Cycleに残す |
 | CYC-10 | StartedまたはCompletedになった未所属Issueを現在Cycleへ自動追加できる | 個人設定でON/OFFでき、変更履歴にAutomationとして記録する |
 | CYC-11 | Issueが繰り越された回数と元Cycleを保持する | Issue詳細およびCycle履歴から追跡できる |
-| CYC-12 | Cycle終了処理を冪等に実行する | 手動Run再実行・同時実行・後続Cron・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
+| CYC-12 | Cycle終了処理を冪等に実行する | 手動Run再実行・同時実行・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
 
 ### 6.4.3 Cycle画面・分析
 
@@ -163,17 +163,17 @@ MVP推奨ショートカット:
 - 業務データの作成・更新・削除は、actor、action、entity、before/after差分、request ID、timestampを記録する
 - JSONまたはCSVでIssueをExportできる（Phase 2）
 - Issue、Project、通知、メモ、Saved Viewの削除は原則論理削除とし、Trashから30日以内に復元できる
-- `deleted_at`から30日を超えたデータは、MVPでは手動Runが依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する。Cron自動Purgeは後続Phaseで有効化する
-- Mutation receiptは作成から30日後を`expires_at`とし、MVPでは手動Runが物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う。Cron自動削除は後続Phaseで有効化する
+- `deleted_at`から30日を超えたデータは、MVPでは手動RunがD1をChunk処理して依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する
+- Mutation receiptは作成から30日後を`expires_at`とし、MVPでは手動RunがD1をChunk処理して物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う
 - D1 Time TravelおよびBackup上の保持は、アプリ内の30日復元期限には含めない
 
 ## 6.10 バックグラウンド処理
 
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
-| ASYNC-01 | バックグラウンド処理をSettingsから手動実行できる | 公開Run種別は`maintenance`に固定し、固定Stepを`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`の順に処理する。各Stepの`pending / running / succeeded / failed / skipped`、`processed / total`、成果物、dedupe keyを記録して`run_id`と状態を返す。Step失敗時は後続Stepを実行せず、完了済みStepを保持して再実行時にNo-opまたは再開する |
-| ASYNC-02 | バックグラウンド処理の実行中は業務操作を停止する | Issue（CRUD、Notes、Relation、Label、Archive、Trash、Restore、Bulk）、Cycle、Project、View、Notification、Preference、Workflow、Project statusなど全業務Mutationを`code = OPERATION_IN_PROGRESS`と`requestId`付きの423で拒否し、version、Activity、Outbox、Mutation receiptを増やさない。Runの開始・状態取得・復旧、進捗取得、再認証、ログアウト、読み取りは許可する。画面はフルスクリーンの処理中表示にする |
-| ASYNC-03 | 実行状態と進捗を端末横断で確認できる | `pending / queued / running / succeeded / failed / expired / rejected`を保持し、再読み込み・別端末でも同じ`run_id`、Step、進捗を表示する。HeartbeatとLease期限を持ち、期限切れWorkerは業務データ、進捗、Run状態、Heartbeat、Lockを更新できない |
-| ASYNC-04 | 手動・Cronで同じジョブランナーを利用し、Queueを実行transportとして使う | MVPは手動起動だけを有効にし、必要なStepをQueueへ送る。後続PhaseでCronは同じ起動Serviceを呼び出し、Queueの常時自動投入を有効化する。実行中ロックとの競合は業務更新なしで記録し、次回起動へ回す |
-| ASYNC-05 | 非同期処理を冪等に再実行できる | Queue Messageは内部機密として`user_id`、`run_id`、`lock_token`、処理単位、dedupe keyを持ち、再配送・同時実行でも二重反映しない。実行中に別RunのMessageは処理せず再試行または延期する。Queue / Cronのactorは監査へ記録する |
-| ASYNC-06 | 失敗・停止後に安全に復旧できる | Step失敗時はRunを`failed`として後続Stepを止め、完了済みStepを記録したうえでロックを解放する。Lease期限切れは`expired`として扱い、再実行は新しい`idempotencyKey`・新しい`run_id`・`retry_of_run_id`で行い、同じ業務対象のdedupe keyを引き継ぐ。旧Runで`succeeded`済みのStepはNo-op、`failed / expired`のStepは`attempt_count`を増やして再実行する。terminal状態からの逆戻りは禁止し、MVPでは任意地点からのCancelは提供しない |
+| ASYNC-01 | バックグラウンド処理をSettingsから手動実行できる | 公開Run種別は`maintenance`に固定し、固定Stepを`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`の順に処理する。各Chunkは最大`CHUNK_SIZE`件で、`cursor`と進捗を保存して次のHTTP呼び出しへ返す |
+| ASYNC-02 | バックグラウンド処理の実行中は業務操作を停止する | Issue（CRUD、Notes、Relation、Label、Archive、Trash、Restore、Bulk）、Cycle、Project、View、Notification、Preference、Workflow、Project statusなど全業務Mutationを`code = OPERATION_IN_PROGRESS`と`requestId`付きの423で拒否し、version、Activity、Outbox、Mutation receiptを増やさない。Run継続・状態取得・復旧、進捗取得、再認証、ログアウト、読み取りは許可する。画面はフルスクリーンの処理中表示にする |
+| ASYNC-03 | 実行状態と進捗を端末横断で確認できる | `pending / running / paused / succeeded / failed / rejected`を保持し、`GET /current`で再読み込み・別端末から同じ`run_id`、Step、cursor、進捗を表示する。cursorはServer生成のopaque stringとし、比較はcursor値ではなくD1のversion / 状態遷移で行う。Lease期限切れは`paused`へ遷移し、古いChunk実行は書き込みできない |
+| ASYNC-04 | 手動RunをHTTP Chunk実行で継続できる | `POST /api/v1/background-runs`でRunを作成し、`POST /api/v1/background-runs/:id/continue`へ現在の`expected_cursor`を渡してブラウザが完了まで呼び出す。各呼び出しはD1 `batch()`で1 Chunkだけ処理し、Heartbeatを更新する。古いcursorの敗者は現在進捗を返して効果を発生させない。外部メッセージ基盤・自動スケジューラ・常駐Workerを必要としない |
+| ASYNC-05 | Chunk処理を冪等に再実行できる | 同じRun・Step・cursorの再送や同時実行でも一度だけ反映し、`background_effect_dedupes`で業務効果を重複させない。Chunkの順序、user_id、Run所有者、lock token、LeaseをServer側で検証する。Run所有者不一致・不存在は404、paused / failed Runへのcontinueは409 `RUN_REQUIRES_RESUME`、有効Runへの競合Mutationは423 `OPERATION_IN_PROGRESS`とする |
+| ASYNC-06 | ブラウザ終了・失敗後に安全に再開できる | Heartbeatが止まるとRunを`paused`にしてLockを解放し、再度開いた画面から同じRunをcursor位置から再開する。Step失敗は`failed`として再開対象にし、成功済みStep・ChunkはNo-op、terminal状態からの逆戻りは禁止する |

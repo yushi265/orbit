@@ -45,7 +45,7 @@
 			"Bash(git log:*)",
 			"Bash(gh pr view:*)",
 			"Bash(gh pr diff:*)",
-			"Bash(npx lefthook:*)",
+			"Bash(pnpm exec lefthook:*)",
 			"Bash(lefthook:*)",
 			"Bash(gitleaks:*)",
 			"Bash(pnpm -C .claude/aidlc test:*)",

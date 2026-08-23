@@ -1,4 +1,16 @@
 {
-  "$comment": "Stage 5 の検証コマンドを定義する。orbit はアプリ本体の実装前なので、現時点では未設定。アプリの各レイヤーと検証コマンドを確定したら、ここへ実コマンドを追加する。",
-  "layers": {}
+  "$comment": "Stage 5 のアプリ品質ゲート。root package.json導入前はnode_modules前提によりunavailableとなる。実装開始時はpnpm scriptsを正本とし、lint=oxlint、format-check=oxfmt --checkを維持する。",
+  "layers": {
+    "app": {
+      "cwd": ".",
+      "command": ["pnpm", "lint"],
+      "precondition": "node_modules"
+    }
+  },
+  "post": {
+    "name": "format-check",
+    "cwd": ".",
+    "command": ["pnpm", "format:check"],
+    "precondition": "node_modules"
+  }
 }

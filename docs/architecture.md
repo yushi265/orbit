@@ -14,10 +14,10 @@ ui（TanStack Start + React）
         ▼
 service（Cloudflare Worker）
         │ 認証・認可・ドメイン処理・トランザクション
-        ├───────────────┬───────────────┬───────────────┐
-        ▼               ▼               ▼               ▼
-data（D1 + Drizzle）  Manual Run      Queues（Background manual / Notification later）    Cron: later
-                         │               │               │
+        ├───────────────┬───────────────┐
+        ▼               ▼               ▼
+data（D1 + Drizzle）  Manual Run      D1 Chunk Runner
+                         │               │
                          └── Background run lock / progress ──┘
 ```
 
@@ -28,14 +28,13 @@ data（D1 + Drizzle）  Manual Run      Queues（Background manual / Notificatio
 | data（データ層） | `src/db/` / `drizzle/` | Drizzleスキーマ、Migration、Repository。D1 BindingをBrowserへ露出しない |
 | shared（共有契約） | `src/shared/` | UIとserviceの間で共有するZod入出力スキーマ・エラーEnvelope・公開型。特定層へ依存しない |
 
-MVPではSettingsのManual Runから冪等なservice処理を呼び出し、実行中はD1のBackground run lockで業務Mutationを停止する。通知生成・重い集計・将来のWebhook処理はQueuesへ、Cycleの自動境界処理はCron Triggersへ後から接続する。どちらもManual Runと同じservice処理を再利用する。
+MVPではSettingsのManual Runから冪等なservice処理を呼び出し、実行中はD1のBackground run lockで業務Mutationを停止する。通知生成・重い集計は同じWorkerのD1 Chunk処理で行い、Webhookや外部連携は今回対象外とする。
 
 ## 依存方向
 
 ```
 ui  →  shared ← service → data
-                   ├── Queues
-                   └── Cron Triggers
+                   └── Manual Chunk Runner
 ```
 
 - `ui` は HTTPまたはServer Functionの公開契約経由で `service` を利用し、D1へ直接アクセスしない。
@@ -53,7 +52,7 @@ MVPでは単一 Worker 内のモジュールとして次を分ける。独立し
 - `views`: Filter、Group、Order、Saved View
 - `notifications`: Inboxと通知設定
 - `auth`: Cloudflare Access JWT検証と本人スコープ
-- `background`: Manual Run、実行ロック、進捗、Lease復旧。Queue / Cronはこのモジュールの起動アダプタとして扱う
+- `background`: Manual Run、実行ロック、進捗、cursor、Lease復旧
 
 モジュール間の参照は公開関数・型を経由し、他モジュールのRepositoryやDBテーブルへ直接依存しない。
 
@@ -62,6 +61,6 @@ MVPでは単一 Worker 内のモジュールとして次を分ける。独立し
 - TanStack Startの具体的なRoute配置とServer Functionの切り分け
 - D1 Repositoryのファイル構成とMigration運用
 - Cloudflare Access JWT検証ライブラリ・鍵取得の実装方法
-- Background Queue consumerのローカルテスト方法とCron adapterの有効化手順
+- D1 Chunk Runnerのローカルテスト方法とLease復旧手順
 
 これらは実装開始時のTier 1設計判断として、該当specと人間ゲートで確定する。

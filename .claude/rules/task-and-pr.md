@@ -22,7 +22,7 @@ PR 作成前に、**必ず**以下を実行し pass を確認する。失敗し�
 
 | 対象 | コマンド（例） |
 |------|---------|
-| pre-commit 一括 | `npx lefthook run pre-commit`（secret 検知 = `gitleaks` + 各レイヤーの lint/フォーマット/テストを束ねる。フックの中身はプロジェクトが定義） |
+| pre-commit 一括 | `pnpm exec lefthook run pre-commit`（secret 検知 = `gitleaks` + 各レイヤーの lint/フォーマット/テストを束ねる。フックの中身はプロジェクトが定義） |
 | 各レイヤー | フォーマッタ（差分なし）/ linter / 型チェック / テスト（プロジェクトが定めるコマンド） |
 
 - テスト追加状況・カバレッジ方針は [testing.md](./testing.md) に従う。

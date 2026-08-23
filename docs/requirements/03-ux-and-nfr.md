@@ -57,7 +57,7 @@
 | データ保護 | 全Queryを認証済みuser_idでスコープし、他アカウントのデータへアクセスできないようにする |
 | プライバシー | ログへ本文、Cookie、Token、メールアドレスを不用意に出力しない |
 | バックアップ | D1 Time Travelを利用し、定期Export手順を用意する。FTS Virtual tableは派生IndexとしてExport前に除外し、復元後にMigrationと再Indexで再構築する。[D1 import / export](https://developers.cloudflare.com/d1/best-practices/import-export-data/) |
-| 観測性 | request ID、構造化ログ、エラー、Latency、D1 query、Queue失敗を追跡する |
+| 観測性 | request ID、構造化ログ、エラー、Latency、D1 query、Background run失敗を追跡する |
 | 保守性 | TypeScript strict、境界Schema、Migration、ADR、Feature単位のモジュール構成を採用する |
 | 互換性 | 最新2世代のChrome、Safari、Edge、Firefoxおよび現行iOS/Androidブラウザを対象とする |
 | テスト | Domain unit、Repository / Service / UI integrationを一次担保とし、Playwright E2EはAccess・PWA・実Browser固有の少数Smokeへ限定する |

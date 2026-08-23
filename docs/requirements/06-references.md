@@ -22,9 +22,13 @@
 - [react-i18next](https://react.i18next.com/)
 - [Drizzle ORM for Cloudflare D1](https://orm.drizzle.team/docs/sqlite/connect-cloudflare-d1)
 
+## JavaScriptツールチェーン
+
+- [Oxlint](https://oxc.rs/docs/guide/usage/linter.html)
+- [Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html)
+
 ## Cloudflare公式
 
-- [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/)
 - [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 - [Storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
@@ -35,10 +39,6 @@
 - [D1 import / export](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
 - [D1 read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
 - [Durable Objects](https://developers.cloudflare.com/durable-objects/)
-- [Queues](https://developers.cloudflare.com/queues/)
-- [Queues consumers](https://developers.cloudflare.com/queues/reference/how-queues-works/)
-- [Queues batching, retries and delays](https://developers.cloudflare.com/queues/configuration/batching-retries/)
-- [Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)
 - [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
 - [Validate Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 - [Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)

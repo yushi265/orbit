@@ -114,7 +114,7 @@ AI に実装を任せるほど「設計を読まずに書く」「過剰設計�
 
 ### 編集時の自動整形（hooks）
 
-`.claude/settings.json` の `PostToolUse(Edit|Write)` が `.claude/hooks/format.sh` を呼び、編集ファイルを整形する（既定は Go=gofmt / JS・TS 系=prettier の例。プロジェクトの整形ツールに差し替える）。失敗してもブロックしない（最終防衛線は lefthook）。
+`.claude/settings.json` の `PostToolUse(Edit|Write)` が `.claude/hooks/format.sh` を呼び、編集ファイルを整形する（orbitではGo=gofmt / JS・TS系=oxfmt）。失敗してもブロックしない（最終防衛線はlefthook）。
 
 同じ `PostToolUse` で `aidlc-sensor.sh`（編集ファイルへの sensor 実行）と `aidlc-engine-nudge.sh`（spec 作成時の engine state 着火リマインド）が advisory で走る。
 
@@ -128,8 +128,8 @@ AI に実装を任せるほど「設計を読まずに書く」「過剰設計�
 `commit-msg` フックが Conventional Commits 規約（`<type>(<scope>): 説明`）を強制する。手元での実行:
 
 ```bash
-npx lefthook run pre-commit
-npx lefthook run commit-msg <コミットメッセージファイルパス>
+pnpm exec lefthook run pre-commit
+pnpm exec lefthook run commit-msg <コミットメッセージファイルパス>
 ```
 
 **CI（GitHub Actions 等）で同等チェックを PR/push 時に再実行することを推奨**（ローカル hook を経由しないコミットの素通り対策）。CI 定義はプロジェクトで用意する。

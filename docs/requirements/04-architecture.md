@@ -17,12 +17,13 @@
 | DB | Cloudflare D1 | リレーショナルなIssue管理に適し、Worker Bindingで運用負荷が低い |
 | ORM | Drizzle ORM + Drizzle Kit | D1を正式サポートし、型安全SQLとMigrationを扱える |
 | Auth | Cloudflare Access | 一人専用のためApp内にUser・Session・招待機能を実装せず、メールAllow policyで保護できる |
-| Async | Cloudflare Queues（Background / Notificationを分離） | MVPは手動RunのStepをBackground Queueへ送り、再配送・分割を担保する。Notification Queueの常時自動投入は後続Phaseで有効化する |
-| Scheduler | Workers Cron Triggers（後続Phase） | MVPでは無効化し、後続Phaseで同じジョブ起動ServiceからCycle処理、Purge、Outbox再送を定期実行する |
+| Package manager | pnpm | 依存導入・script実行・lockfileをpnpmへ統一する |
+| Async | 手動HTTP Chunk Runner | MVPはSettingsのボタンからD1を一定件数ずつ処理し、cursorを返して次のHTTP呼び出しへ継続する。外部メッセージ基盤や常駐Consumerは使わない |
+| Scheduler | なし（手動実行のみ） | サーバー側の自動スケジューラは使わず、必要な処理はユーザーの手動Runから起動する |
 | Realtime | Durable Objects + WebSocket（Phase 2・任意） | PCとモバイル間の即時Push更新に向く |
 | File | Cloudflare R2（Phase 2） | 添付ファイルをDBと分離できる |
 | Test | Vitest + Playwright + MSW | Unit / Integrationを一次担保とし、外部I/O Mockと少数の実Browser Smokeを分担できる |
-| Quality | ESLint + Prettier + TypeScript + Lefthook | 静的検査とローカル品質ゲートを統一する |
+| Quality | oxlint + oxfmt + TypeScript + Lefthook | JavaScript / TypeScriptのlintとformatを高速に統一する |
 | Observability | Workers Logs + OpenTelemetry互換の外部Sink | 構造化ログと分散追跡へ拡張できる |
 
 TanStack Startは2026-08-23時点でRC表記であるため、本番採用は可能でも破壊的変更リスクを受け入れる必要がある。一方、Cloudflare Workersは公式PartnerとしてVite Pluginを使う手順が提供されている。[TanStack Start](https://tanstack.com/start/latest) [TanStack Start Hosting](https://tanstack.com/start/latest/docs/framework/react/guide/hosting)
@@ -39,27 +40,20 @@ flowchart TD
   A --> W[TanStack Start on Workers]
   M[Settings: Run now] --> W
   W --> D[(D1)]
-  W --> QB[Background Queue: manual Run]
-  W --> QN[Notification Queue: later]
   W --> R[(R2: Phase 2)]
   W --> O[Durable Objects: Phase 2]
-  C[Cron Triggers: later] --> W
-  QB --> B[Background Step Consumer]
-  B --> D
-  QN --> N[Notification / Webhook Worker]
-  N --> D
 ```
 
 ### 構成判断
 
 - 主データはD1に集約する。D1は管理DBとしてMigration、Import / Export、Query insightsを備える。一方、Durable Objects SQLiteは強整合な状態と計算を同一場所に置けるが、初期構築の複雑性が増すため、MVPの主DBにはしない。[Cloudflare storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
-- MVPのバックグラウンド処理はSettingsの手動起動を入口とし、短いStepは同じWorkerで、長いStepはQueueへ送って実行する。Queue Bindingは手動Runのtransportとして有効化し、CronのBindingとQueueの常時自動投入は処理境界を検証した後に有効化する。
+- MVPのバックグラウンド処理はSettingsの手動起動を入口とし、各HTTP呼び出しでD1を一定件数ずつ処理する。Serverはcursorと進捗を返し、ブラウザが次Chunkを継続呼び出しする。外部メッセージ基盤、自動スケジューラ、常駐Consumerは導入しない。
 - RealtimeはMVPでポーリング/再検証に留める。Phase 2では利用実績に基づいて導入要否を判断し、導入する場合は複数Clientの状態調停とWebSocketに適するDurable Objectsを使用する。[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
-- 通知、Webhook、重い集計は後続PhaseでQueuesへ送り、API応答時間と再試行性を確保する。Queuesは少なくとも一度の配送を前提とし、順序保証がないため、`run_id`とdedupe keyで冪等化する。[Cloudflare Queues](https://developers.cloudflare.com/queues/)
+- 通知は同じWorkerのD1書き込みとして生成し、Webhook、重い外部連携、常駐Background Workerは今回対象外とする。
 - D1 Read Replicationを有効にする場合はSessions APIとBookmarkを用い、同一Browser session内のsequential consistency（順序一貫性）を確保する。[D1 read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
-- HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。CronはWorker環境変数`OWNER_USER_ID`を使い、Queue Messageはproducerが確定した`user_id`と`event_id`を持たせ、consumerで`OWNER_USER_ID`との一致を検証する。Cron / Queueのactorは`system:cron` / `system:queue`として監査へ記録する。[Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) [Queues consumers](https://developers.cloudflare.com/queues/reference/how-queues-works/)
+- HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。手動RunnerはHTTPで認証した`user_id`をRunへ保存し、各Chunkで所有者境界を再検証する。actorは`user` / `system:manual-run`として監査へ記録する。
 - 初回Deploy時にUUID v7の唯一の`users`行をBootstrapし、そのIDを`OWNER_USER_ID`へ設定する。Binding未設定、UUID不正、対応行なし、Access JWTの本人識別子が所有者と対応しない場合はFail closedとする。
-- Queueは再配送を前提とし、D1 Outboxを配送状態の正本にする。Queue保持期限へ依存せず、未完了Eventを同じジョブランナーから再投入できるようにする。Queue consumerはAccess JWTではなくMessageの`user_id`と`run_id`を検証する。
+- D1 Outboxは同じWorkerのChunk処理で再送し、外部配送基盤や常駐Consumerには依存しない。未完了EventはRunのcursorとdedupe台帳で再処理する。
 - Accessセッション失効時は共通Fetch層で401を検知し、Client Routerではなく現在URLをTop-levelで再読込する。Window focus復帰時・Network再接続時・30秒周期にもServer stateを再検証する。
 
 ## 9.3 API方針
@@ -69,7 +63,7 @@ flowchart TD
 - Validation: 入出力ともZod Schema
 - Error: `code`, `message`, `fieldErrors`, `requestId`の統一Envelope
 - Mutation: 全Mutationが`idempotencyKey`を受け取り、Issue更新は追加でentity `version`を受け取る
-- Background run: `POST /api/v1/background-runs`はSettingsからは常に`kind = 'maintenance'`で`idempotencyKey`を受け取り、`cycle_transition` / `purge` / `outbox_retry`の3 Step計画を作って手動起動時に202と`run_id`を返す。同じKey・同じRequestは既存Runを返し、異なるRequestは409とする。`GET /api/v1/background-runs/current`と`GET /api/v1/background-runs/:id`は読み取り前にLease reaperを実行して期限切れを確定する。`/current`は本人の`pending / queued / running`だけを返し、該当なしは`{ run: null }`、`:id`は本人所有だけを返す（不存在・他ユーザーは404）。実行中の業務Mutationは423 `OPERATION_IN_PROGRESS`とする。`lock_token`はAPI応答・通常ログ・`progress_json`へ出さない
+- Background run: `POST /api/v1/background-runs`はSettingsから常に`kind = 'maintenance'`で`idempotencyKey`を受け取り、3 Step計画を作って202と`run_id`を返す。入力は固定のMaintenance schemaとし、同じKeyの再送は既存Runを返す。`POST /api/v1/background-runs/:id/continue`は認証済みユーザーが`expected_cursor`を含めて1 Chunkだけ処理し、`cursor`・進捗・次の状態を返す。`POST /api/v1/background-runs/:id/resume`は`paused / failed`を同じRunで再開する。`GET /api/v1/background-runs/current`と`GET /api/v1/background-runs/:id`は読み取り前にLease期限を確認する。`/current`は本人の`pending / running / paused / failed`だけを返し、該当なしは`{ run: null }`、`:id`は本人所有だけを返す（不存在・他ユーザーは404）。実行中の業務Mutationは423 `OPERATION_IN_PROGRESS`とする。`lock_token`と`admission_token`はAPI応答・通常ログ・`progress_json`へ出さない
 - Runtime lock: すべての業務Mutationは実行ロックをServer側で検査し、ジョブ自身の書き込みだけが`run_id`と`lock_token`の一致で通過する
 - Mutationの事前読取: D1 Read Replication有効時は`withSession('first-primary')`を使い、条件付きUPDATEのCASを最終判定とする
 - Pagination: cursor方式
@@ -114,7 +108,7 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 | activity_events | id, user_id, actor_type, actor_id, entity_type, entity_id, action, request_id, mutation_key, before_json, after_json, created_at |
 | outbox_events | id, user_id, event_id, type, payload_json, dedupe_key, status, attempt_count, available_at, created_at |
 | mutation_receipts | id, user_id, idempotency_key, operation, request_hash, response_json, created_at, expires_at |
-| background_runs | id, user_id, kind, trigger, status, plan_json, progress_json, error_json, idempotency_key, request_hash, retry_of_run_id, lock_token, requested_at, started_at, heartbeat_at, finished_at, lease_expires_at |
+| background_runs | id, user_id, kind, status, plan_json, progress_json, error_json, idempotency_key, request_hash, admission_token, requested_at, started_at, heartbeat_at, finished_at, lease_expires_at, resume_count |
 | background_run_steps | id, user_id, run_id, step, status, cursor, processed_count, total_count, result_json, dedupe_key, attempt_count, error_json, started_at, finished_at |
 | background_effect_dedupes | id, user_id, step, dedupe_key, first_run_id, status, effect_json, attempt_count, created_at, completed_at |
 | user_runtime_locks | user_id, run_id, lock_token, status, acquired_at, heartbeat_at, lease_expires_at |
@@ -134,9 +128,8 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 - `mutation_receipts(user_id, idempotency_key)` unique
 - `background_runs(id)` primary key、`background_runs(user_id, idempotency_key)` unique
 - `background_runs.kind`は`maintenance`だけを許可し、Stepの種類は`background_run_steps.step`で表す
-- `background_runs.trigger`は`manual / cron`だけを許可し、`retry_of_run_id`は同じ`user_id`の`failed / expired` Runだけを参照する
 - `background_run_steps.user_id`、`background_runs.user_id`、`user_runtime_locks.user_id`は同じ所有者に限定し、Stepの親Runを跨いだ参照を拒否する
-- `rejected` RunのStep行とdispatch intentは効果なしで`skipped / failed`へ収束させ、Queueへ送らない
+- `rejected` RunのStep行とOutbox対象は効果なしで`skipped / failed`へ収束させ、外部配送を発生させない
 - `background_run_steps(run_id, step)` unique、`background_effect_dedupes(user_id, step, dedupe_key)` unique。`step`は`cycle_transition` / `purge` / `outbox_retry`だけを許可する。Run Step表は進捗・cursor・attemptをRun単位で保持し、Effect dedupe表は業務効果をRun横断で記録する
 - `user_runtime_locks(user_id)` primary key。所有者Bootstrap時に`status = 'idle'`の1行を作る
 - `recent_issue_views(user_id, issue_id)` unique
@@ -223,7 +216,7 @@ async function closeCycle(
   cycleId: string,
   ownerUserId: string,
   now: Date,
-  trigger: 'cron' | 'manual',
+  trigger: 'manual',
   runContext?: { runId: string; lockToken: string },
 ) {
   const completionToken = uuidv7()
@@ -264,45 +257,39 @@ async function closeCycle(
 
 `batch()`の結果を受け取るまで途中分岐できないため、後続SQLはすべて同じ`completion_token`の存在と、ジョブ実行時は同じ`run_id`・`lock_token`・Leaseの一致を条件にする。候補抽出は事前SELECTせず、`INSERT ... SELECT`と集合UPDATEで`user_id`、元`cycle_id`、Workflow categoryをbatch内で再評価する。手動即時開始では、次Cycleの日付変更と後続の自動生成Cycle再生成も同じTokenでGuardし、個別調整済みCycleとの重複がある場合は先頭CASを成立させない。次Cycle、繰越履歴、Outboxには一意制約を置く。Batch中の失敗はCASを含めてRollbackされるため、外部から遷移中状態は見えない。[D1 batch API](https://developers.cloudflare.com/d1/worker-api/d1-database/)
 
-Cronは短い間隔で「境界を過ぎた未処理Cycle」を取得する。時刻ぴったりの1回だけに依存せず、状態遷移のCAS、一意制約、冪等な再実行で重複処理を吸収する。
+Manual Runは「境界を過ぎた未処理Cycle」をcursor付きChunkで処理する。時刻ぴったりの1回だけに依存せず、状態遷移のCAS、一意制約、冪等な再実行で重複処理を吸収する。
 
-## 11.3 バックグラウンド処理の手動起動と実行ロック
+## 11.3 手動Chunk処理と実行ロック
 
 ```mermaid
 stateDiagram-v2
   [*] --> pending
-  pending --> queued: lock claim
-  pending --> rejected: lock conflict / timeout
-  queued --> running: first step
+  pending --> running: lock claim
+  running --> paused: lease timeout / browser close
+  running --> failed: chunk error
   running --> succeeded: all steps complete
-  queued --> failed: admission / dispatch error
-  running --> failed: step error
-  running --> expired: lease timeout
+  paused --> running: resume
+  failed --> running: resume
+  rejected --> [*]
   succeeded --> [*]
-  failed --> [*]: new run for retry
-  expired --> [*]: new run for retry
-  rejected --> [*]: new run later
 ```
 
-`background_runs.status`は`pending / queued / running / succeeded / failed / expired / rejected`、`user_runtime_locks.status`は`idle / running`、`background_effect_dedupes.status`は`pending / succeeded / failed / expired`だけを許可する。terminal状態からの更新は、同じRun・同じTokenの終了処理を除いて拒否する。`background_runs.progress_json`は`{ current_step, step_index, step_count, processed, total, percent }`、`error_json`は`{ code, message, failed_step, retryable, request_id }`を持ち、Tokenは含めない。`cycle_transition`の成果物はCycle状態・繰越Issue・将来Cycle生成・履歴・Outbox、`purge`の成果物は物理削除件数、`outbox_retry`の成果物は再投入件数とする。各RunのStepは`background_run_steps`で状態を記録し、失敗したStep以降は`skipped`として実行しない。再実行は新RunのStep行を作り、`background_effect_dedupes`で成功済み効果はNo-op、失敗・期限切れ効果は`attempt_count`を増やして再実行する。
-`dedupe_key`はRun UUIDから生成せず、業務対象と論理境界から生成する。例として`cycle_transition:<cycle_id>:<completion_boundary>`、`purge:<cutoff_day>`、`outbox_retry:<event_id>`を使い、retry Runは旧RunのStep計画とKeyを引き継ぐ。Settingsの`createPendingIfAbsent`はこの3 Stepを必ず作成し、部分Stepだけを選ぶ公開APIは持たない。外部配送の再試行回数はdedupe keyへ含めず、`attempt_count`で管理する。
+`background_runs.status`は`pending / running / paused / failed / succeeded / rejected`、`user_runtime_locks.status`は`idle / running`、`background_effect_dedupes.status`は`pending / succeeded / failed`だけを許可する。`succeeded / rejected`はterminal状態、`paused / failed`は同じRunを再開できる状態とする。`background_runs.progress_json`は`{ current_step, step_index, step_count, cursor, processed, total, percent }`、`error_json`は`{ code, message, failed_step, retryable, request_id }`を持ち、Tokenは含めない。
 
-`RUN_LEASE_MS`と`HEARTBEAT_INTERVAL_MS`は環境設定として固定し、Heartbeat間隔はLeaseの3分の1未満にする。具体値はPhase 0でWorker実行時間とQueue再配送に合わせて確定し、通常のAPI応答・ログ・進捗JSONへ`lock_token`を含めない。
+固定Stepは`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`（D1 Outbox再処理）の3つで、`createPendingIfAbsent`が必ずRun計画へ保存する。各Stepは`background_run_steps(run_id, step)`でcursor・Chunk進捗・attemptを保持し、業務効果は`background_effect_dedupes(user_id, step, dedupe_key)`でRunを跨いで重複排除する。旧Stepが成功済みなら再開時はNo-op、失敗したStepは同じdedupe keyで再試行する。
 
-Lease reaperは、`lease_expires_at <= now`を条件に`background_runs`を`expired`へ更新し、同じ`run_id + lock_token`の`user_runtime_locks`を`idle`へ戻す2文を同一`batch()`で実行する。新RunのClaimもこのreaperと同じBatch内で行い、期限切れRunの`finished_at`、Lock解放、新Runの取得を原子的に扱う。`pending`のままLockを持たないRunは、一定時間後に`rejected`へ更新して再実行対象にする。
-成功・失敗の終了処理も`background_runs`のterminal更新と`user_runtime_locks`の解放を同じ`run_id + lock_token`条件の`batch()`で行う。古いWorkerが後から`failAndRelease`やHeartbeatを呼んでも、新RunのLockには影響しない。
-`failAndReleaseIfActive`はRunのfrom状態を`pending / queued / running`に限定し、`rejected`を含むterminal状態を変更しない。Heartbeat、Step効果、Step完了、成功・失敗、Lock解放のすべてで`run_id + lock_token + lease_expires_at > now`を同一D1条件へ含める。
+`dedupe_key`はRun UUIDから生成せず、業務対象と論理境界から生成する。例として`cycle_transition:<cycle_id>:<completion_boundary>`、`purge:<entity_type>:<entity_id>:<deleted_at>`、`outbox_retry:<event_id>`を使う。Purgeは対象行単位のKeyとし、Chunk単位のKeyで複数行を一括No-op化しない。Chunk再送の内部attemptはdedupe keyへ含めず、`attempt_count`で管理する。
+
+`RUN_LEASE_MS`、`HEARTBEAT_INTERVAL_MS`、`CHUNK_SIZE`は環境設定として固定し、Heartbeat間隔はLeaseの3分の1未満にする。具体値はPhase 0でWorker実行時間とD1書き込み量に合わせて確定する。Lease判定の時刻はD1側の`now`を正本とし、通常のAPI応答・ログ・進捗JSONへ`lock_token`を含めない。
+
+Lease確認は`GET /api/v1/background-runs/current`、`GET /api/v1/background-runs/:id`、`POST /api/v1/background-runs/:id/continue`、`POST /api/v1/background-runs/:id/resume`の入口で行う。期限切れの対象は`status = 'running'`かつ現在Lockの`run_id + lock_token`が一致するRunだけとし、`background_runs`を`paused`へ更新し、同じLockを`idle`へ戻す2文を同一`batch()`で実行する。古いHTTP処理の業務データ、進捗、Run状態、Heartbeat、Lock更新は、`run_id + lock_token + lease_expires_at > now`の条件で拒否する。
 
 ```ts
-async function startBackgroundRun(
+async function startManualRun(
   ownerUserId: string,
-  kind: 'maintenance',
-  trigger: 'manual' | 'cron',
   idempotencyKey: string,
-  retryOfRunId: string | undefined,
-  backgroundQueue: Queue<BackgroundMessage>,
 ) {
-  const requestHash = hashCanonicalRequest({ kind, trigger, retryOfRunId })
+  const requestHash = hashCanonicalRequest({ kind: 'maintenance' })
   const existing = await backgroundRunRepo.findByIdempotencyKey(
     ownerUserId,
     idempotencyKey,
@@ -312,109 +299,60 @@ async function startBackgroundRun(
       throw new ConflictError('IDEMPOTENCY_KEY_REUSED')
     }
     if (existing.status === 'pending') {
-      return resumePendingBackgroundRun(existing, backgroundQueue)
+      return resumePendingManualRun(existing)
     }
     return existing
   }
 
-  const plan = await backgroundRunRepo.buildMaintenancePlan(ownerUserId, retryOfRunId)
+  const plan = await backgroundRunRepo.buildMaintenancePlan(ownerUserId)
   const runId = uuidv7()
   const lockToken = uuidv7()
-  const now = Date.now()
-  const leaseExpiresAt = now + RUN_LEASE_MS
-  const firstStep = 'cycle_transition'
-
-  try {
-    // 先にpendingを一意Keyで記録し、202応答紛失後の再送先を作る。
-    // Unique conflictは既存Runを再読込し、Request hashを比較する。
-    const pending = await backgroundRunRepo.createPendingIfAbsent({
-      runId,
-      ownerUserId,
-      kind,
-      trigger,
-      plan,
-      idempotencyKey,
-      requestHash,
-      retryOfRunId,
-      lockToken,
-    })
-    if (!pending.created) {
-      if (pending.existing.requestHash !== requestHash) {
-        throw new ConflictError('IDEMPOTENCY_KEY_REUSED')
-      }
-      return pending.existing
+  const now = databaseNow()
+  const pending = await backgroundRunRepo.createPendingIfAbsent({
+    runId,
+    ownerUserId,
+    kind: 'maintenance',
+    plan,
+    idempotencyKey,
+    requestHash,
+    admissionToken: lockToken,
+  })
+  if (!pending.created) {
+    if (pending.existing.status === 'pending') {
+      return resumePendingManualRun(pending.existing)
     }
-
-    const [expired, claimed, activated, dispatchIntent] = await db.batch([
-      // 期限切れ旧Runをexpiredへ更新し、同じrun_id + lock_tokenのLockをidleへ戻す。
-      backgroundRunRepo.expireAndReleaseIfLeaseElapsed(ownerUserId, now),
-      // UPDATE user_runtime_locks
-      // SET status = 'running', run_id = ?, lock_token = ?,
-      //     acquired_at = ?, heartbeat_at = ?, lease_expires_at = ?
-      // WHERE user_id = ?
-      //   AND (status = 'idle' OR lease_expires_at <= ?)
-      runtimeLockRepo.claimIfFreeOrExpired(
-        ownerUserId,
-        runId,
-        lockToken,
-        now,
-        leaseExpiresAt,
-      ),
-      // UPDATE background_runs SET status = 'queued'
-      // WHERE id = ? AND status = 'pending'
-      //   AND EXISTS (run_id / lock_tokenが一致するrunning lock)
-      backgroundRunRepo.activateIfLockMatches(
-        runId,
-        ownerUserId,
-        lockToken,
-      ),
-      // INSERT outbox_events(type = 'background_step.dispatch', ...)
-      // WHERE RunとLockのrun_id / lock_tokenが一致する
-      outboxRepo.enqueueBackgroundStepIfRunTokenMatches(
-        runId,
-        ownerUserId,
-        lockToken,
-        firstStep,
-        `background_dispatch:${runId}:${firstStep}:1`,
-      ),
-    ])
-
-    if (
-      claimed.meta.changes === 0 ||
-      activated.meta.changes === 0 ||
-      dispatchIntent.meta.changes === 0
-    ) {
-      await backgroundRunRepo.rejectIfPending(runId, 'OPERATION_IN_PROGRESS')
-      throw new ConflictError('OPERATION_IN_PROGRESS', 423)
-    }
-
-    // Outbox-backed Background Step RelayがQueueへ最初のStepを送信し、応答は先に返す。
-    // 送信前にWorkerが終了してもdispatch intentは残り、再送対象になる。
-    await backgroundStepRelay.flushPending(runId, backgroundQueue)
-    return { runId, status: 'queued' }
-  } catch (error) {
-    if (error.code !== 'OPERATION_IN_PROGRESS' && error.code !== 'IDEMPOTENCY_KEY_REUSED') {
-      await backgroundRunRepo.failAndReleaseIfActive(runId, lockToken, error)
-    }
-    throw error
+    return pending.existing
   }
+
+  const [paused, claimed, activated] = await db.batch([
+    // Lease切れの旧Runをpausedへ更新し、Lockをidleへ戻す
+    backgroundRunRepo.pauseIfLeaseElapsed(ownerUserId, now),
+    // UPDATE user_runtime_locks ... WHERE status = 'idle' OR lease_expires_at <= now
+    runtimeLockRepo.claimIfIdleOrLeaseExpired(ownerUserId, runId, lockToken, now),
+    // UPDATE background_runs SET status = 'running'
+    // WHERE id = ? AND status = 'pending'
+    //   AND EXISTS (run_id / lock_tokenが一致するLock)
+    backgroundRunRepo.activateIfLockMatches(runId, ownerUserId, lockToken),
+  ])
+
+  if (claimed.meta.changes === 0) {
+    await backgroundRunRepo.rejectIfPending(runId)
+    throw new ConflictError('OPERATION_IN_PROGRESS', 423)
+  }
+  if (activated.meta.changes === 0) {
+    await runtimeLockRepo.releaseIfTokenMatches(ownerUserId, runId, lockToken)
+    await backgroundRunRepo.rejectIfPending(runId)
+    throw new ConflictError('BACKGROUND_RUN_ADMISSION_FAILED', 409)
+  }
+
+  return { runId, status: 'running', next: 'continue' }
 }
 ```
 
-`createPendingIfAbsent`は`INSERT ... ON CONFLICT(user_id, idempotency_key) DO NOTHING`の結果を返す。先行する既存Run検索が同時に空でも、Unique conflict後に同じRunを再読込してRequest hashを比較するため、同一Key・同一Requestの同時起動は同じ`run_id`、異なるRequestは409になる。Run作成前・Lock Claim前のクラッシュで残った`pending`はreaperが`rejected`へ遷移させる。
-既存`pending`の再送は単に返却せず、`resumePendingBackgroundRun`が保存済みのRun計画・lock token・Step Keyを使って同じClaim/Activate/dispatch intent Batchを再試行する。Lockが別Runで占有中なら`pending`のまま状態を返し、期限超過後にreaperが`rejected`へ遷移させる。
+`createPendingIfAbsent`は一意KeyのConflict後に既存Runを再読込する。同じKey・同じRequestの応答紛失や同時起動は同じ`run_id`へ収束し、`pending`のまま残ったRunは保存済みの`admission_token`と計画を使う`resumePendingManualRun`がLock Claimを再試行する。異なるRequestは409、Lock競合で`rejected`になったRunは同じKeyで再起動せず、新しいRunを要求する。
 
-Queue送信が失敗した場合は`failAndReleaseIfActive(run_id, lock_token, error)`を同じToken条件で実行し、Runを`failed`、Lockを`idle`にして202後の誤った`queued`保持を避ける。D1に残ったdispatch intentは後続の再送対象とし、再実行は新しいKey・Runで行う。
+`POST /api/v1/background-runs/:id/continue`はRun所有者を確認し、同じLockのTokenをServer側で取得して1回のD1 `batch()`だけを実行する。入力の`expected_cursor`はopaque stringとし、`background_run_steps`の現在cursorと一致する条件付きUPDATE CASで1 ChunkをClaimする。敗者は現在のcursor・進捗を返し、業務効果・processed_count・attempt_countを増やさない。1回のChunkで対象を最大`CHUNK_SIZE`件処理し、cursorはD1のversionと同じく同値または前進だけを許可する。Chunk本体の失敗はD1 `batch()`をRollbackし、その後の別CASでRunを`failed`、Lockを`idle`にして後続Stepを`skipped`へ戻す。Stepが完了したら次Stepを`pending`へ進め、前Stepが成功するまで後続Stepの業務効果は発生させない。Run全体が完了したら`succeeded`としてLockを解放する。レスポンスを受けたブラウザは、Runがterminalでない限り次の`continue`を呼び出す。
 
-MVPではSettingsのボタンが`trigger = 'manual'`でこのServiceを呼び、UIは返された`run_id`をポーリングする。実行中はフルスクリーンOverlayで業務操作を止め、Server側の全Mutationも同じロックを検査する。読み取り、進捗取得、ログアウト、Access再認証は許可する。ブラウザ再読み込み後も`user_runtime_locks`と`background_runs`からOverlayを復元する。
+`POST /api/v1/background-runs/:id/resume`は`paused / failed` Runだけを対象とし、同じRun計画・cursor・dedupe台帳を使って新しいLeaseを取得し、`resume_count`を1増やす。再開時はブロッキングOverlayを解除して再開可能Runカードを表示し、成功済みStep・ChunkをNo-opにし、失敗Stepを`running`、失敗後に`skipped`となった後続Stepを`pending`へ戻して正しい順序で再開する。Lease取得、Run状態変更、Lock解放・取得はすべて`run_id + lock_token`を条件にしたD1 CASで行う。
 
-MVPでは手動RunのStepを`{ user_id, run_id, lock_token, kind, step, cursor, dedupe_key }`としてQueueへ送り、Queue consumer内でD1 `batch()`を実行する。Queue consumerは各Stepの前に`run_id`・`lock_token`・Leaseを検証し、業務効果、Stepの`succeeded`更新、進捗、次StepのOutbox dispatch intentを同じ`batch()`で確定する。Queueの順序には依存せず、前Stepが`succeeded`でないMessageは再試行・延期し、同じStepの再配送は一意制約でNo-opにする。別RunまたはロックなしのMessageも処理しない。後からCronを有効化する場合も、Cron handlerはこのServiceを`trigger = 'cron'`で呼ぶだけにし、ロック競合時は次回起動へ回して業務処理の実装を重複させない。
-`background_effect_dedupes`のClaim、業務効果、`succeeded`更新は同じD1 `batch()`で行う。既存行が`succeeded`ならStepはNo-op、`failed / expired`ならTokenとLeaseを再確認して`attempt_count`を増やし、同じ業務効果を再試行する。side effect後・台帳更新前にWorkerが落ちても、次回のUnique Claimで効果を二重適用しない。
-`background_step.dispatch` Outboxは専用のBackground Step Relayが処理する。Relayは手動Runの初回Admission後と各StepのD1 `batch()`成功後に起動し、Queue送信とOutboxの`sent / failed`更新をtransport dedupe keyで冪等に行う。送信失敗はdispatch intentを残してRunを`failed`へ遷移させ、retry Runで同じ業務dedupe keyを再利用する。`outbox_retry` StepはこのRelayとは別に、業務Outboxの保留イベントを再処理する。
-transport dedupe keyは`background_dispatch:<run_id>:<step>:<attempt_count>`、業務効果のdedupe keyは対象・論理境界由来とし、両者を混同しない。これによりretry Runは新しいdispatch intentでQueueへ送れるが、業務効果は同じ`background_effect_dedupes`で一度だけになる。
-
-MVPの`outbox_retry`はBackground QueueのStep dispatch intentと、同一Workerで完結するInbox通知の再処理を対象にする。Webhookや外部通知向けのNotification Queueは後続Phaseで有効化し、MVPのRun完了条件には含めない。
-
-Cron adapterの`idempotencyKey`は論理境界から決定的に生成し、Cycleなら`cron:cycle:<cycle_id>:<ends_at>`、Purgeなら`cron:purge:<cutoff_day>`のように同じ境界の再実行を同じKeyへ収束させる。
-
-Workerのクラッシュや通信断でHeartbeatが止まった場合はLease期限後に`expired`として復旧対象にする。期限切れWorkerの書き込みは条件付きUPDATEで拒否し、ユーザーは再実行を選べる。MVPでは任意地点からのCancelは提供せず、失敗・期限切れ後の再実行だけを提供する。
+ブラウザが閉じた場合、継続HTTP呼び出しが止まりLeaseが期限切れになる。再度アプリを開くと`/current`が`paused` Runを返し、ユーザーはOverlayの「再開」から同じRunを続けられる。外部メッセージ基盤、自動スケジューラ、常駐Workerは使用しない。

@@ -13,10 +13,9 @@ Stage / Tier / Gate / spec / TDD の意味は変更しない。
 
 ## 現在のプロジェクト状態
 
-現在は要件定義・ハーネス導入段階で、アプリ本体のルート依存関係・lint・format・testコマンドは未設定である。
+現在は要件定義・ハーネス導入段階で、アプリ本体のルート依存関係・scriptは未設定である。実装開始時はpnpmをPackage managerとし、oxlintをlint、oxfmtをformatへ採用する。
 そのため、導入直後に実行できる検証は AI-DLC engine 自体とハーネスの構造検査に限られる。
-アプリ実装を開始したら、Stage 5の検証コマンドを `.claude/aidlc/referee.config.json`、`lefthook.yml`、
-本書へ同じ変更で追加する。
+現在の`.claude/aidlc/referee.config.json`と`lefthook.yml`には、package.jsonが存在する場合だけoxlint/oxfmtを実行する予備配線がある。アプリ実装開始時はroot scriptsへtest/typecheckを追加し、refereeへ同じ変更を反映する。
 
 ## 開始前
 
@@ -29,6 +28,8 @@ Stage / Tier / Gate / spec / TDD の意味は変更しない。
 pnpm -C .claude/aidlc install --ignore-workspace
 pnpm -C .claude/aidlc run doctor -- --fast
 ```
+
+アプリ実装開始時は、ルートで`pnpm add -D oxlint oxfmt`を実行してからStage 5のscriptを有効化する。
 
 `doctor` は pnpm の組み込みコマンド名と衝突するため、`run doctor --` 形式で呼ぶ。
 環境制約でengineを実行できない場合は、GREENと扱わず「未実測（環境制約）」と記録する。
@@ -69,7 +70,7 @@ spec外の設計判断、不明点の推測、担当外ファイルの変更は�
 | Claude Code | Codex |
 |---|---|
 | SessionStart bootstrap | 初回に `pnpm -C .claude/aidlc install --ignore-workspace` を明示実行 |
-| PostToolUse formatter | Stage 5で `prettier --check` 等を独立実行。現段階はアプリformatter未設定 |
+| PostToolUse formatter | Stage 5で `pnpm format:check`（oxfmt --check）を独立実行。現段階はアプリ依存未設定 |
 | PostToolUse sensor | spec・codekb・learnings・高リスク変更後に必要なファイルへ手動実行 |
 | spec編集時のengine nudge | Stage/Gate完了ごとに `report` を手動実行 |
 | PreToolUse context guard | 委譲前に `progress.md` のworklogを確定。Codex transcript形式は前提にしない |
@@ -93,8 +94,8 @@ stateはadvisoryであり、Gate承認の代替ではない。
 ```bash
 pnpm typecheck
 pnpm test
-pnpm lint
-pnpm format:check
+pnpm lint          # oxlint
+pnpm format:check  # oxfmt --check
 pnpm -C .claude/aidlc run referee-check -- --layer all
 ```
 

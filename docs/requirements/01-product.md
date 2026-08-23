@@ -59,6 +59,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - WebアプリおよびPWA（インストール可能なWebアプリ）として提供し、ネイティブアプリは作らない
 - CycleとWorkflowはユーザーに対して1系統とする
 - 1 IssueはProjectとCycleにそれぞれ最大1件所属する
+- MVPではCycle境界処理、将来Cycle生成、論理削除データのPurge、Outbox再送などのバックグラウンド処理をSettingsの手動実行から起動する。Queueは必要なStepの実行transportとして手動Runから利用し、Cronの自動起動とQueueの常時自動投入は後続Phaseで有効化する
 
 ## 4. スコープと優先順位
 
@@ -72,7 +73,8 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | 個人設定 | タイムゾーン、UI言語、Workflow、Cycle、Estimate、テーマ設定 | Must |
 | Issue | CRUD、状態、優先度、見積、期限、Label、Project、Cycle | Must |
 | Issue | 親子Issue、メモ、活動履歴、関連Issue | Should |
-| Cycle | 反復設定、自動生成、計画、繰越、進捗、履歴 | Must |
+| Cycle | 反復設定、手動実行による生成・計画・繰越、進捗、履歴 | Must |
+| Background processing | 手動RunによるCycle処理、Purge、Outbox再送、実行中の操作ロック・進捗・復旧 | Must |
 | Project | CRUD、状態、期間、Issue一覧、進捗 | Must |
 | View | List / Board、Filter、Group、Order、保存View | Must |
 | 操作 | コマンドメニュー、主要ショートカット、一括操作 | Must |
@@ -84,6 +86,8 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 
 ### 4.2 Phase 2
 
+ここでのPhase 2 / Phase 3は機能スコープ上の区分であり、実装フェーズ表のPhase 0〜6とは別軸である。Cron自動起動とQueue常時自動投入は、実装フェーズではRelease hardening（Phase 6）で有効化する。
+
 - InitiativeとロードマップTimeline
 - Triage（外部連携から来たIssue候補の受け入れキュー）
 - Issueテンプレート、Projectテンプレート
@@ -92,6 +96,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - Webhook、公開API、GitHub / Slack連携
 - CSV import / export
 - CycleおよびProjectの高度な分析
+- バックグラウンド処理のCron自動起動、Queueの常時自動投入
 - 完全なリアルタイム更新（Phase 2候補。導入要否は利用実績で判断）
 - オフラインでのIssue作成・編集と再同期
 

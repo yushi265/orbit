@@ -57,8 +57,8 @@ Issueの依存関係はLinearのblocking、related、duplicateを踏襲する。
 | CYC-01 | Cycleを有効化できる | 無効化しても過去Cycleは保持される |
 | CYC-02 | 期間を1〜8週間で設定できる | 個人設定のタイムゾーン基準で開始・終了する |
 | CYC-03 | 開始曜日を設定できる | 開始日の00:00を境界とする |
-| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と自動繰越は許可するが、現在Cycleへの割当は行わない |
-| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を自動生成する |
+| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と手動Runによる繰越は許可するが、現在Cycleへの割当は行わない。Cron自動繰越は後続Phaseで有効化する |
+| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を保留として表示し、MVPは手動Runで生成する。Cron自動生成は後続Phaseで有効化する |
 | CYC-06 | 将来Cycleの開始日・終了日を個別調整できる | 過去Cycleは変更不可、期間重複を禁止し、個別調整したCycleは`schedule_overridden = true`として自動再生成の上書き対象外にする |
 
 ### 6.4.2 Cycleライフサイクル
@@ -80,7 +80,7 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 | CYC-09 | Active終了時に未完了Issueを次Cycleへ繰り越す | Workflow categoryがUnstartedまたはStartedのIssueだけを次Cycleへ移し、Backlog / Completed / Canceledは元Cycleに残す |
 | CYC-10 | StartedまたはCompletedになった未所属Issueを現在Cycleへ自動追加できる | 個人設定でON/OFFでき、変更履歴にAutomationとして記録する |
 | CYC-11 | Issueが繰り越された回数と元Cycleを保持する | Issue詳細およびCycle履歴から追跡できる |
-| CYC-12 | Cycle終了処理を冪等に実行する | Cron再実行・同時実行・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
+| CYC-12 | Cycle終了処理を冪等に実行する | 手動Run再実行・同時実行・後続Cron・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
 
 ### 6.4.3 Cycle画面・分析
 
@@ -159,10 +159,21 @@ MVP推奨ショートカット:
 
 ## 6.9 Settings・監査・データ管理
 
-- Profile、Workflow、Cycle、Label、Project status、通知、テーマを設定できる
+- Profile、Workflow、Cycle、Label、Project status、通知、テーマ、Background processingを設定できる
 - 業務データの作成・更新・削除は、actor、action、entity、before/after差分、request ID、timestampを記録する
 - JSONまたはCSVでIssueをExportできる（Phase 2）
 - Issue、Project、通知、メモ、Saved Viewの削除は原則論理削除とし、Trashから30日以内に復元できる
-- `deleted_at`から30日を超えたデータは、Cronが依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する
-- Mutation receiptは作成から30日後を`expires_at`とし、期限後にCronが物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う
+- `deleted_at`から30日を超えたデータは、MVPでは手動Runが依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する。Cron自動Purgeは後続Phaseで有効化する
+- Mutation receiptは作成から30日後を`expires_at`とし、MVPでは手動Runが物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う。Cron自動削除は後続Phaseで有効化する
 - D1 Time TravelおよびBackup上の保持は、アプリ内の30日復元期限には含めない
+
+## 6.10 バックグラウンド処理
+
+| ID | 要件 | 受入条件 |
+| --- | --- | --- |
+| ASYNC-01 | バックグラウンド処理をSettingsから手動実行できる | 公開Run種別は`maintenance`に固定し、固定Stepを`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`の順に処理する。各Stepの`pending / running / succeeded / failed / skipped`、`processed / total`、成果物、dedupe keyを記録して`run_id`と状態を返す。Step失敗時は後続Stepを実行せず、完了済みStepを保持して再実行時にNo-opまたは再開する |
+| ASYNC-02 | バックグラウンド処理の実行中は業務操作を停止する | Issue（CRUD、Notes、Relation、Label、Archive、Trash、Restore、Bulk）、Cycle、Project、View、Notification、Preference、Workflow、Project statusなど全業務Mutationを`code = OPERATION_IN_PROGRESS`と`requestId`付きの423で拒否し、version、Activity、Outbox、Mutation receiptを増やさない。Runの開始・状態取得・復旧、進捗取得、再認証、ログアウト、読み取りは許可する。画面はフルスクリーンの処理中表示にする |
+| ASYNC-03 | 実行状態と進捗を端末横断で確認できる | `pending / queued / running / succeeded / failed / expired / rejected`を保持し、再読み込み・別端末でも同じ`run_id`、Step、進捗を表示する。HeartbeatとLease期限を持ち、期限切れWorkerは業務データ、進捗、Run状態、Heartbeat、Lockを更新できない |
+| ASYNC-04 | 手動・Cronで同じジョブランナーを利用し、Queueを実行transportとして使う | MVPは手動起動だけを有効にし、必要なStepをQueueへ送る。後続PhaseでCronは同じ起動Serviceを呼び出し、Queueの常時自動投入を有効化する。実行中ロックとの競合は業務更新なしで記録し、次回起動へ回す |
+| ASYNC-05 | 非同期処理を冪等に再実行できる | Queue Messageは内部機密として`user_id`、`run_id`、`lock_token`、処理単位、dedupe keyを持ち、再配送・同時実行でも二重反映しない。実行中に別RunのMessageは処理せず再試行または延期する。Queue / Cronのactorは監査へ記録する |
+| ASYNC-06 | 失敗・停止後に安全に復旧できる | Step失敗時はRunを`failed`として後続Stepを止め、完了済みStepを記録したうえでロックを解放する。Lease期限切れは`expired`として扱い、再実行は新しい`idempotencyKey`・新しい`run_id`・`retry_of_run_id`で行い、同じ業務対象のdedupe keyを引き継ぐ。旧Runで`succeeded`済みのStepはNo-op、`failed / expired`のStepは`attempt_count`を増やして再実行する。terminal状態からの逆戻りは禁止し、MVPでは任意地点からのCancelは提供しない |

@@ -24,6 +24,7 @@
 
 ## Cloudflare公式
 
+- [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/)
 - [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 - [Storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
@@ -36,6 +37,7 @@
 - [Durable Objects](https://developers.cloudflare.com/durable-objects/)
 - [Queues](https://developers.cloudflare.com/queues/)
 - [Queues consumers](https://developers.cloudflare.com/queues/reference/how-queues-works/)
+- [Queues batching, retries and delays](https://developers.cloudflare.com/queues/configuration/batching-retries/)
 - [Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)
 - [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
 - [Validate Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)

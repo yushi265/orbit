@@ -6,7 +6,7 @@
 
 ## 読み始めガイド（読者別の入口）
 
-- **新規参入者・チームメンバー（人間）**: まず [`../REQUIREMENTS.md`](../REQUIREMENTS.md) でプロダクト要件を把握 → [`architecture.md`](./architecture.md) で実装予定の構成を確認 → [`ai-dlc-flow-guide.md`](./ai-dlc-flow-guide.md) で開発フローを確認。
+- **新規参入者・チームメンバー（人間）**: まず [`requirements/index.md`](./requirements/index.md) でプロダクト要件を把握 → [`architecture.md`](./architecture.md) で実装予定の構成を確認 → [`ai-dlc-flow-guide.md`](./ai-dlc-flow-guide.md) で開発フローを確認。
 - **AI（Claude Code）**: ルートの [`../CLAUDE.md`](../CLAUDE.md) を入口に、必要に応じて [`../.claude/rules/`](../.claude/rules/) を参照。
 - **AI（Codex）**: ルートの [`../AGENTS.md`](../AGENTS.md) と [`ai-dlc/codex-adapter.md`](./ai-dlc/codex-adapter.md) を入口にする。
 - **ハーネスを見直す人・運用方法を確認する人**: [`../.claude/README.md`](../.claude/README.md)（取扱説明書・正本）と [`harness-design-decisions.md`](./harness-design-decisions.md)（設計判断の履歴）。
@@ -16,7 +16,7 @@
 
 | ドキュメント | 概要 |
 |------------|------|
-| [../REQUIREMENTS.md](../REQUIREMENTS.md) | プロダクト要件・受入条件・技術選定 |
+| [requirements/index.md](./requirements/index.md) | プロダクト要件・受入条件・技術選定 |
 | [architecture.md](./architecture.md) | `orbit` の実装予定アーキテクチャ（レイヤー責務・依存方向） |
 | [ai-dlc-flow-guide.md](./ai-dlc-flow-guide.md) | AI-DLC 開発フローの解説（チームメンバー・新規参入者向け。人間の承認ゲートの見方） |
 | [ai-dlc/codex-adapter.md](./ai-dlc/codex-adapter.md) | CodexでAI-DLCを実行するためのホスト差分・委譲・検証手順 |

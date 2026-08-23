@@ -5,7 +5,7 @@
 このファイルは `orbit` プロジェクト向けの Claude Code アダプタ（オーケストレーター）です。
 詳細ルールはここに重複転記せず、`.claude/rules/*.md` と `docs/` で辿ります。
 
-プロジェクトの要件は [`REQUIREMENTS.md`](./REQUIREMENTS.md)、実装予定の構成は
+プロジェクトの要件は [`docs/requirements/index.md`](./docs/requirements/index.md)、実装予定の構成は
 [`docs/architecture.md`](./docs/architecture.md)、Codex での運用差分は
 [`docs/ai-dlc/codex-adapter.md`](./docs/ai-dlc/codex-adapter.md) を参照してください。
 
@@ -17,7 +17,7 @@
 実装着手前に、関連する範囲を次の順で参照する。
 
 1. [`docs/index.md`](./docs/index.md)（ドキュメント目次）
-2. [`REQUIREMENTS.md`](./REQUIREMENTS.md)（プロダクト要件・受入条件）
+2. [`docs/requirements/index.md`](./docs/requirements/index.md)（プロダクト要件・受入条件）
 3. [`docs/architecture.md`](./docs/architecture.md)（全体構成・レイヤー責務・依存方向）／[`docs/ai-dlc/glossary.md`](./docs/ai-dlc/glossary.md)（AI-DLC 用語の正本）
 4. 対象レイヤーの入口ドキュメントと docs（実装開始後に整備）
 5. タスクにチケット番号が紐づく場合は `docs/spec/<TICKET>-*/`（薄い実装 spec）

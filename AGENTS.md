@@ -5,7 +5,7 @@
 ## プロジェクトの現在地
 
 `orbit` は、Cloudflare Workers 上で動かす個人用プロジェクト管理アプリです。現在は
-要件定義（[`REQUIREMENTS.md`](./REQUIREMENTS.md)）と AI-DLC 開発ハーネスの導入段階であり、
+要件定義（[`docs/requirements/index.md`](./docs/requirements/index.md)）と AI-DLC 開発ハーネスの導入段階であり、
 アプリ本体の実装・ルートのビルドコマンド・テストコマンドはまだ定義していません。
 
 実装予定の技術構成とレイヤー境界は [`docs/architecture.md`](./docs/architecture.md) に、
@@ -23,7 +23,7 @@ AI-DLC を Codex で運用する際のホスト差分は [`docs/ai-dlc/codex-ada
 
 ## 基本姿勢
 
-- まず `REQUIREMENTS.md` と `docs/architecture.md` を読み、未確定の実装方針を推測で確定しない。
+- まず `docs/requirements/index.md` と `docs/architecture.md` を読み、未確定の実装方針を推測で確定しない。
 - 仕様が不足・曖昧な場合は、実装前に必ず人間へ確認する。推測で埋めない。
 - 変更コストが高い判断（スキーマ・API 仕様・認証フロー・ロール体系・データ境界）は、実装前に人間と合意する。
 - 人間ゲート（Gate 1 / Gate 2 / Gate 3）の承認とレビューは人間が担う。

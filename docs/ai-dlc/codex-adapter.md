@@ -8,7 +8,7 @@ Stage / Tier / Gate / spec / TDD の意味は変更しない。
 
 - Codexの入口はルートの [`AGENTS.md`](../../AGENTS.md) と本書。
 - AI-DLCの正本は `.claude/skills/` と `.claude/rules/`。`.codex/` はCodex用の配線・委譲定義であり、ルールを再定義しない。
-- プロダクト要件の正本は [`REQUIREMENTS.md`](../../REQUIREMENTS.md)。実装予定の依存方向は [`../architecture.md`](../architecture.md)。
+- プロダクト要件の正本は [`requirements/index.md`](../requirements/index.md)。実装予定の依存方向は [`../architecture.md`](../architecture.md)。
 - 人間ゲート（Gate 1 / Gate 2 / Gate 3）は省略しない。Codexが自分で承認済みにはしない。
 
 ## 現在のプロジェクト状態
@@ -20,7 +20,7 @@ Stage / Tier / Gate / spec / TDD の意味は変更しない。
 
 ## 開始前
 
-1. `AGENTS.md`、`REQUIREMENTS.md`、`docs/index.md`、`docs/architecture.md` を読む。
+1. `AGENTS.md`、`docs/requirements/index.md`、`docs/index.md`、`docs/architecture.md` を読む。
 2. タスクに応じて `.claude/rules/` の risk-tiers / spec-driven / simplicity / testing / task-and-pr を読む。
 3. チケットに紐づく実装は `docs/spec/<TICKET>-*/` を確認する。無い・曖昧な場合は推測でコードを書かず、spec作成または人間確認へ戻る。
 4. engineを使う場合、依存導入が必要なことを人間に明示してから実行する。
@@ -51,7 +51,7 @@ pnpm -C .claude/aidlc run doctor -- --fast
 
 ```text
 あなたの役割は <role>。
-必読: AGENTS.md / REQUIREMENTS.md / docs/spec/<TICKET>-*/ の該当ファイル / .claude/rules/*.md / <role定義>
+必読: AGENTS.md / docs/requirements/index.md / docs/spec/<TICKET>-*/ の該当ファイル / .claude/rules/*.md / <role定義>
 担当範囲: <レイヤーまたはレビュー観点>
 書込範囲: <許可するファイルまたは読み取り専用>
 spec外の設計判断、不明点の推測、担当外ファイルの変更は禁止。

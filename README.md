@@ -1,14 +1,15 @@
 # orbit
 
 Linearライクな個人用プロジェクト管理アプリです。要件定義は
-[`REQUIREMENTS.md`](./REQUIREMENTS.md) にまとめています。
+[`docs/requirements/index.md`](./docs/requirements/index.md) にまとめています。
 
 現在は要件定義と AI-DLC 開発ハーネスの導入段階です。アプリ本体はこれから実装します。
 
 ## 想定スタック
 
 要件定義で採用予定としている構成は次のとおりです。実装時に変更した場合は
-[`docs/architecture.md`](./docs/architecture.md) と要件定義を更新します。
+[`docs/architecture.md`](./docs/architecture.md) と
+[`docs/requirements/04-architecture.md`](./docs/requirements/04-architecture.md) を更新します。
 
 - TanStack Start + React
 - Cloudflare Workers / Vite Plugin
@@ -43,6 +44,7 @@ pnpm -C .claude/aidlc typecheck
 
 | ドキュメント | 内容 |
 |------------|------|
+| [`docs/requirements/index.md`](./docs/requirements/index.md) | プロダクト要件・受入条件・技術選定の入口 |
 | [`.claude/README.md`](./.claude/README.md) | ハーネス取扱説明書（運用・構成・機械強制・導入手順） |
 | [`docs/ai-dlc-flow-guide.md`](./docs/ai-dlc-flow-guide.md) | AI-DLC フローの解説（承認ゲート・KPT・FAQ） |
 | [`docs/ai-dlc/codex-adapter.md`](./docs/ai-dlc/codex-adapter.md) | CodexでのStage・Gate・worker・検証の運用 |

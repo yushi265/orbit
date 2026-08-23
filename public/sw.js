@@ -1,12 +1,20 @@
-const CACHE_NAME = "orbit-static-v1";
+const CACHE_NAME = "orbit-static-v2";
 const STATIC_ASSET = /\.(?:js|css|svg|png|webp|ico|woff2?)$/i;
+const DEV_ASSET = /^(?:\/src\/|\/@|\/node_modules\/)/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+      )
+      .then(() => self.clients.claim()),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
@@ -15,6 +23,8 @@ self.addEventListener("fetch", (event) => {
   if (
     request.method !== "GET" ||
     url.origin !== self.location.origin ||
+    url.pathname === "/sw.js" ||
+    DEV_ASSET.test(url.pathname) ||
     !STATIC_ASSET.test(url.pathname)
   )
     return;

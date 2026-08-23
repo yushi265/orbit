@@ -1,6 +1,8 @@
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 
+const APP_ASSET_VERSION = "2";
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -9,7 +11,7 @@ export const Route = createRootRoute({
       { title: "Orbit — 個人用プロジェクト管理" },
     ],
     links: [
-      { rel: "stylesheet", href: appCss },
+      { rel: "stylesheet", href: `${appCss}?v=${APP_ASSET_VERSION}` },
       { rel: "manifest", href: "/manifest.webmanifest" },
     ],
   }),

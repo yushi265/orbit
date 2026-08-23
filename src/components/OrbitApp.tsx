@@ -183,7 +183,9 @@ function OrbitAppInner(props: Props) {
 
   useEffect(() => {
     if ("serviceWorker" in navigator)
-      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      void navigator.serviceWorker
+        .register("/sw.js?v=2", { updateViaCache: "none" })
+        .catch(() => undefined);
   }, []);
 
   useEffect(() => {

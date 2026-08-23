@@ -1,0 +1,1 @@
+../../.claude/hooks/aidlc-bootstrap.sh

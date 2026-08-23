@@ -1,0 +1,42 @@
+{
+  "$comment": "Tier 1（高リスク・事前承認必須）に該当するorbitの変更を検出するトリガー。正本は .claude/rules/risk-tiers.md の Tier 1 対象。glob はブレース展開（{a,b}）非対応で、1要素の複数パスは同じidのエントリに分ける。",
+  "version": 1,
+  "source": ".claude/rules/risk-tiers.md",
+  "triggers": [
+    {
+      "id": "db-schema",
+      "glob": "drizzle/**",
+      "contentPattern": "CREATE TABLE|ALTER TABLE|DROP TABLE|CREATE INDEX|DROP INDEX"
+    },
+    {
+      "id": "db-schema",
+      "glob": "**/migrations/**",
+      "contentPattern": "CREATE TABLE|ALTER TABLE|DROP TABLE|CREATE INDEX|DROP INDEX"
+    },
+    {
+      "id": "auth-boundary",
+      "glob": "src/auth/**",
+      "contentPattern": ".+"
+    },
+    {
+      "id": "auth-boundary",
+      "glob": "src/server/**",
+      "contentPattern": "Access|JWT|認証|認可|user_id|require"
+    },
+    {
+      "id": "api-contract",
+      "glob": "src/shared/**",
+      "contentPattern": ".+"
+    },
+    {
+      "id": "api-contract",
+      "glob": "src/routes/**",
+      "contentPattern": "route|router|api|schema|export"
+    },
+    {
+      "id": "cycle-automation",
+      "glob": "src/server/**",
+      "contentPattern": "cycle|繰越|Cron|cron|scheduled"
+    }
+  ]
+}

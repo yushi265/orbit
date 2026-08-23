@@ -1,0 +1,10 @@
+{
+  "$comment": "risk-tiers.md の決定表を機械可読化（＝人間判断の機械ルール化）。正本は .claude/rules/risk-tiers.md。gateN: blocking=ブロッキング承認 / declare-only=宣言のみ（承認待ち不要） / conditional=spec実行時のみ / n/a=該当なし。Gate 2 のみ、Gate 1 での人間の明示委任（state の gate2Delegated）で declare-only 相当に降格できる（本表の値は変えない・engine の next() 側で判定）。",
+  "version": 1,
+  "source": ".claude/rules/risk-tiers.md",
+  "tiers": {
+    "1": { "label": "高リスク・事前承認必須", "gate1": "blocking", "gate2": "blocking", "gate3": "blocking", "spec": "required" },
+    "2": { "label": "中リスク・要点承認", "gate1": "blocking", "gate2": "conditional", "gate3": "blocking", "spec": "conditional" },
+    "3": { "label": "低リスク・自走+事後承認", "gate1": "declare-only", "gate2": "n/a", "gate3": "blocking", "spec": "none" }
+  }
+}

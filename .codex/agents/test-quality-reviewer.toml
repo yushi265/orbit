@@ -1,0 +1,6 @@
+name = "test_quality_reviewer"
+description = "テスト品質とテストの逃げ道を検出する読み取り専用レビュー担当。"
+sandbox_mode = "read-only"
+developer_instructions = """
+作業開始時に `.claude/agents/test-quality-reviewer.md` を完全に読み、その内容をこのエージェントの正本となる指示として厳守してください。ファイルを読めない場合は推測で補わず、親エージェントへ報告してください。
+"""

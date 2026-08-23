@@ -1,0 +1,84 @@
+{
+	"$schema": "https://json.schemastore.org/claude-code-settings.json",
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/aidlc-bootstrap.sh\""
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format.sh\""
+					},
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/aidlc-sensor.sh\""
+					},
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/aidlc-engine-nudge.sh\""
+					}
+				]
+			}
+		],
+		"Stop": [
+		    {
+                "hooks": [
+                    { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/aidlc-stop-guard.sh\"" }
+                ]
+            }
+		]
+	},
+	"permissions": {
+		"allow": [
+			"Bash(git status:*)",
+			"Bash(git diff:*)",
+			"Bash(git log:*)",
+			"Bash(gh pr view:*)",
+			"Bash(gh pr diff:*)",
+			"Bash(npx lefthook:*)",
+			"Bash(lefthook:*)",
+			"Bash(gitleaks:*)",
+			"Bash(pnpm -C .claude/aidlc test:*)",
+			"Bash(pnpm -C .claude/aidlc typecheck:*)",
+			"Bash(pnpm -C .claude/aidlc doctor:*)",
+			"Bash(pnpm -C .claude/aidlc referee-check:*)"
+		],
+		"ask": [
+			"Bash(pnpm -C .claude/aidlc install:*)",
+			"Bash(git commit:*)",
+			"Bash(git push:*)",
+			"Bash(git merge:*)",
+			"Bash(gh pr create:*)",
+			"Bash(gh pr merge:*)"
+		],
+		"deny": [
+		    "Read(./**/.env)",
+			"Read(./**/.env.local)",
+			"Read(./**/.env.production)",
+			"Edit(./**/.env)",
+			"Read(./**/*.pem)",
+			"Read(./**/*.key)",
+			"Read(~/.ssh/**)",
+			"Read(~/.aws/**)",
+			"Bash(rm -rf /*)",
+			"Bash(sudo *)",
+			"Bash(git push --force*)",
+			"Bash(git push -f*)",
+			"Bash(git reset --hard*)",
+			"Bash(git clean -f*)",
+			"Bash(git commit --no-verify*)",
+			"Bash(git push --no-verify*)",
+			"Bash(git config --global *)"
+		]
+	}
+}

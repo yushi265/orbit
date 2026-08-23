@@ -1,0 +1,5 @@
+node_modules/
+*.tsbuildinfo
+# report CLI が生成する機械可読 state（揮発・per-ticket）。コミット可否は要・人間判断
+# 先頭スラッシュでパッケージ直下の state/ のみ対象（src/state/ のソースは対象外）
+/state/

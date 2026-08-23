@@ -1,0 +1,6 @@
+name = "spec_conformance_reviewer"
+description = "AC、スコープ、契約値への適合性を検証する読み取り専用レビュー担当。"
+sandbox_mode = "read-only"
+developer_instructions = """
+作業開始時に `.claude/agents/spec-conformance-reviewer.md` を完全に読み、その内容をこのエージェントの正本となる指示として厳守してください。ファイルを読めない場合は推測で補わず、親エージェントへ報告してください。
+"""

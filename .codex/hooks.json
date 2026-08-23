@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/codex-edit-adapter.sh\" \"$(git rev-parse --show-toplevel)/.codex/hooks/format.sh\""
+          },
+          {
+            "type": "command",
+            "command": "CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/codex-edit-adapter.sh\" \"$(git rev-parse --show-toplevel)/.codex/hooks/aidlc-sensor.sh\""
+          },
+          {
+            "type": "command",
+            "command": "CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/codex-edit-adapter.sh\" \"$(git rev-parse --show-toplevel)/.codex/hooks/aidlc-engine-nudge.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/aidlc-bootstrap.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" bash \"$(git rev-parse --show-toplevel)/.codex/hooks/aidlc-stop-guard.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$comment": "ai-dlc-flow の 7 Stage を機械可読化。正本は .claude/skills/ai-dlc-flow/SKILL.md。助言モード（非強制・並走）。required: true=🔒必須 / false=🔓条件付き。gate: その Stage 完了に紐づく人間ゲート。planKey: 実行可否を決める state キー（条件付き Stage のみ）。produces: Stage 完了時に存在検証する証跡（artifact guard・advisory）。<TICKET> は state ファイル名で置換。",
+  "version": 1,
+  "source": ".claude/skills/ai-dlc-flow/SKILL.md",
+  "stages": [
+    { "id": "0+1", "name": "Stage宣言＋要件整理", "required": true, "skill": null, "gate": "gate1", "planKey": null, "skipCondition": null },
+    { "id": "2", "name": "design doc作成", "required": false, "skill": "create-spec", "gate": "gate2", "planKey": "specPlanned", "skipCondition": "spec未実行（Tier3 / Tier2の4条件充足時）",
+      "produces": [
+        { "glob": "docs/spec/<TICKET>-*/index.md", "kind": "exists" },
+        { "glob": "docs/spec/<TICKET>-*/progress.md", "kind": "exists" }
+      ] },
+    { "id": "3+4", "name": "TDD（RED→GREEN→REFACTOR）", "required": true, "skill": "tdd-cycle", "gate": null, "planKey": null, "skipCondition": null,
+      "produces": [
+        { "kind": "test-delta", "exemptWhen": "behaviorChange=false" }
+      ] },
+    { "id": "5", "name": "静的解析・フォーマッター", "required": true, "skill": null, "gate": null, "planKey": null, "skipCondition": null },
+    { "id": "6", "name": "セルフレビュー", "required": true, "skill": "self-review", "gate": null, "planKey": null, "skipCondition": null },
+    { "id": "8", "name": "成果提示＋コミット", "required": true, "skill": null, "gate": "gate3", "planKey": null, "skipCondition": null,
+      "produces": [
+        { "glob": "docs/ai-dlc/retro/<TICKET>.md", "kind": "exists", "exemptWhen": "specPlanned=false" },
+        { "glob": "docs/spec/<TICKET>-*/progress.md", "kind": "progress-removed" },
+        { "glob": "docs/spec/<TICKET>-*/questions.md", "kind": "progress-removed" }
+      ] }
+  ]
+}

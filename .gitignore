@@ -1,0 +1,19 @@
+# 依存
+node_modules/
+.pnpm-store/
+
+# ビルド成果物
+*.tsbuildinfo
+dist/
+build/
+
+# OS / エディタ
+.DS_Store
+*.swp
+
+# 環境変数・secret（コミット厳禁）
+.env
+.env.local
+.env.*.local
+
+# AI-DLC engine のローカル揮発 state は .claude/aidlc/.gitignore で管理

@@ -1,0 +1,11 @@
+{
+  "$comment": "サブエージェント返答スキーマのミラー。正本は各エージェント .md の「出力」節と各スキルの委譲手順。required=必須見出し（行頭一致・後続文字許容）/ contradictions=自己矛盾ルール（if 見出しがあるなら requires 見出しも必須）。検査: pnpm -C .claude/aidlc checkreturn <schema> <file>。",
+  "version": 1,
+  "implementer-v1": {
+    "required": ["## RED 証跡", "## GREEN 証跡", "## 変更ファイル一覧", "## 申し送り"],
+    "contradictions": [{ "if": "## GREEN 証跡", "requires": "## RED 証跡" }]
+  },
+  "explore-v1": {
+    "required": ["## 再利用できるもの", "## 差分", "## 衝突", "## 依存"]
+  }
+}

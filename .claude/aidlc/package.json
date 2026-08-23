@@ -1,0 +1,26 @@
+{
+  "name": "aidlc-engine",
+  "private": true,
+  "type": "module",
+  "description": "AI-DLC 決定論エンジン（advisory モード）。ai-dlc-flow の Stage routing と risk-tiers の Gate 判定を機械可読化した純粋関数。正本は .claude/skills/ai-dlc-flow/SKILL.md と .claude/rules/risk-tiers.md。スタック非依存: レイヤー・検証コマンド・高リスク要素は *.json 設定で各プロジェクトが定義する。",
+  "scripts": {
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "next": "tsx src/cli.ts",
+    "report": "tsx src/state/cli.ts",
+    "sensor": "tsx src/sensors/dispatch.ts",
+    "learnings": "tsx src/learnings/cli.ts",
+    "referee": "tsx src/autonomy/referee.ts",
+    "referee-check": "tsx src/referee/cli.ts",
+    "scope": "tsx src/scopes/cli.ts",
+    "stopguard": "tsx src/stopguard/cli.ts",
+    "ledger": "tsx src/ledger/cli.ts",
+    "checkreturn": "tsx src/returncheck/cli.ts",
+    "doctor": "tsx src/doctor/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

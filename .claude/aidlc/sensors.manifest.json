@@ -1,0 +1,77 @@
+{
+  "$comment": "sensor レジストリ。advisory=非強制。正本は .claude/rules/。id と glob は dispatch.ts が読み、実装レジストリと双方向突合される（不一致・重複は起動時 loud error）。glob は matchGlob 記法（** = 任意階層 / * = セグメント内）。delegate 付きエントリは他ツール委譲のドキュメント（機械処理の対象外）。プロジェクト固有のルールを機械化したい場合は、src/sensors/ に純粋関数（テキスト → Finding[]）を足し、ここに id + glob を登録して dispatch の registry に追加する（双方向突合が通ること）。",
+  "version": 2,
+  "sensors": [
+    {
+      "id": "tier-tripwire",
+      "glob": "**",
+      "$comment": "実発火条件は tier-triggers.json の glob + engine state 宣言 tier が正本（二重定義しない）。dispatch は全ファイルで tripwire 関数へ委譲し、関数内で判定する",
+      "advisory": true,
+      "impl": "src/sensors/tier-tripwire.ts",
+      "cli": "src/sensors/dispatch.ts",
+      "source": ".claude/rules/risk-tiers.md",
+      "checks": [
+        "Tier 1 要素（tier-triggers.json の各トリガー）への新規追加行 × 宣言 tier 2/3 → 昇格再宣言の勧告"
+      ],
+      "knownGaps": [
+        "検出したい高リスク要素は tier-triggers.json に glob + 内容パターンで追加する",
+        "engine state 未使用ボルトでは判定しない（declaredTier=null → 無音）",
+        "編集がどのボルトに属するかは判定せず、state 群の最小 tier と突合する簡略運用"
+      ]
+    },
+    {
+      "id": "codekb-refs",
+      "glob": "docs/ai-dlc/codekb/**.md",
+      "$comment": "サブディレクトリの .md も対象（startsWith + endsWith 判定）",
+      "advisory": true,
+      "impl": "src/sensors/codekb-refs.ts",
+      "cli": "src/sensors/dispatch.ts",
+      "source": "docs/ai-dlc/codekb/README.md（鮮度規約）",
+      "checks": [
+        "codekb の `参照:` パスの実在検査（切れていれば advisory 警告）"
+      ],
+      "knownGaps": [
+        "パスの実在のみ検査（内容の stale さは最終更新 SHA との突合を読む側が行う）"
+      ]
+    },
+    {
+      "id": "spec-sections",
+      "glob": "docs/spec/**.md",
+      "advisory": true,
+      "impl": "src/sensors/spec-sections.ts",
+      "cli": "src/sensors/dispatch.ts",
+      "source": ".claude/skills/create-spec/SKILL.md（チェックリストの機械チェック可能行）",
+      "checks": [
+        "index.md: AC 番号（AC-1 形式）・「テスト戦略」節・対象外（スコープ外）の記載",
+        "レイヤー .md（例: data/service/ui）: 「担保 AC」「テストケース」「異常系」の 3 節",
+        "表示層（ui.md）: 「レスポンシブ / アクセシビリティ」節"
+      ],
+      "knownGaps": [
+        "見出し・記法の存在検査のみ（節の中身の意味的充足・AC 引用のリテラル一致は spec-conformance-reviewer が担当）",
+        "_TEMPLATE / progress.md / questions.md は対象外（雛形・揮発物）",
+        "「担保 AC」節が無いレイヤー .md は旧 spec とみなし全節検査をスキップ（spec-conformance-reviewer B-2 の N/A 慣行と同一。ブラインドスポット = 担保 AC 節を欠く新規 spec はこの sensor では検出されず、Gate 2 とレビュアーの B-2 が担保する）"
+      ]
+    },
+    {
+      "id": "learnings-format",
+      "glob": "docs/ai-dlc/learnings.md",
+      "advisory": true,
+      "impl": "src/sensors/learnings-format.ts",
+      "cli": "src/sensors/dispatch.ts",
+      "source": "docs/ai-dlc/learnings.md 冒頭のエントリ・フォーマット規約",
+      "checks": [
+        "「## 学び」セクション内 entry 行の書式（日付 [YYYY-MM-DD] / カテゴリタグ / 還流先候補 / 出典）の欠落検査"
+      ],
+      "knownGaps": [
+        "書式のみ検査（カテゴリ語彙の妥当性・既存 rules との矛盾は conflict-check〔code-reviewer 委譲〕が担当）"
+      ]
+    },
+    {
+      "id": "secret-scan",
+      "glob": "**/*",
+      "advisory": true,
+      "delegate": "lefthook gitleaks（commit 時に staged 差分を検査）",
+      "note": "secret 検知は commit 時 gitleaks が担保済み。編集時ラッパは follow-up（重複実装を避ける）"
+    }
+  ]
+}

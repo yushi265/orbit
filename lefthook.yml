@@ -1,0 +1,38 @@
+pre-commit:
+  parallel: true
+  commands:
+    # secret 検知（gitleaks）。スタック非依存の汎用ゲート。維持を推奨。
+    gitleaks:
+      run: gitleaks git --staged --no-banner
+    # --- プロジェクトの lint / format / test をここに追加する ---
+    #   下は例（コメントアウト）。自分のスタックの linter / formatter に置き換えて有効化する。
+    #   glob でレイヤー別に対象を絞れる（root: でサブディレクトリ基準にできる）。
+    # lint:
+    #   glob: "<対象 glob 例: **/*.ts>"
+    #   run: <lint コマンド 例: eslint --no-warn-ignored {staged_files} / golangci-lint run / ruff check>
+    # format-check:
+    #   glob: "<対象 glob>"
+    #   run: <formatter --check 例: prettier --check {staged_files} / gofmt -l>
+    # --- AI-DLC ハーネス機構（維持を推奨）---
+    # anti-tamper（advisory・非ブロック）: staged な test diff の改ざん（assertion 削除 / skip 追加等）を早期警告する。
+    aidlc-anti-tamper:
+      run: bash .claude/hooks/aidlc-anti-tamper.sh
+    # retro-surface（advisory・非ブロック）: staged に retro note があれば learnings surface を自動提示する（Gate 3 の着火漏れ防止）。
+    aidlc-retro-surface:
+      run: bash .claude/hooks/aidlc-retro-surface.sh
+    # drift guard（ブロッキング）: 散文正本（risk-tiers / ai-dlc-flow）と JSON ミラー
+    # （tier-gate-map / stage-graph / scopes / tier-triggers）・verification/ 分離の同期を検査する。対象が staged の時だけ実行。
+    aidlc-drift-check:
+      glob: "{.claude/rules/*.md,.claude/rules/verification/*.md,.claude/skills/ai-dlc-flow/*.md,.claude/aidlc/*.json}"
+      run: bash .claude/hooks/aidlc-drift-check.sh
+
+commit-msg:
+  commands:
+    conventional-commit:
+      run: |
+        msg=$(head -1 {1})
+        if ! echo "$msg" | grep -qE '^(feat|fix|refactor|test|docs|chore|perf|ci|style)(\([^)]+\))?: .+|^(Merge|Revert|fixup!|squash!)'; then
+          echo "コミットメッセージが Conventional Commits に従っていません: $msg"
+          echo "形式: <type>(<scope>): 説明（type: feat/fix/refactor/test/docs/chore/perf/ci/style）"
+          exit 1
+        fi

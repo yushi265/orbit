@@ -1,0 +1,1 @@
+../../.claude/hooks/aidlc-drift-check.sh

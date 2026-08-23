@@ -1,0 +1,6 @@
+{
+  "tier": 2,
+  "specPlanned": true,
+  "stageStatus": { "0+1": "done" },
+  "gateStatus": { "gate1": "approved" }
+}

@@ -1,0 +1,35 @@
+{
+  "$comment": "scope プロファイル。既存の risk-tiers + spec省略条件を名前付き再利用部品に。scope=どの Stage を回すか（specPlanned/behaviorChange）、tier=ゲート深さ（役割を分け二重定義しない）。stage-graph.json と組み合わせて実行計画を算出。simplicity.md 準拠で少数のみ（増やしすぎない）。",
+  "version": 1,
+  "source": ".claude/rules/risk-tiers.md / spec-driven.md / testing.md",
+  "scopes": {
+    "doc-only": {
+      "tier": 3,
+      "behaviorChange": false,
+      "specPlanned": false,
+      "sensors": [],
+      "note": "typo / コメント / doc のみ（挙動変更なし）。TDD 不要（testing.md）。Tier3 自走 + 事後承認"
+    },
+    "bugfix": {
+      "tier": 2,
+      "behaviorChange": true,
+      "specPlanned": false,
+      "sensors": [],
+      "note": "設計影響なし bugfix。spec 省略可（4 条件）。TDD 必須"
+    },
+    "feature": {
+      "tier": 2,
+      "behaviorChange": true,
+      "specPlanned": true,
+      "sensors": [],
+      "note": "機能追加。spec 必須・全 Stage 実行"
+    },
+    "security-patch": {
+      "tier": 1,
+      "behaviorChange": true,
+      "specPlanned": true,
+      "sensors": [],
+      "note": "認証 / 認可 / データ境界に触れる → Tier1・spec 必須。セキュリティ規約を機械化する sensor があれば sensors に列挙する（同梱は無し。src/sensors/ に足して sensors.manifest.json に登録したら id をここに追加）"
+    }
+  }
+}

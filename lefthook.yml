@@ -12,6 +12,7 @@ pre-commit:
         if [ -f package.json ]; then pnpm exec oxlint {staged_files}; fi
     format-check:
       glob: "**/*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,yaml,yml,md,mdx,css,scss}"
+      exclude: '(^|/)src/routeTree\.gen\.ts$'
       run: |
         if [ -f package.json ]; then pnpm exec oxfmt --check {staged_files}; fi
     # --- AI-DLC ハーネス機構（維持を推奨）---

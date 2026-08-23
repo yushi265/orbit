@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -11,6 +12,7 @@ import type {
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
 import { ApiError, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
+import { queryClient } from "../lib/query";
 
 type Section =
   | "home"
@@ -88,6 +90,14 @@ function getInitialSection(value?: Section): Section {
 }
 
 export function OrbitApp(props: Props) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <OrbitAppInner {...props} />
+    </QueryClientProvider>
+  );
+}
+
+function OrbitAppInner(props: Props) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const initial = getInitialSection(props.initialSection);

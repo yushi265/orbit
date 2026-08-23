@@ -73,7 +73,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | 領域 | 要件 | 優先度 |
 | --- | --- | --- |
 | 認証 | Cloudflare Accessによる本人限定認証、ログアウト、セッション失効時の再認証 | Must |
-| 個人設定 | タイムゾーン、Workflow、Cycle、テーマ設定 | Must |
+| 個人設定 | タイムゾーン、UI言語、Workflow、Cycle、Estimate、テーマ設定 | Must |
 | Issue | CRUD、状態、優先度、見積、期限、Label、Project、Cycle | Must |
 | Issue | 親子Issue、メモ、活動履歴、関連Issue | Should |
 | Cycle | 反復設定、自動生成、計画、繰越、進捗、履歴 | Must |
@@ -83,7 +83,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | 検索 | Issue ID・タイトル・説明の検索、属性絞り込み | Must |
 | Inbox | アプリ内通知、既読、削除、遷移 | Should |
 | UI | PC・スマホ・タブレット対応、ライト/ダーク | Must |
-| PWA | ホーム画面追加、静的シェルのキャッシュ | Should |
+| PWA | ホーム画面追加、Manifest・version付きJS / CSS / Icon等の公開静的AssetのCache | Should |
 | 監査 | 主要エンティティの変更履歴 | Must |
 
 ### 4.2 Phase 2
@@ -96,7 +96,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - Webhook、公開API、GitHub / Slack連携
 - CSV import / export
 - CycleおよびProjectの高度な分析
-- 完全なリアルタイム更新
+- 完全なリアルタイム更新（Phase 2候補。導入要否は利用実績で判断）
 - オフラインでのIssue作成・編集と再同期
 
 ### 4.3 Phase 3
@@ -176,7 +176,7 @@ LinearではIssueはTeamに必ず属するが、本アプリはTeamを持たな�
 | ISS-12 | blocking / blocked by / related / duplicateを設定できる | 依存関係は双方向から確認できる |
 | ISS-13 | 作業メモを追記・編集・削除できる | Markdownとコードブロックを扱える |
 | ISS-14 | 変更履歴を時系列表示する | 作成、属性変更、メモ、アーカイブを時刻付きで記録する |
-| ISS-15 | Issueをアーカイブ・復元・論理削除できる | 通常Viewから除外され、管理画面から復元できる |
+| ISS-15 | Issueをアーカイブ・復元・論理削除できる | 通常Viewから除外し、ArchiveはIssuesのArchived Filter、論理削除はTrashから復元できる |
 
 Issueの依存関係はLinearのblocking、related、duplicateを踏襲する。[Linear Issue relations](https://linear.app/docs/issue-relations)
 
@@ -191,7 +191,7 @@ Issueの依存関係はLinearのblocking、related、duplicateを踏襲する。
 | CYC-03 | 開始曜日を設定できる | 開始日の00:00を境界とする |
 | CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と自動繰越は許可するが、現在Cycleへの割当は行わない |
 | CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を自動生成する |
-| CYC-06 | 将来Cycleの開始日・終了日を個別調整できる | 過去Cycleは変更不可、期間重複を禁止する |
+| CYC-06 | 将来Cycleの開始日・終了日を個別調整できる | 過去Cycleは変更不可、期間重複を禁止し、個別調整したCycleは`schedule_overridden = true`として自動再生成の上書き対象外にする |
 
 #### 6.4.2 Cycleライフサイクル
 
@@ -208,7 +208,7 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
 | CYC-07 | Cycle状態をUpcoming / Active / Completedで自動判定する | 個人設定のタイムゾーンで境界を一貫して扱う |
-| CYC-08 | 次Cycleを即時開始できる | 確認後、Cronと同じCAS方式の終了Serviceで現在Cycleを終了し、次CycleをActiveにする |
+| CYC-08 | 次Cycleを即時開始できる | 確認後、Cronと同じCAS方式で現在Cycleを即時終了し、次Cycleの`starts_at`を現在時刻、`ends_at`を設定期間後へ変更してActiveにする。後続の自動生成Cycleは新しい境界から再生成し、個別調整済みCycleと重複する場合は更新を拒否して解消を求める |
 | CYC-09 | Active終了時に未完了Issueを次Cycleへ繰り越す | Workflow categoryがUnstartedまたはStartedのIssueだけを次Cycleへ移し、Backlog / Completed / Canceledは元Cycleに残す |
 | CYC-10 | StartedまたはCompletedになった未所属Issueを現在Cycleへ自動追加できる | 個人設定でON/OFFでき、変更履歴にAutomationとして記録する |
 | CYC-11 | Issueが繰り越された回数と元Cycleを保持する | Issue詳細およびCycle履歴から追跡できる |
@@ -218,7 +218,7 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
-| CYC-13 | Current / Upcoming / Pastを切り替えられる | PC、タブレット、スマホで同じ情報へ到達できる |
+| CYC-13 | Current / Upcoming / Pastを切り替えられる | PC、タブレット、スマホで同じ情報へ到達できる。Cooldown中のCurrentは「Active Cycleなし」、次回開始時刻、Upcoming Cycleへの導線を表示する |
 | CYC-14 | CycleへIssueを追加・削除・並び替えできる | ListとBoardの両方から更新できる |
 | CYC-15 | Scopeと完了率をIssue数・Estimateの両方で表示する | Estimate無効時または全Issueが未設定の場合はIssue数を既定とし、有効時の未設定IssueはEstimate合計で0として扱う |
 | CYC-16 | 日別のCompleted、Remaining、Scope changeを表示する | Cycle開始時点と追加・削除の差分を再現できる |
@@ -231,11 +231,11 @@ LinearのProjectは明確な成果または目標日を持つ作業単位で、I
 
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
-| PRJ-01 | Projectを作成・編集・アーカイブできる | name以外は任意とする |
+| PRJ-01 | Projectを作成・編集・アーカイブ・復元できる | name以外は任意とし、Archived Filterから復元できる |
 | PRJ-02 | status、priority、色、アイコンを設定できる | 一覧とIssue pickerに同じ表現を使う |
 | PRJ-03 | start dateとtarget dateを設定できる | 日・月・四半期の入力粒度を日付とは別に保持し、元の精度で再表示できる |
 | PRJ-04 | Project IssueをList / Boardで表示する | Filter、Group、Order、保存Viewに対応する |
-| PRJ-05 | 完了率をIssue数またはEstimateで表示する | canceled Issueを母数から除外し、Estimate無効時または全Issueが未設定の場合はIssue数を使う |
+| PRJ-05 | 完了率をIssue数またはEstimateで表示する | canceled Issueを母数から除外し、Estimate無効時または全Issueが未設定の場合はIssue数を使う。Estimate有効時の未設定Issueは合計で0として扱う |
 | PRJ-06 | Project詳細に概要、説明、プロパティ、Issue、進捗を表示する | タブまたはモバイル向けセクションで切り替えられる |
 | PRJ-07 | Project statusを手動更新する | Backlog / Planned / In Progress / Completed / Canceledカテゴリを持つ |
 | PRJ-08 | Project statusの名称、色、順序、既定値を設定できる | ユーザーごとの既定値を1件だけ保ち、参照中または既定の状態は削除を拒否して、先にProjectの一括変更または別の既定値の選択を求める |
@@ -296,6 +296,7 @@ MVP推奨ショートカット:
 - JSONまたはCSVでIssueをExportできる（Phase 2）
 - Issue、Project、通知、メモ、Saved Viewの削除は原則論理削除とし、Trashから30日以内に復元できる
 - `deleted_at`から30日を超えたデータは、Cronが依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する
+- Mutation receiptは作成から30日後を`expires_at`とし、期限後にCronが物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う
 - D1 Time TravelおよびBackup上の保持は、アプリ内の30日復元期限には含めない
 
 ## 7. UI / UX要件
@@ -359,7 +360,7 @@ MVP推奨ショートカット:
 | 観測性 | request ID、構造化ログ、エラー、Latency、D1 query、Queue失敗を追跡する |
 | 保守性 | TypeScript strict、境界Schema、Migration、ADR、Feature単位のモジュール構成を採用する |
 | 互換性 | 最新2世代のChrome、Safari、Edge、Firefoxおよび現行iOS/Androidブラウザを対象とする |
-| テスト | Domain unit、Repository integration、主要JourneyのPlaywright E2Eを自動化する |
+| テスト | Domain unit、Repository / Service / UI integrationを一次担保とし、Playwright E2EはAccess・PWA・実Browser固有の少数Smokeへ限定する |
 
 ## 9. 技術選定
 
@@ -384,7 +385,7 @@ MVP推奨ショートカット:
 | Scheduler | Workers Cron Triggers | Cycle開始・終了・将来Cycle生成、論理削除データのPurge、Outbox再送を定期実行できる |
 | Realtime | Durable Objects + WebSocket（Phase 2・任意） | PCとモバイル間の即時Push更新に向く |
 | File | Cloudflare R2（Phase 2） | 添付ファイルをDBと分離できる |
-| Test | Vitest + Playwright + MSW | Unit、Browser E2E、外部I/O Mockを分担できる |
+| Test | Vitest + Playwright + MSW | Unit / Integrationを一次担保とし、外部I/O Mockと少数の実Browser Smokeを分担できる |
 | Quality | ESLint + Prettier + TypeScript + Lefthook | 静的検査とローカル品質ゲートを統一する |
 | Observability | Workers Logs + OpenTelemetry互換の外部Sink | 構造化ログと分散追跡へ拡張できる |
 
@@ -406,12 +407,13 @@ flowchart TD
   W --> O[Durable Objects: Phase 2]
   C[Cron Triggers] --> W
   Q --> N[Notification / Webhook Worker]
+  N --> D
 ```
 
 #### 構成判断
 
 - 主データはD1に集約する。D1は管理DBとしてMigration、Import / Export、Query insightsを備える。一方、Durable Objects SQLiteは強整合な状態と計算を同一場所に置けるが、初期構築の複雑性が増すため、MVPの主DBにはしない。[Cloudflare storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
-- RealtimeはMVPでポーリング/再検証に留め、Phase 2でDurable Objectsを導入する。Durable Objectsは複数Clientの状態調停とWebSocketに適する。[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
+- RealtimeはMVPでポーリング/再検証に留める。Phase 2では利用実績に基づいて導入要否を判断し、導入する場合は複数Clientの状態調停とWebSocketに適するDurable Objectsを使用する。[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
 - 通知、Webhook、重い集計はQueuesへ送り、API応答時間と再試行性を確保する。Queuesは保証付き配送、Batch、Retry、Delayに対応する。[Cloudflare Queues](https://developers.cloudflare.com/queues/)
 - D1 Read Replicationを有効にする場合はSessions APIとBookmarkを用い、同一Browser session内のsequential consistency（順序一貫性）を確保する。[D1 read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
 - HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。CronはWorker環境変数`OWNER_USER_ID`を使い、Queue Messageはproducerが確定した`user_id`と`event_id`を持たせ、consumerで`OWNER_USER_ID`との一致を検証する。Cron / Queueのactorは`system:cron` / `system:queue`として監査へ記録する。[Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) [Queues consumers](https://developers.cloudflare.com/queues/reference/how-queues-works/)
@@ -425,7 +427,7 @@ flowchart TD
 - 外部連携・Webhook・将来Public API: `/api/v1` Server Routes
 - Validation: 入出力ともZod Schema
 - Error: `code`, `message`, `fieldErrors`, `requestId`の統一Envelope
-- Mutation: `idempotencyKey`とentity `version`を受け取る
+- Mutation: 全Mutationが`idempotencyKey`を受け取り、Issue更新は追加でentity `version`を受け取る
 - Mutationの事前読取: D1 Read Replication有効時は`withSession('first-primary')`を使い、条件付きUPDATEのCASを最終判定とする
 - Pagination: cursor方式
 - D1アクセス: Server側のみ。BrowserへBindingやTokenを露出しない
@@ -449,9 +451,9 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 | Entity | 主な属性 |
 | --- | --- |
 | users | id, name, email, avatar_url, created_at |
-| user_preferences | user_id, timezone, locale, theme, issue_counter, estimate_enabled, estimate_scale, default_issue_display_json |
+| user_preferences | user_id, timezone, locale, theme, issue_counter, estimate_enabled, default_issue_display_json |
 | workflow_states | id, user_id, name, category, color, position, is_default |
-| cycles | id, user_id, number, name_override, description_json, starts_at, ends_at, status, completed_at, completion_token |
+| cycles | id, user_id, number, name_override, description_json, starts_at, ends_at, schedule_overridden, status, completed_at, completion_token |
 | cycle_settings | user_id, enabled, duration_weeks, cooldown_weeks, start_weekday, future_count, auto_add_to_current_cycle |
 | project_statuses | id, user_id, name, category, color, position, is_default |
 | projects | id, user_id, name, status_id, priority, color, icon, description_json, start_at, start_precision, target_at, target_precision, archived_at, deleted_at |
@@ -459,16 +461,16 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 | labels | id, user_id, name, color |
 | issue_labels | issue_id, label_id |
 | issue_relations | source_issue_id, target_issue_id, type |
-| issue_notes | id, issue_id, user_id, body_json, edited_at, deleted_at |
+| issue_notes | id, issue_id, user_id, body_json, created_at, edited_at, deleted_at |
 | cycle_issue_history | id, user_id, issue_id, from_cycle_id, to_cycle_id, reason, moved_at |
 | saved_views | id, user_id, name, entity_type, query_json, layout_json, deleted_at |
 | recent_issue_views | user_id, issue_id, viewed_at |
 | recent_searches | id, user_id, normalized_query_json, searched_at |
 | notifications | id, user_id, type, entity_type, entity_id, read_at, deleted_at, created_at |
 | notification_preferences | user_id, notification_type, enabled |
-| activity_events | id, user_id, actor_type, actor_id, entity_type, entity_id, action, request_id, before_json, after_json, created_at |
+| activity_events | id, user_id, actor_type, actor_id, entity_type, entity_id, action, request_id, mutation_key, before_json, after_json, created_at |
 | outbox_events | id, user_id, event_id, type, payload_json, dedupe_key, status, attempt_count, available_at, created_at |
-| mutation_receipts | id, user_id, idempotency_key, operation, response_json, created_at, expires_at |
+| mutation_receipts | id, user_id, idempotency_key, operation, request_hash, response_json, created_at, expires_at |
 
 ### 10.1 主要制約・Index
 
@@ -478,18 +480,21 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 - `issues(user_id, project_id, status_id, position)`
 - `notifications(user_id, read_at, created_at)`
 - `activity_events(user_id, entity_type, entity_id, created_at)`
+- `activity_events(user_id, mutation_key)` unique
 - `cycles(user_id, number)` unique
 - `cycle_issue_history(user_id, issue_id, from_cycle_id, to_cycle_id, reason)` unique
 - `outbox_events(user_id, dedupe_key)` unique
 - `mutation_receipts(user_id, idempotency_key)` unique
+- `recent_issue_views(user_id, issue_id)` unique
+- `recent_searches(user_id, normalized_query_json)` unique。`normalized_query_json`はKey順・既定値・空条件を正規化したCanonical JSONとする
 - `workflow_states(user_id)`と`project_statuses(user_id)`は、それぞれ`is_default = true`を1件だけ許可する部分Unique Indexを持つ
 - `workflow_states.category`はBacklog / Unstarted / Started / Completed / Canceled、`project_statuses.category`はBacklog / Planned / In Progress / Completed / Canceledだけを許可する
-- 最近閲覧と最近の検索は同一対象をUpsertし、種別ごとに新しい20件だけを保持する
+- 最近閲覧と最近の検索は上記Unique制約をConflict targetとしてUpsertし、種別ごとに新しい20件だけを保持する
 - 親子Issueは同一ユーザー所有に限定し、再帰更新前に循環を検出する
 - Relationは正規化した組み合わせに一意制約を置く
 - Project、Cycle、Workflow state、Project status、Labelを参照する書き込みは、参照先が同じ`user_id`を持つことを検証する
 
-検索はD1 SQLite FTS5を採用し、Issue番号、title、`description_text`を索引化する。Issue保存時にServer側でTiptap JSONから`description_text`を生成し、JSON・射影列・FTS Indexを同一書き込み処理で更新する。FTS Indexは再構築可能な派生データとして扱う。Phase 0ではtrigramを含むTokenizer、MATCH QueryのEscape、3文字未満のIssue ID・title Prefix検索、英日混在の検索品質、1万Issue時のLatencyとRows readを検証する。FTS5が品質・性能目標を満たさない場合も、`description_text`への検索を含むFallbackでNAV-01を満たす。高度な全文検索は外部検索基盤を導入するまでPhase 2とする。[D1 supported SQLite extensions](https://developers.cloudflare.com/d1/sql-api/sql-statements/) [D1 index best practices](https://developers.cloudflare.com/d1/best-practices/use-indexes/)
+検索はD1 SQLite FTS5を第一候補とし、Phase 0の品質・性能基準を満たした場合に採用してIssue番号、title、`description_text`を索引化する。Issue保存時にServer側でTiptap JSONから`description_text`を生成し、JSON・射影列・採用時のFTS Indexを同一書き込み処理で更新する。FTS Indexは再構築可能な派生データとして扱う。Phase 0ではtrigramを含むTokenizer、MATCH QueryのEscape、3文字未満のIssue ID・title Prefix検索、英日混在の検索品質、1万Issue時のLatencyとRows readを検証する。基準を満たさない場合も、title Prefixと`description_text`検索を組み合わせたFallbackでNAV-01を満たす。高度な全文検索は外部検索基盤を導入するまでPhase 2とする。[D1 supported SQLite extensions](https://developers.cloudflare.com/d1/sql-api/sql-statements/) [D1 index best practices](https://developers.cloudflare.com/d1/best-practices/use-indexes/)
 
 ## 11. 主要処理フロー
 
@@ -500,14 +505,27 @@ const updateIssue = createServerFn({ method: 'POST' })
   .inputValidator(updateIssueSchema)
   .handler(async ({ data, context }) => {
     const user = await requireAllowedUser(context)
+    const requestHash = hashCanonicalRequest(data)
+    const existing = await mutationReceiptRepo.find(user.id, data.idempotencyKey)
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        throw new ConflictError('IDEMPOTENCY_KEY_REUSED')
+      }
+      return existing.response
+    }
+
     const current = await issueRepo.findOwnedBy(data.id, user.id)
     const next = buildUpdatedIssue(current, data)
 
     const [updated] = await db.batch([
       // UPDATE issues SET ..., version = version + 1, last_mutation_key = ?
       // WHERE id = ? AND user_id = ? AND version = ?
+      //   AND NOT EXISTS (
+      //     SELECT 1 FROM mutation_receipts
+      //     WHERE user_id = ? AND idempotency_key = ?
+      //   )
       issueRepo.updateByVersion(next),
-      activityRepo.appendIfMutationMatches(
+      activityRepo.appendUniqueIfMutationMatches(
         buildIssueDiff(user, current, next),
         data.idempotencyKey,
       ),
@@ -517,13 +535,15 @@ const updateIssue = createServerFn({ method: 'POST' })
       ),
       mutationReceiptRepo.recordIfMutationMatches(
         data.idempotencyKey,
+        requestHash,
         buildMutationResponse(next),
       ),
     ])
 
     if (updated.meta.changes === 0) {
       const receipt = await mutationReceiptRepo.find(user.id, data.idempotencyKey)
-      if (receipt) return receipt.response // 同一Mutationの再送
+      if (receipt?.requestHash === requestHash) return receipt.response
+      if (receipt) throw new ConflictError('IDEMPOTENCY_KEY_REUSED')
       throw new ConflictError('ISSUE_VERSION_CONFLICT')
     }
 
@@ -531,7 +551,7 @@ const updateIssue = createServerFn({ method: 'POST' })
   })
 ```
 
-Version比較はWorker上の事前読取だけに依存せず、条件付きUPDATEをCASとして使う。同一`batch()`内のActivity、Outbox、Mutation receiptは`last_mutation_key`との一致でGuardし、CASの勝者だけが書き込む。クライアントは`onMutate`でCacheを先に更新し、409 Conflict時は最新Issueを取得して差分を提示する。
+Version比較はWorker上の事前読取だけに依存せず、条件付きUPDATEをCASとして使う。同一`batch()`内のActivity、Outbox、Mutation receiptは`last_mutation_key`との一致でGuardし、各`mutation_key` / `dedupe_key` / `idempotency_key`のUnique制約で再送をNo-opにする。Request hashはMutationのoperation名と、`idempotencyKey`を除くValidation済みPayloadのCanonical表現から生成する。同じKey・同じRequest hashは保存済み応答を返し、同じKey・異なるRequestは409 `IDEMPOTENCY_KEY_REUSED`とする。クライアントは`onMutate`でCacheを先に更新し、409 Conflict時は最新Issueを取得して差分を提示する。
 
 ### 11.2 Cycle終了
 
@@ -548,6 +568,7 @@ async function closeCycle(
     // UPDATE cycles SET status = 'completed', completed_at = ?, completion_token = ?
     // WHERE id = ? AND user_id = ? AND status = 'active'
     //   AND (ends_at <= ? OR ? = 'manual')
+    //   AND NOT EXISTS (manual再計算後に重複する個別調整済みCycle)
     cycleRepo.completeIfActive(
       cycleId,
       ownerUserId,
@@ -556,7 +577,7 @@ async function closeCycle(
       completionToken,
     ),
     cycleRepo.ensureNextIfTokenMatches(cycleId, completionToken),
-    cycleRepo.activateNextIfDueOrManualAndTokenMatches(
+    cycleRepo.rescheduleAndActivateNextIfDueOrManualAndTokenMatches(
       cycleId,
       trigger,
       completionToken,
@@ -574,7 +595,7 @@ async function closeCycle(
 }
 ```
 
-`batch()`の結果を受け取るまで途中分岐できないため、後続SQLはすべて同じ`completion_token`の存在を条件にする。候補抽出は事前SELECTせず、`INSERT ... SELECT`と集合UPDATEで`user_id`、元`cycle_id`、Workflow categoryをbatch内で再評価する。次Cycle、繰越履歴、Outboxには一意制約を置く。Batch中の失敗はCASを含めてRollbackされるため、外部から遷移中状態は見えない。[D1 batch API](https://developers.cloudflare.com/d1/worker-api/d1-database/)
+`batch()`の結果を受け取るまで途中分岐できないため、後続SQLはすべて同じ`completion_token`の存在を条件にする。候補抽出は事前SELECTせず、`INSERT ... SELECT`と集合UPDATEで`user_id`、元`cycle_id`、Workflow categoryをbatch内で再評価する。手動即時開始では、次Cycleの日付変更と後続の自動生成Cycle再生成も同じTokenでGuardし、個別調整済みCycleとの重複がある場合は先頭CASを成立させない。次Cycle、繰越履歴、Outboxには一意制約を置く。Batch中の失敗はCASを含めてRollbackされるため、外部から遷移中状態は見えない。[D1 batch API](https://developers.cloudflare.com/d1/worker-api/d1-database/)
 
 Cronは短い間隔で「境界を過ぎた未処理Cycle」を取得する。時刻ぴったりの1回だけに依存せず、状態遷移のCAS、一意制約、冪等な再実行で重複処理を吸収する。
 
@@ -583,10 +604,10 @@ Cronは短い間隔で「境界を過ぎた未処理Cycle」を取得する。�
 | 画面 | 主な内容 | Mobile差分 |
 | --- | --- | --- |
 | Home | Current Cycle、期限超過・期限接近、Recently updated | Card中心 |
-| Issues | List / Board、Filter、Group、Bulk action | List優先、FilterはBottom sheet |
+| Issues | List / Board、Filter、Group、Bulk action、Archived Filter / 復元 | List優先、FilterはBottom sheet |
 | Cycle list | Current、Upcoming、Past | 横SwipeまたはSelect |
 | Cycle detail | Summary、Graph、Issues、Status / Priority / Project別内訳 | Summaryを折りたたみ表示 |
-| Project list | List / Board、Progress | Card密度を下げる |
+| Project list | List / Board、Progress、Archived Filter / 復元 | Card密度を下げる |
 | Project detail | Overview、Issues、Progress | Section navigation |
 | Issue detail | Title、Description、Properties、Relations、Notes、Activity | Full screen route |
 | Search | Query、Recent、Result、Filter | 下部タブからFull screen |
@@ -604,7 +625,7 @@ Cloudflare Accessが提供する認証画面はアプリ画面一覧の対象外
 ```gherkin
 Given 本人がログインしてIssuesを開いている
 When Cを押してタイトルを入力しEnterで確定する
-Then 1秒以内にIssueが一覧へ表示される
+Then Preview環境でEnter確定からServer採番済みIssueが一覧へ描画されるまでのp95が1秒以内である
 And `TASK-123`形式のIssue番号が採番される
 And URLを開くと同じIssue詳細を表示できる
 ```
@@ -618,7 +639,9 @@ When 同じCycleの終了Jobが並行して実行される
 Then UnstartedとStartedのIssueだけが次Cycleへ移る
 And BacklogとCompletedとCanceledのIssueは元Cycleに残る
 And 元CycleはCompletedになる
-And 次Cycle、繰越履歴、Outbox eventはそれぞれ1回だけ作成される
+And 次Cycleは既存行を再利用して1件だけ存在する
+And 繰越履歴は移動したIssueごとに1件、このシナリオでは2件だけ作成される
+And Outbox eventは1件だけ作成される
 And Jobを再実行しても結果は変わらない
 ```
 
@@ -674,15 +697,45 @@ And もう1件は409 Conflictになる
 And Activity、Outbox event、Mutation receiptは勝者の1件だけ作成される
 ```
 
+### AC-08 Mutation再送
+
+```gherkin
+Given Issue更新が成功しMutation receiptが保存されている
+When 同じidempotencyKeyと同じRequestを再送する
+Then 初回と同じResponseを返す
+And Issue version、Activity、Outbox event、Mutation receiptは増えない
+But 同じidempotencyKeyで異なるRequestを送る
+Then 409 IDEMPOTENCY_KEY_REUSEDを返し業務データを更新しない
+```
+
 ## 14. テスト戦略
 
 - Unit: Cycle境界・Cooldown、繰越対象、Estimate ON/OFF、権限、Workflow / Project status遷移、Filter変換、Position計算、Tiptap JSONから検索Textへの射影
-- Integration: D1 Migration、Repositoryの`user_id`所有境界、Issue採番、Issue / CycleのCASと同時実行、Batch rollback、一意制約、recent最大20件、30日Purge、Outbox再投入
-- Component: Dialog、Combobox、Board card、Touch drag、Keyboard操作、UI言語切替、Estimate表示切替
-- E2E: Access認証・拒否・Logout・セッション失効からの復帰、Issue CRUD、Bulk edit、Cycle設定・繰越、Project進捗、Saved View、Trash復元、Mobile / standalone PWA viewport
+- Repository / Service Integration: 実D1 Migration、`user_id`所有境界、Issue作成・採番、Issue / CycleのCASと同時実行、Batch rollback、一意制約、検索Index、recent、30日Purge、Outbox再投入
+- UI Integration: Issue CRUD、Bulk edit、Cycle繰越、Project進捗、Saved View、楽観的Rollback・Error・再試行・選択・Scroll保持、Access 401分類とTop-level Navigation、UI言語・Estimate表示切替
+- Browser E2E: Access実環境の認証・拒否・Logout・Deep link復帰、Keyboard / Touch統合、Mobile / standalone PWA、Service Worker Cache境界に絞った少数のSmoke test
 - Accessibility: axeによる自動検査 + Keyboardのみの主要Journey
-- Performance: 1万IssueのSeedで一覧、Filter、英日混在のtitle / description検索、Cycle集計を計測
+- Performance: 1万IssueのSeedで一覧、Filter、英日混在のtitle / description検索、Cycle集計を計測する。AC-01はEnter確定からServer採番済みIssueが描画されるまでをPreview環境で測り、p95を1秒以内とする
 - Resilience: Queue再試行・保持期限超過後のOutbox再投入、Cron / CYC-08同時実行、Batch途中失敗、誤った`OWNER_USER_ID`、API timeout、Mutation conflictをFault injectionする
+
+正常系Journeyの一次担保はRepository / Service / UIの各レイヤー内Integration testとし、Browser E2EはAccess・PWA・実Browser固有の境界に限定して同じ正常系を重複させない。
+
+### 14.1 必須テストケース
+
+| 対象 | 技法 | 必須ケース |
+| --- | --- | --- |
+| 基本入力制約 | 境界値 | Issue title `0 / 1 / 255 / 256`文字、Cycle期間`0 / 1 / 8 / 9`週、Cooldown`0 / 4 / 5`週、将来Cycle`0 / 1 / 15 / 16`件 |
+| Cycle状態 | 状態遷移 | Upcoming→Active、Active→Completed（scheduled / manual）、期限前scheduled拒否、Upcoming終了拒否、Completed再実行No-op、Cron / CYC-08競合、Cooldown中のActiveなし表示 |
+| Cycle繰越 | デシジョンテーブル | Backlog / Completed / Canceledは残留、Unstarted / Startedは移動、次Cycle既存行再利用、Issueごとの履歴、Outbox 1件、Batch失敗時Rollback |
+| Owner解決 | デシジョンテーブル | HTTP本人一致 / 不一致、Cron正常、Binding未設定、UUID不正、`users`行なし、Queue `user_id`一致 / 不一致。拒否は業務更新0件と構造化Security log、Background失敗は加えてMetricで観測する |
+| Issue Mutation | デシジョンテーブル | Version一致、Version競合、同じKey・同じRequestの再送、同じKey・異なるRequestの拒否、並行更新で勝者1件、Activity / Outbox / Receipt重複なし |
+| Estimate | デシジョンテーブル | 無効、有効かつ全件未設定、有効かつ一部未設定、許可値`1 / 2 / 3 / 5 / 8`、不許可値`0 / 4 / 13`、無効化後の値保持と再有効化、ProjectのCanceled除外 |
+| Access失効 | デシジョンテーブル | 401、Offline、Timeout、5xxを区別し、401だけがTop-level再認証、元Deep link復帰、認証応答・個人データCacheなし |
+| 楽観的更新失敗 | 状態遷移 | Optimistic表示→成功確定、Optimistic表示→失敗Rollback→Error / 再試行、選択・Scroll位置維持 |
+| Search射影 | 状態遷移・障害注入 | Create / Edit / Delete時のJSON・`description_text`・FTS整合、途中失敗Rollback、短い検索語、MATCH特殊文字、英日混在、Fallback |
+| Recent | 境界値 | 19 / 20 / 21件、重複Upsert、Canonical JSON、最終利用順、削除済み除外、端末同期 |
+| 論理削除Purge | 境界値・状態遷移 | 30日ちょうどは復元可能、30日+1msはPurge、依存データ、Owner分離、再実行No-op、監査記録 |
+| Mutation receipt期限 | 境界値 | `expires_at`直前、期限到達後かつCron削除前の同じKeyの再送応答・異なるRequest拒否、Cron削除後の新規Mutation扱い、Purge再実行No-op |
 
 ## 15. 開発フェーズ案
 
@@ -690,8 +743,8 @@ And Activity、Outbox event、Mutation receiptは勝者の1件だけ作成され
 | --- | --- | --- |
 | 0. Technical spike | TanStack Start + Workers + D1 + Authの縦切りPoC | Access認証・拒否・失効復帰、Issue 1件CRUD、Preview deployが動く |
 | 1. Foundation | 本人限定認証、Owner bootstrap、個人設定、Workflow、共通UI | 未認証・未許可ユーザー・Owner誤設定の拒否テストが通る |
-| 2. Issue core | Issue CRUD、List、Detail、属性、Bulk | PC主要Journeyが通る |
-| 3. Cycle | 設定、自動生成、繰越、Current/Past、Graph | AC-02と境界テストが通る |
+| 2. Issue core | Issue CRUD、List、Detail、属性、Bulk、Search、Command menu、Shortcut | PC主要Journeyが通る |
+| 3. Cycle | 設定、自動生成、繰越、Current/Past、Graph | AC-02、状態遷移、CYC-08の日付再計算・重複拒否のテストが通る |
 | 4. Project / View | Project、Board、Filter、Saved View | 横断利用が可能になる |
 | 5. Mobile / PWA | 下部Navigation、Touch最適化、PWA | 主要Mobile E2EとAA検査が通る |
 | 6. Release hardening | Inbox、監査、性能、Backup、Purge、Outbox再送、運用手順 | SLO、Security、Restore drillを満たす |
@@ -710,7 +763,7 @@ And Activity、Outbox event、Mutation receiptは勝者の1件だけ作成され
 
 ### Phase 0で実装可能性・品質を確定する項目
 
-1. 承認済みのD1 Token付きCAS方式について、Drizzleでの`meta.changes`取得、同時実行、Batch rollback、CYC-08競合、履歴・Outbox・次Cycleの重複防止
+1. 承認済みのD1 Token付きCAS方式について、Drizzleでの`meta.changes`取得、同時実行、Batch rollback、CYC-08競合・日付再計算・個別調整済みCycleとの重複拒否、履歴・Outbox・次Cycleの重複防止
 2. Cloudflare Access JWT検証、非同期リクエストへの401契約、Top-level再認証、元URL復帰、Logout、standalone PWAでのTanStack Start SSR / Server Functions保護
 3. D1 FTS5のTokenizer、短い検索語、英日混在の検索品質、射影・Index整合性、1万Issue時のLatency、およびExport / Restore時の再Index手順
 4. 採用するDnDライブラリのReact現行版対応とTouch / Keyboard品質

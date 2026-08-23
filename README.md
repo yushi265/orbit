@@ -3,7 +3,30 @@
 Linearライクな個人用プロジェクト管理アプリです。要件定義は
 [`docs/requirements/index.md`](./docs/requirements/index.md) にまとめています。
 
-現在は要件定義と AI-DLC 開発ハーネスの導入段階です。アプリ本体はこれから実装します。
+MVPの主要なIssue / Cycle / Project / View / Search / Inbox / Settings / Background Runと、TanStack Start + Cloudflare Workersの実行基盤を実装しています。
+
+## MVPを動かす
+
+依存関係を導入して開発サーバーを起動します。
+
+```bash
+pnpm install
+pnpm dev
+```
+
+ローカル開発では `DEV_OWNER_USER_ID`（既定値 `dev-owner`）を使った明示的な開発Ownerへフォールバックします。Cloudflare Access環境では `APP_ENV=production`、`OWNER_USER_ID`、`OWNER_EMAIL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD` をWorker Secret / Environmentへ設定してください。JWTは `jose` とAccess JWKSで署名・issuer・audience・emailを検証し、失敗時はfail-closedになります。
+
+MVPのローカルデータはWorkerの開発Storeで保持されます。D1用の正規化Schemaと初期Migration、Owner / Issue Repositoryの基盤は `src/db/` と `drizzle/` に含まれています。本番D1へ適用する前に `wrangler.jsonc` のプレースホルダー `database_id` を対象D1のIDへ置き換え、`pnpm db:migrate` 相当の運用手順を環境側で確定してください。
+
+品質ゲート:
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm lint
+pnpm format:check
+pnpm build
+```
 
 ## 想定スタック
 

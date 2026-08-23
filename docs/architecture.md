@@ -1,7 +1,6 @@
 # アーキテクチャ概要
 
-これは `orbit` の要件定義に基づく**実装予定のアーキテクチャ**である。現在はアプリ本体が未実装のため、
-実装中に変更した場合はこの文書と要件定義の該当文書（入口: [`requirements/index.md`](./requirements/index.md)）を同じ変更で更新する。
+これは `orbit` の要件定義に基づくMVPアーキテクチャである。主要な実装は `src/` に配置し、Previewで実D1へ接続する際に変更した場合はこの文書と要件定義の該当文書（入口: [`requirements/index.md`](./requirements/index.md)）を同じ変更で更新する。
 
 ## 全体像
 

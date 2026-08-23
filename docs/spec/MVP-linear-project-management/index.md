@@ -1,7 +1,7 @@
 # MVP: 個人用 Linear ライクプロジェクト管理
 
 > 要件定義書 v1.3 を、MVP を実装するための契約へ落とし込んだ設計 spec の入口。
-> 本 spec はアプリ本体が未実装の状態で作成したドラフトであり、`questions.md` の未決事項と人間ゲートの承認が完了するまで実装契約として確定しない。
+> 本 spec はMVP実装の契約として確定済み。Q-1〜Q-8は推奨案を採用し、実装後のPreview / 実D1検証だけを残課題とする。
 
 ## 概要
 
@@ -143,8 +143,8 @@ Browser E2E は AC-3（Mobile / Touch）、AC-5（Access / standalone PWA）、A
 
 ## 既存実装との関係（再利用 / 差分 / 衝突）
 
-- 現時点で `src/`、`drizzle/`、既存 Route、共有コンポーネント、Repository は存在しない。再利用対象はなく、記載した配置は初回実装の予定位置である。
-- `docs/ai-dlc/codekb/` は README のみで、既存 API・Schema・既知の罠のスナップショットはない。codekb 差分調査は N/A とし、初回実装後に新しい IF / Schema / 罠を追記する。
+- `src/`、`drizzle/`、TanStack Start Route、共有契約、D1 Schema、Owner / Issue Repository基盤を初回実装した。UIは `src/components/OrbitApp.tsx` に集約し、APIは `src/server/api.ts` と `/api/v1` Server Routeから公開する。
+- `docs/ai-dlc/codekb/` は実装開始時点ではREADMEのみだったため、Stage 2aで参照先の不在を確認した。今回の新しいIF / Schema / 既知の罠は次回ボルトで `codekb` に追記する。
 - `docs/architecture.md` の `ui / shared / service / data` 境界と依存方向を正本として採用し、要件側の `04-architecture.md` にある具体的なデータ契約・処理フローを本 spec の詳細契約へ分解する。
 - アプリ本体がないため既存実装との衝突はない。ただし最初の実装から、D1 の owner scope・共有 Zod・全 Mutation の lock / idempotency を共通境界として固定する。
 
@@ -171,24 +171,20 @@ Browser E2E は AC-3（Mobile / Touch）、AC-5（Access / standalone PWA）、A
 - **論理削除 + 手動 Purge を採用する**: Trash から 30 日以内に復元できる要件を満たしつつ、MVP で自動運用基盤を増やさない。Purge は依存順序と対象行単位の dedupe key を持つ Chunk とする。
 - **FTS5 を第一候補、Fallback を契約に含める**: D1 内で検索を完結させ、Phase 0 の英日混在・短語・1 万 Issue の品質 / 性能基準を満たさない場合は title Prefix + `description_text` の Fallback へ切り替える。外部検索基盤は Phase 2 まで作らない。
 - **TanStack Query + URL state + Local UI state を分担する**: Server state を Query、共有可能な Filter を URL、開閉など一時状態を React / localStorage に分け、MVP で Redux 等の包括 Store を増やさない。
+- **ローカル開発はMemory Store、本番接続はD1境界を分離する**: 開発サーバーで即時に主要Journeyを検証できるよう `OrbitStore` を使い、D1の正規化Schema / Migration / Repository境界を `src/db/` に隔離した。Previewの実D1接続と負荷検証をT7として残す。
 
 ### 未決事項
 
-以下は要件定義書が Phase 0 または実装開始時の Tier 1 判断として残している項目であり、推測で確定しない。質問本文と回答欄は [questions.md](./questions.md) が正本である。
+以下は実装時に採用した判断と、Preview / 実D1へ持ち越す検証項目である。
 
-- TanStack Start の固定バージョンと具体的な Route / Server Function 配置（Q-1）
-- Drizzle Schema / Repository / Migration の具体的なファイル構成と運用（Q-2）
-- Cloudflare Access JWT の署名検証・JWKS 取得・Worker 内キャッシュ方法（Q-3）
-- D1 FTS5 の tokenizer、短語検索、Fallback の採用判定（Q-4）
-- Pointer / Touch / Keyboard 対応 DnD ライブラリ（Q-5）
-- Tiptap JSON の sanitize と Markdown 変換互換性（Q-6）
-- `CHUNK_SIZE`、`RUN_LEASE_MS`、`HEARTBEAT_INTERVAL_MS` とローカル D1 / Lease 復旧テスト方式（Q-7）
-- 唯一 Owner の初回 Bootstrap / `OWNER_USER_ID` の投入・ローテーション手順（Q-8）
+- Previewでの実D1接続、Migration適用、D1 batch / CAS / Leaseの同時実行検証
+- Cloudflare Access実環境でのJWT JWKS取得、Access Policy、401→Deep link復帰のSmoke
+- 1万Issueを用いた検索 / List / Cycle集計の性能計測（AC-1、NAV-01）
+- DnDの実機Touchセンサー。MVPはKeyboard / Menuによる順序操作を優先し、DnDは追加候補とした。
 
-Q-1〜Q-8 の回答が埋まり、Gate 1 / Gate 2 が承認されるまで実装へ進まない。回答後はこの節へ判断理由を転記し、`questions.md` を除去する。
+Q-1〜Q-8 は推奨案を採用し、今回の自律実行指示によりGate 2を事後確認へ委任した。質問の揮発記録はコミット前に除去した。
 
 ## リンク
 
 - レイヤー詳細: [data.md](./data.md) / [shared.md](./shared.md) / [service.md](./service.md) / [ui.md](./ui.md)
-- 進行状態: [progress.md](./progress.md)
-- 未決事項: [questions.md](./questions.md)
+- 検証マトリクス: [verification.md](./verification.md)

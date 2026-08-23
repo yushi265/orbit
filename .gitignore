@@ -1,6 +1,7 @@
 # 依存
 node_modules/
 .pnpm-store/
+.wrangler/
 
 # ビルド成果物
 *.tsbuildinfo

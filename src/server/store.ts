@@ -1,0 +1,1318 @@
+import {
+  BackgroundRun,
+  BootstrapPayload,
+  Cycle,
+  CycleSettings,
+  Issue,
+  IssueQuery,
+  Notification,
+  Preferences,
+  Project,
+  ProjectStatus,
+  PublicRunSummary,
+  SavedView,
+  User,
+  WorkflowState,
+  ActivityEvent,
+  MutationReceipt,
+  OutboxEvent,
+  RunStep,
+  RunStatus,
+  priorities,
+  runSteps,
+} from "./model";
+import { conflict, locked, notFound, validationError } from "./errors";
+import { canonicalMutationJson } from "../shared/canonical-json";
+
+type Lock = {
+  userId: string;
+  runId: string | null;
+  token: string | null;
+  status: "idle" | "running";
+  leaseExpiresAt: number | null;
+};
+
+type IssuePatch = Partial<
+  Pick<
+    Issue,
+    | "title"
+    | "description"
+    | "statusId"
+    | "priority"
+    | "estimate"
+    | "dueAt"
+    | "projectId"
+    | "cycleId"
+    | "parentId"
+    | "labelIds"
+  >
+>;
+
+export interface CreateIssueInput {
+  idempotencyKey: string;
+  title: string;
+  description?: string;
+  statusId?: string;
+  priority?: Issue["priority"];
+  estimate?: Issue["estimate"];
+  dueAt?: number | null;
+  projectId?: string | null;
+  cycleId?: string | null;
+  parentId?: string | null;
+  labelIds?: string[];
+}
+
+export interface UpdateIssueInput {
+  id: string;
+  idempotencyKey: string;
+  version: number;
+  patch: IssuePatch;
+}
+
+export interface CreateProjectInput {
+  idempotencyKey: string;
+  name: string;
+  description?: string;
+  statusId?: string;
+  priority?: Project["priority"];
+  color?: string;
+  icon?: string;
+  startAt?: number | null;
+  targetAt?: number | null;
+}
+
+export interface UpdateProjectInput {
+  id: string;
+  idempotencyKey: string;
+  patch: Partial<Omit<CreateProjectInput, "idempotencyKey">>;
+}
+
+export interface CreateViewInput {
+  idempotencyKey: string;
+  name: string;
+  query: IssueQuery;
+  layout?: Record<string, boolean>;
+}
+
+export interface MaintenanceRunInput {
+  kind: "maintenance";
+  idempotencyKey: string;
+}
+
+export interface ContinueRunInput {
+  idempotencyKey: string;
+  expected_cursor: string | null;
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+const THIRTY_DAYS = 30 * DAY;
+const RUN_LEASE_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 5_000;
+const CHUNK_SIZE = 25;
+export const backgroundRuntimeConfig = { CHUNK_SIZE, RUN_LEASE_MS, HEARTBEAT_INTERVAL_MS } as const;
+
+export function nowMs(): number {
+  return Date.now();
+}
+
+export function createId(prefix = "id"): string {
+  const uuid =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Math.random().toString(36).slice(2)}-${Date.now()}`;
+  return `${prefix}_${uuid}`;
+}
+
+export function requestHash(operation: string, input: unknown): string {
+  return canonicalMutationJson(operation, input);
+}
+
+function validateKey(key: string): void {
+  if (typeof key !== "string" || key.trim().length < 1 || key.length > 200) {
+    throw validationError({ idempotencyKey: ["1〜200文字のキーを指定してください。"] });
+  }
+}
+
+function validateTitle(title: string): void {
+  const length = [...title].length;
+  if (length < 1 || length > 255)
+    throw validationError({ title: ["タイトルは1〜255文字で入力してください。"] });
+}
+
+function defaultQuery(): IssueQuery {
+  return {
+    mode: "list",
+    filter: {},
+    showEmptyGroups: false,
+    order: "manual",
+    layout: {
+      priority: true,
+      status: true,
+      project: true,
+      cycle: true,
+      estimate: true,
+      dueAt: true,
+    },
+    limit: 100,
+  };
+}
+
+export class OrbitStore {
+  readonly users = new Map<string, User>();
+  readonly preferences = new Map<string, Preferences>();
+  readonly workflowStates = new Map<string, WorkflowState>();
+  readonly projectStatuses = new Map<string, ProjectStatus>();
+  readonly projects = new Map<string, Project>();
+  readonly cycles = new Map<string, Cycle>();
+  readonly cycleSettings = new Map<string, CycleSettings>();
+  readonly issues = new Map<string, Issue>();
+  readonly views = new Map<string, SavedView>();
+  readonly notifications = new Map<string, Notification>();
+  readonly activities: ActivityEvent[] = [];
+  readonly outbox: OutboxEvent[] = [];
+  readonly receipts = new Map<string, MutationReceipt>();
+  readonly runs = new Map<string, BackgroundRun>();
+  readonly locks = new Map<string, Lock>();
+  readonly cycleHistory: Array<{
+    id: string;
+    userId: string;
+    issueId: string;
+    fromCycleId: string;
+    toCycleId: string;
+    movedAt: number;
+  }> = [];
+  private seededUsers = new Set<string>();
+
+  constructor(private readonly clock: () => number = nowMs) {}
+
+  ensureOwner(userId: string, email = "you@orbit.local", seedDemo = false): User {
+    const existing = this.users.get(userId);
+    if (existing) return existing;
+    const now = this.clock();
+    const user: User = { id: userId, name: "Orbit User", email, avatarUrl: null, createdAt: now };
+    this.users.set(userId, user);
+    this.preferences.set(userId, {
+      userId,
+      timezone: "Asia/Tokyo",
+      locale: "ja",
+      theme: "system",
+      estimateEnabled: true,
+      issueCounter: 0,
+    });
+    const workflowDefaults = [
+      ["Backlog", "backlog", "#a0a6b0"],
+      ["Todo", "unstarted", "#8b93a1"],
+      ["In progress", "started", "#4f7cff"],
+      ["Done", "completed", "#26a269"],
+      ["Canceled", "canceled", "#d55e73"],
+    ] as const;
+    workflowDefaults.forEach(([name, category, color], position) => {
+      const state: WorkflowState = {
+        id: createId("status"),
+        userId,
+        name,
+        category,
+        color,
+        position,
+        isDefault: position === 1,
+      };
+      this.workflowStates.set(state.id, state);
+    });
+    const projectDefaults = [
+      ["Backlog", "backlog", "#a0a6b0"],
+      ["Planned", "planned", "#8b93a1"],
+      ["In progress", "in_progress", "#4f7cff"],
+      ["Completed", "completed", "#26a269"],
+      ["Canceled", "canceled", "#d55e73"],
+    ] as const;
+    projectDefaults.forEach(([name, category, color], position) => {
+      const status: ProjectStatus = {
+        id: createId("project-status"),
+        userId,
+        name,
+        category,
+        color,
+        position,
+        isDefault: position === 1,
+      };
+      this.projectStatuses.set(status.id, status);
+    });
+    this.cycleSettings.set(userId, {
+      userId,
+      enabled: true,
+      durationWeeks: 2,
+      cooldownWeeks: 0,
+      startWeekday: 1,
+      futureCount: 3,
+    });
+    this.locks.set(userId, {
+      userId,
+      runId: null,
+      token: null,
+      status: "idle",
+      leaseExpiresAt: null,
+    });
+    if (seedDemo && !this.seededUsers.has(userId)) this.seedDemo(userId);
+    this.seededUsers.add(userId);
+    return user;
+  }
+
+  private seedDemo(userId: string): void {
+    const now = this.clock();
+    const statuses = this.ownedWorkflowStates(userId);
+    const activeStatus = statuses.find((item) => item.category === "started") ?? statuses[0];
+    const todoStatus = statuses.find((item) => item.category === "unstarted") ?? statuses[0];
+    const doneStatus = statuses.find((item) => item.category === "completed") ?? statuses[0];
+    const projectStatus =
+      this.ownedProjectStatuses(userId).find((item) => item.category === "in_progress") ??
+      this.ownedProjectStatuses(userId)[0];
+    const project: Project = {
+      id: createId("project"),
+      userId,
+      name: "Orbit MVP",
+      statusId: projectStatus.id,
+      priority: "high",
+      color: "#ff6b57",
+      icon: "◈",
+      description: "毎日の作業を小さく進めるためのプロジェクト。",
+      startAt: now - 14 * DAY,
+      targetAt: now + 30 * DAY,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: now - 14 * DAY,
+      updatedAt: now,
+    };
+    this.projects.set(project.id, project);
+    const cycle: Cycle = {
+      id: createId("cycle"),
+      userId,
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "今週の集中テーマ",
+      startsAt: now - 4 * DAY,
+      endsAt: now + 10 * DAY,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    };
+    this.cycles.set(cycle.id, cycle);
+    const titles = [
+      ["データモデルを確認する", activeStatus.id, "high", 3],
+      ["Mobileの一覧を磨く", todoStatus.id, "medium", 2],
+      ["Background Runの復旧導線", todoStatus.id, "urgent", 5],
+      ["READMEを更新する", doneStatus.id, "low", 1],
+    ] as const;
+    titles.forEach(([title, statusId, priority, estimate], index) => {
+      this.createIssue(
+        userId,
+        {
+          idempotencyKey: `seed-${index}-${userId}`,
+          title,
+          statusId,
+          priority,
+          estimate,
+          projectId: project.id,
+          cycleId: cycle.id,
+        },
+        true,
+      );
+    });
+  }
+
+  ownedWorkflowStates(userId: string): WorkflowState[] {
+    return [...this.workflowStates.values()]
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => a.position - b.position);
+  }
+
+  ownedProjectStatuses(userId: string): ProjectStatus[] {
+    return [...this.projectStatuses.values()]
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => a.position - b.position);
+  }
+
+  private assertOwner(userId: string): void {
+    if (!this.users.has(userId)) this.ensureOwner(userId);
+  }
+
+  private assertUnlocked(userId: string, runId?: string): void {
+    const lock = this.locks.get(userId);
+    if (
+      lock?.status === "running" &&
+      lock.runId !== runId &&
+      (lock.leaseExpiresAt ?? 0) > this.clock()
+    )
+      throw locked();
+  }
+
+  private recordActivity(
+    userId: string,
+    entityType: string,
+    entityId: string,
+    action: string,
+    mutationKey: string,
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+    actorType: ActivityEvent["actorType"] = "user",
+  ): void {
+    if (this.activities.some((item) => item.userId === userId && item.mutationKey === mutationKey))
+      return;
+    this.activities.push({
+      id: createId("activity"),
+      userId,
+      entityType,
+      entityId,
+      action,
+      actorType,
+      mutationKey,
+      before,
+      after,
+      createdAt: this.clock(),
+    });
+  }
+
+  private recordOutbox(
+    userId: string,
+    type: string,
+    dedupeKey: string,
+    payload: Record<string, unknown>,
+  ): void {
+    if (this.outbox.some((item) => item.userId === userId && item.dedupeKey === dedupeKey)) return;
+    this.outbox.push({
+      id: createId("outbox"),
+      userId,
+      type,
+      dedupeKey,
+      payload,
+      status: "pending",
+      attemptCount: 0,
+      createdAt: this.clock(),
+    });
+  }
+
+  private recordReceipt(
+    userId: string,
+    operation: string,
+    idempotencyKey: string,
+    input: unknown,
+    response: unknown,
+  ): void {
+    this.receipts.set(`${userId}:${idempotencyKey}`, {
+      userId,
+      operation,
+      idempotencyKey,
+      requestHash: requestHash(operation, input),
+      response,
+      createdAt: this.clock(),
+      expiresAt: this.clock() + THIRTY_DAYS,
+    });
+  }
+
+  private checkReceipt<T>(
+    userId: string,
+    operation: string,
+    idempotencyKey: string,
+    input: unknown,
+  ): T | null {
+    validateKey(idempotencyKey);
+    const existing = this.receipts.get(`${userId}:${idempotencyKey}`);
+    if (!existing) return null;
+    const hash = requestHash(operation, input);
+    if (hash !== existing.requestHash)
+      throw conflict("IDEMPOTENCY_KEY_REUSED", "同じキーで異なる内容は送信できません。");
+    return existing.response as T;
+  }
+
+  createIssue(userId: string, input: CreateIssueInput, bypassLock = false): Issue {
+    this.assertOwner(userId);
+    if (!bypassLock) this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Issue>(userId, "issue.create", input.idempotencyKey, input);
+    if (existing) return existing;
+    validateTitle(input.title);
+    const preferences = this.preferences.get(userId)!;
+    const status = input.statusId
+      ? this.workflowStates.get(input.statusId)
+      : this.ownedWorkflowStates(userId).find((item) => item.isDefault);
+    if (!status || status.userId !== userId) throw notFound();
+    const project = input.projectId ? this.projects.get(input.projectId) : null;
+    if (project && (project.userId !== userId || project.deletedAt)) throw notFound();
+    const cycle = input.cycleId ? this.cycles.get(input.cycleId) : null;
+    if (cycle && cycle.userId !== userId) throw notFound();
+    const parent = input.parentId ? this.issues.get(input.parentId) : null;
+    if (parent && parent.userId !== userId) throw notFound();
+    if (input.priority && !priorities.includes(input.priority))
+      throw validationError({ priority: ["優先度が不正です。"] });
+    if (
+      input.estimate !== undefined &&
+      input.estimate !== null &&
+      ![1, 2, 3, 5, 8].includes(input.estimate)
+    )
+      throw validationError({ estimate: ["見積は1 / 2 / 3 / 5 / 8から選択してください。"] });
+    const now = this.clock();
+    const number = preferences.issueCounter + 1;
+    const issue: Issue = {
+      id: createId("issue"),
+      userId,
+      number,
+      identifier: `TASK-${number}`,
+      title: input.title,
+      description: input.description ?? "",
+      statusId: status.id,
+      priority: input.priority ?? "no_priority",
+      estimate: input.estimate ?? null,
+      dueAt: input.dueAt ?? null,
+      projectId: input.projectId ?? null,
+      cycleId: input.cycleId ?? null,
+      parentId: input.parentId ?? null,
+      labelIds: input.labelIds ?? [],
+      position: [...this.issues.values()].filter((item) => item.userId === userId).length,
+      version: 1,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    preferences.issueCounter = number;
+    this.issues.set(issue.id, issue);
+    this.recordActivity(userId, "issue", issue.id, "created", input.idempotencyKey, null, {
+      identifier: issue.identifier,
+      title: issue.title,
+    });
+    this.recordOutbox(userId, "issue.created", `issue.created:${issue.id}`, { issueId: issue.id });
+    this.recordReceipt(userId, "issue.create", input.idempotencyKey, input, issue);
+    return issue;
+  }
+
+  getIssue(userId: string, issueId: string): Issue {
+    const issue = this.issues.get(issueId);
+    if (!issue || issue.userId !== userId || issue.deletedAt) throw notFound();
+    return issue;
+  }
+
+  listIssues(userId: string, query: Partial<IssueQuery> = {}): Issue[] {
+    const defaults = defaultQuery();
+    const resolved: IssueQuery = {
+      ...defaults,
+      ...query,
+      filter: { ...defaults.filter, ...query.filter },
+      layout: { ...defaults.layout, ...query.layout },
+    };
+    let items = [...this.issues.values()].filter(
+      (item) => item.userId === userId && !item.deletedAt && !item.archivedAt,
+    );
+    const filter = resolved.filter;
+    if (filter.text?.trim()) {
+      const needle = filter.text.trim().toLocaleLowerCase();
+      items = items.filter((item) =>
+        `${item.identifier} ${item.title} ${item.description}`.toLocaleLowerCase().includes(needle),
+      );
+    }
+    if (filter.statusIds?.length)
+      items = items.filter((item) => filter.statusIds!.includes(item.statusId));
+    if (filter.priorities?.length)
+      items = items.filter((item) => filter.priorities!.includes(item.priority));
+    if (filter.projectIds?.length)
+      items = items.filter((item) => item.projectId && filter.projectIds!.includes(item.projectId));
+    if (filter.cycleIds?.length)
+      items = items.filter((item) => item.cycleId && filter.cycleIds!.includes(item.cycleId));
+    if (filter.labelIds?.length)
+      items = items.filter((item) =>
+        filter.labelIds!.every((labelId) => item.labelIds.includes(labelId)),
+      );
+    if (filter.created)
+      items = items.filter(
+        (item) =>
+          (filter.created?.from === undefined || item.createdAt >= filter.created.from) &&
+          (filter.created?.to === undefined || item.createdAt <= filter.created.to),
+      );
+    if (filter.due) {
+      const now = new Date(this.clock());
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const tomorrow = today + DAY;
+      items = items.filter((item) =>
+        filter.due === "none"
+          ? item.dueAt === null
+          : filter.due === "overdue"
+            ? item.dueAt !== null && item.dueAt < today
+            : filter.due === "today"
+              ? item.dueAt !== null && item.dueAt >= today && item.dueAt < tomorrow
+              : item.dueAt !== null && item.dueAt >= tomorrow,
+      );
+    }
+    const priorityOrder = new Map(priorities.map((priority, index) => [priority, index]));
+    items.sort((a, b) => {
+      if (resolved.order === "priority")
+        return (
+          priorityOrder.get(a.priority)! - priorityOrder.get(b.priority)! ||
+          b.updatedAt - a.updatedAt
+        );
+      if (resolved.order === "updated") return b.updatedAt - a.updatedAt;
+      if (resolved.order === "created") return b.createdAt - a.createdAt;
+      if (resolved.order === "due_at")
+        return (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER);
+      if (resolved.order === "estimate") return (b.estimate ?? 0) - (a.estimate ?? 0);
+      return a.position - b.position;
+    });
+    return items.slice(0, Math.min(Math.max(resolved.limit, 1), 500));
+  }
+
+  updateIssue(userId: string, input: UpdateIssueInput, runId?: string): Issue {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId, runId);
+    const existing = this.checkReceipt<Issue>(userId, "issue.update", input.idempotencyKey, input);
+    if (existing) return existing;
+    const issue = this.getIssue(userId, input.id);
+    if (issue.version !== input.version)
+      throw conflict("ISSUE_VERSION_CONFLICT", "Issueが別の場所で更新されています。");
+    const patch = input.patch;
+    if (patch.title !== undefined) validateTitle(patch.title);
+    if (patch.statusId) {
+      const status = this.workflowStates.get(patch.statusId);
+      if (!status || status.userId !== userId) throw notFound();
+    }
+    if (patch.projectId) {
+      const project = this.projects.get(patch.projectId);
+      if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    }
+    if (patch.cycleId) {
+      const cycle = this.cycles.get(patch.cycleId);
+      if (!cycle || cycle.userId !== userId) throw notFound();
+    }
+    const before = { ...issue };
+    Object.assign(issue, patch);
+    issue.version += 1;
+    issue.updatedAt = this.clock();
+    this.recordActivity(
+      userId,
+      "issue",
+      issue.id,
+      "updated",
+      input.idempotencyKey,
+      { version: before.version, statusId: before.statusId, priority: before.priority },
+      { version: issue.version, statusId: issue.statusId, priority: issue.priority },
+    );
+    this.recordOutbox(userId, "issue.updated", `issue.updated:${issue.id}:${issue.version}`, {
+      issueId: issue.id,
+      version: issue.version,
+    });
+    this.recordReceipt(userId, "issue.update", input.idempotencyKey, input, issue);
+    return issue;
+  }
+
+  archiveIssue(userId: string, issueId: string, idempotencyKey: string): Issue {
+    this.assertUnlocked(userId);
+    const existing = this.getIssue(userId, issueId);
+    const receipt = this.checkReceipt<Issue>(userId, "issue.archive", idempotencyKey, { issueId });
+    if (receipt) return receipt;
+    existing.archivedAt = this.clock();
+    existing.updatedAt = this.clock();
+    existing.version += 1;
+    this.recordActivity(userId, "issue", issueId, "archived", idempotencyKey, null, {
+      archivedAt: existing.archivedAt,
+    });
+    this.recordReceipt(userId, "issue.archive", idempotencyKey, { issueId }, existing);
+    return existing;
+  }
+
+  restoreIssue(userId: string, issueId: string, idempotencyKey: string): Issue {
+    this.assertUnlocked(userId);
+    const issue = this.issues.get(issueId);
+    if (!issue || issue.userId !== userId) throw notFound();
+    const receipt = this.checkReceipt<Issue>(userId, "issue.restore", idempotencyKey, { issueId });
+    if (receipt) return receipt;
+    issue.archivedAt = null;
+    issue.deletedAt = null;
+    issue.updatedAt = this.clock();
+    issue.version += 1;
+    this.recordActivity(userId, "issue", issueId, "restored", idempotencyKey, null, {
+      archivedAt: null,
+      deletedAt: null,
+    });
+    this.recordReceipt(userId, "issue.restore", idempotencyKey, { issueId }, issue);
+    return issue;
+  }
+
+  trashIssue(userId: string, issueId: string, idempotencyKey: string): Issue {
+    this.assertUnlocked(userId);
+    const issue = this.getIssue(userId, issueId);
+    const receipt = this.checkReceipt<Issue>(userId, "issue.trash", idempotencyKey, { issueId });
+    if (receipt) return receipt;
+    issue.deletedAt = this.clock();
+    issue.updatedAt = this.clock();
+    issue.version += 1;
+    this.recordActivity(userId, "issue", issueId, "trashed", idempotencyKey, null, {
+      deletedAt: issue.deletedAt,
+    });
+    this.recordReceipt(userId, "issue.trash", idempotencyKey, { issueId }, issue);
+    return issue;
+  }
+
+  createProject(userId: string, input: CreateProjectInput): Project {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Project>(
+      userId,
+      "project.create",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+    if (!input.name.trim() || input.name.length > 100)
+      throw validationError({ name: ["プロジェクト名は1〜100文字で入力してください。"] });
+    const status = input.statusId
+      ? this.projectStatuses.get(input.statusId)
+      : this.ownedProjectStatuses(userId).find((item) => item.isDefault);
+    if (!status || status.userId !== userId) throw notFound();
+    const now = this.clock();
+    const project: Project = {
+      id: createId("project"),
+      userId,
+      name: input.name.trim(),
+      statusId: status.id,
+      priority: input.priority ?? "no_priority",
+      color: input.color ?? "#6c7a94",
+      icon: input.icon ?? "◈",
+      description: input.description ?? "",
+      startAt: input.startAt ?? null,
+      targetAt: input.targetAt ?? null,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.projects.set(project.id, project);
+    this.recordActivity(userId, "project", project.id, "created", input.idempotencyKey, null, {
+      name: project.name,
+    });
+    this.recordOutbox(userId, "project.created", `project.created:${project.id}`, {
+      projectId: project.id,
+    });
+    this.recordReceipt(userId, "project.create", input.idempotencyKey, input, project);
+    return project;
+  }
+
+  listProjects(userId: string): Project[] {
+    return [...this.projects.values()]
+      .filter((item) => item.userId === userId && !item.deletedAt)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  updateProject(userId: string, input: UpdateProjectInput): Project {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Project>(
+      userId,
+      "project.update",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+    const project = this.projects.get(input.id);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    if (
+      input.patch.name !== undefined &&
+      (!input.patch.name.trim() || input.patch.name.length > 100)
+    )
+      throw validationError({ name: ["プロジェクト名は1〜100文字で入力してください。"] });
+    if (input.patch.statusId) {
+      const status = this.projectStatuses.get(input.patch.statusId);
+      if (!status || status.userId !== userId) throw notFound();
+    }
+    const before = { ...project };
+    const safePatch = Object.fromEntries(
+      Object.entries(input.patch).filter(([key]) =>
+        [
+          "name",
+          "description",
+          "statusId",
+          "priority",
+          "color",
+          "icon",
+          "startAt",
+          "targetAt",
+        ].includes(key),
+      ),
+    );
+    Object.assign(project, safePatch, { updatedAt: this.clock() });
+    this.recordActivity(
+      userId,
+      "project",
+      project.id,
+      "updated",
+      input.idempotencyKey,
+      { name: before.name },
+      { name: project.name },
+    );
+    this.recordReceipt(userId, "project.update", input.idempotencyKey, input, project);
+    return project;
+  }
+
+  archiveProject(userId: string, id: string, idempotencyKey: string): Project {
+    this.assertUnlocked(userId);
+    const project = this.projects.get(id);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    const existing = this.checkReceipt<Project>(userId, "project.archive", idempotencyKey, { id });
+    if (existing) return existing;
+    project.archivedAt = this.clock();
+    project.updatedAt = this.clock();
+    this.recordActivity(userId, "project", id, "archived", idempotencyKey, null, {
+      archivedAt: project.archivedAt,
+    });
+    this.recordReceipt(userId, "project.archive", idempotencyKey, { id }, project);
+    return project;
+  }
+
+  listCycles(userId: string): Cycle[] {
+    return [...this.cycles.values()]
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => a.startsAt - b.startsAt);
+  }
+
+  closeCycle(userId: string, cycleId: string, idempotencyKey: string, runId?: string): Cycle {
+    this.assertUnlocked(userId, runId);
+    validateKey(idempotencyKey);
+    const cycle = this.cycles.get(cycleId);
+    if (!cycle || cycle.userId !== userId) throw notFound();
+    if (cycle.status === "completed") return cycle;
+    const next =
+      this.listCycles(userId).find((item) => item.number === cycle.number + 1) ??
+      this.createNextCycle(userId, cycle);
+    cycle.status = "completed";
+    cycle.completedAt = this.clock();
+    const moveable = this.listIssues(userId, {
+      filter: { cycleIds: [cycle.id] },
+      limit: 500,
+    }).filter((issue) => {
+      const state = this.workflowStates.get(issue.statusId);
+      return state?.category === "unstarted" || state?.category === "started";
+    });
+    for (const issue of moveable) {
+      issue.cycleId = next.id;
+      issue.updatedAt = this.clock();
+      issue.version += 1;
+      if (
+        !this.cycleHistory.some(
+          (item) =>
+            item.issueId === issue.id &&
+            item.fromCycleId === cycle.id &&
+            item.toCycleId === next.id,
+        )
+      ) {
+        this.cycleHistory.push({
+          id: createId("history"),
+          userId,
+          issueId: issue.id,
+          fromCycleId: cycle.id,
+          toCycleId: next.id,
+          movedAt: this.clock(),
+        });
+      }
+    }
+    this.recordOutbox(userId, "cycle.completed", `cycle.completed:${cycle.id}`, {
+      cycleId: cycle.id,
+      moved: moveable.length,
+    });
+    return cycle;
+  }
+
+  private createNextCycle(userId: string, previous: Cycle): Cycle {
+    const settings = this.cycleSettings.get(userId)!;
+    const id = createId("cycle");
+    const cycle: Cycle = {
+      id,
+      userId,
+      number: previous.number + 1,
+      name: `Cycle ${previous.number + 1}`,
+      nameOverride: null,
+      description: "",
+      startsAt: previous.endsAt,
+      endsAt: previous.endsAt + settings.durationWeeks * 7 * DAY,
+      status: "upcoming",
+      completedAt: null,
+      scheduleOverridden: false,
+    };
+    this.cycles.set(id, cycle);
+    return cycle;
+  }
+
+  createView(userId: string, input: CreateViewInput): SavedView {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<SavedView>(
+      userId,
+      "view.create",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+    if (!input.name.trim() || input.name.length > 80)
+      throw validationError({ name: ["View名は1〜80文字で入力してください。"] });
+    const now = this.clock();
+    const view: SavedView = {
+      id: createId("view"),
+      userId,
+      name: input.name.trim(),
+      query: input.query,
+      layout: input.layout ?? input.query.layout,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.views.set(view.id, view);
+    this.recordReceipt(userId, "view.create", input.idempotencyKey, input, view);
+    return view;
+  }
+
+  listViews(userId: string): SavedView[] {
+    return [...this.views.values()]
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  deleteView(userId: string, id: string, idempotencyKey: string): void {
+    this.assertUnlocked(userId);
+    const view = this.views.get(id);
+    if (!view || view.userId !== userId) throw notFound();
+    const existing = this.checkReceipt<null>(userId, "view.delete", idempotencyKey, { id });
+    if (existing) return;
+    this.views.delete(id);
+    this.recordReceipt(userId, "view.delete", idempotencyKey, { id }, null);
+  }
+
+  listNotifications(userId: string): Notification[] {
+    return [...this.notifications.values()]
+      .filter((item) => item.userId === userId && !item.deletedAt)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  markNotification(
+    userId: string,
+    id: string,
+    read: boolean,
+    idempotencyKey: string,
+  ): Notification {
+    this.assertUnlocked(userId);
+    const notification = this.notifications.get(id);
+    if (!notification || notification.userId !== userId) throw notFound();
+    const existing = this.checkReceipt<Notification>(userId, "notification.read", idempotencyKey, {
+      id,
+      read,
+    });
+    if (existing) return existing;
+    notification.readAt = read ? this.clock() : null;
+    this.recordReceipt(userId, "notification.read", idempotencyKey, { id, read }, notification);
+    return notification;
+  }
+
+  search(userId: string, text: string): Issue[] {
+    return this.listIssues(userId, { filter: { text }, order: "updated", limit: 50 });
+  }
+
+  bootstrap(userId: string): BootstrapPayload {
+    this.assertOwner(userId);
+    const active = this.currentRun(userId);
+    return {
+      me: this.users.get(userId)!,
+      preferences: this.preferences.get(userId)!,
+      workflowStates: this.ownedWorkflowStates(userId),
+      projectStatuses: this.ownedProjectStatuses(userId),
+      issues: this.listIssues(userId),
+      projects: this.listProjects(userId),
+      cycles: this.listCycles(userId),
+      views: this.listViews(userId),
+      notifications: this.listNotifications(userId),
+      background: { run: active ? this.publicRun(active) : null },
+    };
+  }
+
+  updatePreferences(
+    userId: string,
+    patch: Partial<Pick<Preferences, "timezone" | "locale" | "theme" | "estimateEnabled">>,
+    idempotencyKey: string,
+  ): Preferences {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Preferences>(
+      userId,
+      "preferences.update",
+      idempotencyKey,
+      patch,
+    );
+    if (existing) return existing;
+    const preferences = this.preferences.get(userId);
+    if (!preferences) throw notFound();
+    if (patch.locale && !["ja", "en"].includes(patch.locale))
+      throw validationError({ locale: ["ja / en から選択してください。"] });
+    if (patch.theme && !["light", "dark", "system"].includes(patch.theme))
+      throw validationError({ theme: ["light / dark / systemから選択してください。"] });
+    const safePatch = Object.fromEntries(
+      Object.entries(patch).filter(([key]) =>
+        ["timezone", "locale", "theme", "estimateEnabled"].includes(key),
+      ),
+    );
+    Object.assign(preferences, safePatch);
+    this.recordReceipt(userId, "preferences.update", idempotencyKey, patch, preferences);
+    return preferences;
+  }
+
+  currentRun(userId: string): BackgroundRun | null {
+    this.expireRunIfNeeded(userId);
+    const eligible = [...this.runs.values()]
+      .filter(
+        (run) =>
+          run.user_id === userId && ["pending", "running", "paused", "failed"].includes(run.status),
+      )
+      .sort((a, b) => b.requested_at - a.requested_at);
+    return eligible[0] ?? null;
+  }
+
+  getRun(userId: string, runId: string): BackgroundRun {
+    this.expireRunIfNeeded(userId);
+    const run = this.runs.get(runId);
+    if (!run || run.user_id !== userId) throw notFound();
+    return run;
+  }
+
+  lockTokenFor(userId: string, runId: string): string {
+    this.expireRunIfNeeded(userId);
+    const lock = this.locks.get(userId);
+    if (
+      !lock ||
+      lock.status !== "running" ||
+      lock.runId !== runId ||
+      !lock.token ||
+      (lock.leaseExpiresAt ?? 0) <= this.clock()
+    )
+      throw locked("RunのLeaseが競合しています。");
+    return lock.token;
+  }
+
+  startRun(userId: string, input: MaintenanceRunInput): BackgroundRun {
+    this.assertOwner(userId);
+    validateKey(input.idempotencyKey);
+    if (input.kind !== "maintenance")
+      throw validationError({ kind: ["maintenanceのみ指定できます。"] });
+    const existing = [...this.runs.values()].find(
+      (run) => run.user_id === userId && run.idempotencyKey === input.idempotencyKey,
+    );
+    const hash = requestHash("background.create", { kind: input.kind });
+    if (existing) {
+      if (existing.requestHash !== hash)
+        throw conflict("IDEMPOTENCY_KEY_REUSED", "同じキーで異なる内容は送信できません。");
+      if (existing.status === "rejected")
+        throw conflict(
+          "BACKGROUND_RUN_REJECTED",
+          "このRunは競合により拒否済みです。新しいキーで再実行してください。",
+        );
+      return existing;
+    }
+    const now = this.clock();
+    const lock = this.locks.get(userId)!;
+    if (lock.status === "running" && (lock.leaseExpiresAt ?? 0) > now) {
+      const rejected: BackgroundRun = this.makeRun(userId, input, "rejected", now);
+      this.runs.set(rejected.run_id, rejected);
+      throw locked();
+    }
+    if (lock.leaseExpiresAt !== null && lock.leaseExpiresAt <= now) this.expireRunIfNeeded(userId);
+    const run = this.makeRun(userId, input, "running", now);
+    lock.status = "running";
+    lock.runId = run.run_id;
+    lock.token = createId("lock");
+    lock.leaseExpiresAt = now + RUN_LEASE_MS;
+    run.started_at = now;
+    run.heartbeat_at = now;
+    run.leaseExpiresAt = lock.leaseExpiresAt;
+    run.stepStatuses.cycle_transition = "running";
+    run.progress.current_step = "cycle_transition";
+    this.runs.set(run.run_id, run);
+    return run;
+  }
+
+  private makeRun(
+    userId: string,
+    input: MaintenanceRunInput,
+    status: RunStatus,
+    now: number,
+  ): BackgroundRun {
+    return {
+      run_id: createId("run"),
+      user_id: userId,
+      kind: "maintenance",
+      status,
+      progress: {
+        current_step: status === "running" ? "cycle_transition" : null,
+        step_index: 0,
+        step_count: 3,
+        cursor: null,
+        processed: 0,
+        total: null,
+        percent: status === "rejected" ? 0 : 0,
+      },
+      error:
+        status === "rejected"
+          ? {
+              code: "BACKGROUND_RUN_REJECTED",
+              message: "他の処理が実行中です。",
+              failed_step: null,
+              retryable: false,
+              request_id: createId("request"),
+            }
+          : null,
+      requested_at: now,
+      started_at: status === "running" ? now : null,
+      heartbeat_at: status === "running" ? now : null,
+      finished_at: status === "rejected" ? now : null,
+      resume_count: 0,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: requestHash("background.create", { kind: input.kind }),
+      leaseExpiresAt: status === "running" ? now + RUN_LEASE_MS : null,
+      stepIndex: 0,
+      stepStatuses: {
+        cycle_transition:
+          status === "running" ? "running" : status === "rejected" ? "skipped" : "pending",
+        purge: status === "rejected" ? "skipped" : "pending",
+        outbox_retry: status === "rejected" ? "skipped" : "pending",
+      },
+      stepCursors: { cycle_transition: null, purge: null, outbox_retry: null },
+    };
+  }
+
+  continueRun(
+    userId: string,
+    runId: string,
+    input: ContinueRunInput,
+    lockToken?: string,
+  ): {
+    run: PublicRunSummary;
+    step: RunStep | null;
+    cursor: string | null;
+    processed_count: number;
+    next: "continue" | "resume" | "none";
+  } {
+    const run = this.getRun(userId, runId);
+    if (run.status === "paused" || run.status === "failed")
+      throw conflict("RUN_REQUIRES_RESUME", "このRunは再開操作が必要です。");
+    if (run.status === "rejected")
+      throw conflict("BACKGROUND_RUN_REJECTED", "このRunは拒否済みです。");
+    if (run.status === "succeeded")
+      return {
+        run: this.publicRun(run),
+        step: null,
+        cursor: null,
+        processed_count: 0,
+        next: "none",
+      };
+    const lock = this.locks.get(userId)!;
+    if (
+      lock.runId !== runId ||
+      lock.status !== "running" ||
+      !lock.token ||
+      lock.token !== (lockToken ?? lock.token) ||
+      (lock.leaseExpiresAt ?? 0) <= this.clock()
+    ) {
+      this.expireRunIfNeeded(userId);
+      throw locked("RunのLeaseが競合しています。");
+    }
+    const step = runSteps[run.stepIndex];
+    const currentCursor = run.stepCursors[step];
+    if (input.expected_cursor !== currentCursor)
+      return {
+        run: this.publicRun(run),
+        step,
+        cursor: currentCursor,
+        processed_count: 0,
+        next: "continue",
+      };
+    run.stepStatuses[step] = "running";
+    let processed = 0;
+    try {
+      if (step === "cycle_transition") processed = this.runCycleTransition(userId, runId);
+      if (step === "purge") processed = this.runPurge(userId);
+      if (step === "outbox_retry") processed = this.runOutboxRetry(userId);
+      run.progress.processed += processed;
+      run.progress.cursor = `${step}:${run.progress.processed}`;
+      run.stepCursors[step] = run.progress.cursor;
+      run.stepStatuses[step] = "succeeded";
+      run.stepIndex += 1;
+      run.progress.step_index = run.stepIndex;
+      run.progress.current_step = run.stepIndex < runSteps.length ? runSteps[run.stepIndex] : null;
+      run.progress.percent = Math.round((run.stepIndex / runSteps.length) * 100);
+      if (run.stepIndex < runSteps.length) {
+        const nextStep = runSteps[run.stepIndex];
+        run.stepStatuses[nextStep] = "running";
+        run.stepCursors[nextStep] = run.progress.cursor;
+      }
+      run.heartbeat_at = this.clock();
+      run.leaseExpiresAt = run.heartbeat_at + RUN_LEASE_MS;
+      lock.leaseExpiresAt = run.leaseExpiresAt;
+      if (run.stepIndex >= runSteps.length) {
+        run.status = "succeeded";
+        run.finished_at = this.clock();
+        run.heartbeat_at = this.clock();
+        lock.status = "idle";
+        lock.runId = null;
+        lock.token = null;
+        lock.leaseExpiresAt = null;
+      }
+    } catch {
+      run.status = "failed";
+      run.error = {
+        code: "STEP_FAILED",
+        message: "処理中にエラーが発生しました。",
+        failed_step: step,
+        retryable: true,
+        request_id: createId("request"),
+      };
+      run.stepStatuses[step] = "failed";
+      runSteps.slice(run.stepIndex + 1).forEach((name) => {
+        run.stepStatuses[name] = "skipped";
+      });
+      run.finished_at = this.clock();
+      lock.status = "idle";
+      lock.runId = null;
+      lock.token = null;
+      lock.leaseExpiresAt = null;
+    }
+    return {
+      run: this.publicRun(run),
+      step: run.progress.current_step,
+      cursor: run.progress.cursor,
+      processed_count: processed,
+      next: run.status === "succeeded" ? "none" : run.status === "failed" ? "resume" : "continue",
+    };
+  }
+
+  resumeRun(userId: string, runId: string): PublicRunSummary {
+    const run = this.getRun(userId, runId);
+    if (!["paused", "failed"].includes(run.status)) return this.publicRun(run);
+    const now = this.clock();
+    const lock = this.locks.get(userId)!;
+    if (lock.status === "running" && (lock.leaseExpiresAt ?? 0) > now) throw locked();
+    if (run.status === "failed") {
+      const failedStep = runSteps.findIndex((step) => run.stepStatuses[step] === "failed");
+      run.stepIndex = failedStep >= 0 ? failedStep : run.stepIndex;
+      runSteps.slice(run.stepIndex).forEach((step) => {
+        run.stepStatuses[step] = "pending";
+      });
+    }
+    run.status = "running";
+    run.error = null;
+    run.resume_count += 1;
+    run.heartbeat_at = now;
+    run.leaseExpiresAt = now + RUN_LEASE_MS;
+    run.progress.current_step = runSteps[run.stepIndex];
+    run.stepStatuses[runSteps[run.stepIndex]] = "running";
+    lock.status = "running";
+    lock.runId = runId;
+    lock.token = createId("lock");
+    lock.leaseExpiresAt = run.leaseExpiresAt;
+    return this.publicRun(run);
+  }
+
+  expireRunIfNeeded(userId: string): void {
+    const lock = this.locks.get(userId);
+    if (!lock || lock.status !== "running" || (lock.leaseExpiresAt ?? Infinity) > this.clock())
+      return;
+    const run = lock.runId ? this.runs.get(lock.runId) : null;
+    if (run && run.status === "running") {
+      run.status = "paused";
+      run.error = {
+        code: "LEASE_EXPIRED",
+        message: "処理が一時停止しました。再開できます。",
+        failed_step: run.progress.current_step,
+        retryable: true,
+        request_id: createId("request"),
+      };
+      run.progress.current_step = runSteps[run.stepIndex] ?? null;
+    }
+    lock.status = "idle";
+    lock.runId = null;
+    lock.token = null;
+    lock.leaseExpiresAt = null;
+  }
+
+  private runCycleTransition(userId: string, runId: string): number {
+    const now = this.clock();
+    let processed = 0;
+    for (const cycle of this.listCycles(userId)) {
+      if (processed >= CHUNK_SIZE) break;
+      if (cycle.status === "active" && cycle.endsAt <= now) {
+        this.closeCycle(userId, cycle.id, `run-${runId}-${cycle.id}`, runId);
+        processed += 1;
+      }
+    }
+    return processed;
+  }
+
+  private runPurge(userId: string): number {
+    const threshold = this.clock() - THIRTY_DAYS;
+    let processed = 0;
+    for (const [id, issue] of this.issues)
+      if (
+        processed < CHUNK_SIZE &&
+        issue.userId === userId &&
+        issue.deletedAt !== null &&
+        issue.deletedAt < threshold
+      ) {
+        this.issues.delete(id);
+        processed += 1;
+      }
+    for (const [id, project] of this.projects)
+      if (
+        processed < CHUNK_SIZE &&
+        project.userId === userId &&
+        project.deletedAt !== null &&
+        project.deletedAt < threshold
+      ) {
+        this.projects.delete(id);
+        processed += 1;
+      }
+    for (const [key, receipt] of this.receipts)
+      if (processed < CHUNK_SIZE && receipt.userId === userId && receipt.expiresAt < threshold) {
+        this.receipts.delete(key);
+        processed += 1;
+      }
+    return processed;
+  }
+
+  private runOutboxRetry(userId: string): number {
+    let processed = 0;
+    for (const event of this.outbox)
+      if (event.userId === userId && event.status === "pending" && processed < CHUNK_SIZE) {
+        event.status = "sent";
+        event.attemptCount += 1;
+        processed += 1;
+      }
+    return processed;
+  }
+
+  publicRun(run: BackgroundRun): PublicRunSummary {
+    const {
+      user_id: _userId,
+      idempotencyKey: _key,
+      requestHash: _hash,
+      leaseExpiresAt: _lease,
+      stepIndex: _stepIndex,
+      stepStatuses: _statuses,
+      stepCursors: _cursors,
+      ...publicRun
+    } = run;
+    return publicRun;
+  }
+}
+
+const stores = new Map<string, OrbitStore>();
+
+export function getOrbitStore(userId: string): OrbitStore {
+  let store = stores.get(userId);
+  if (!store) {
+    store = new OrbitStore();
+    store.ensureOwner(userId, `${userId}@orbit.local`, userId === "dev-owner");
+    stores.set(userId, store);
+  }
+  return store;
+}
+
+export function peekOrbitStore(userId: string): OrbitStore | undefined {
+  return stores.get(userId);
+}
+
+export function resetOrbitStores(): void {
+  stores.clear();
+}

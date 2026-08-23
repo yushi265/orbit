@@ -111,7 +111,7 @@ Issue Detail は専用 URL を正本とし、Desktop では Modal / Split view �
 - `src/lib/url-state/`: Filter / Group / Order / Layout の canonical search params
 - `public/manifest.webmanifest`, `public/icons/`, `src/service-worker.ts`: 公開静的 Asset のみ Cache
 
-TanStack Start の最終 Route ファイル規則は [questions.md](./questions.md) Q-1 の回答で確定する。上記は UI 契約を先に検討するための予定配置であり、回答前に実装を開始しない。
+TanStack StartのFile-based RouteはQ-1の採用案どおり `src/routes/` に固定した。画面内データ取得はTanStack Queryから同一Origin APIを呼び、Background Runだけ `/api/v1/background-runs/*` のServer Routeを使う。
 
 ## 異常系挙動
 

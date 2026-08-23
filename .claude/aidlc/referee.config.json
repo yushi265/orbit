@@ -1,16 +1,16 @@
 {
-  "$comment": "Stage 5 のアプリ品質ゲート。root package.json導入前はnode_modules前提によりunavailableとなる。実装開始時はpnpm scriptsを正本とし、lint=oxlint、format-check=oxfmt --checkを維持する。",
+  "$comment": "Stage 5 のアプリ品質ゲート。型チェック・テスト・lintをappで再実行し、最後にformat-checkを実行する。",
   "layers": {
     "app": {
       "cwd": ".",
-      "command": ["pnpm", "lint"],
+      "command": ["sh", "-c", "pnpm run typecheck && pnpm run test && pnpm run lint"],
       "precondition": "node_modules"
     }
   },
   "post": {
     "name": "format-check",
     "cwd": ".",
-    "command": ["pnpm", "format:check"],
+    "command": ["pnpm", "run", "format:check"],
     "precondition": "node_modules"
   }
 }

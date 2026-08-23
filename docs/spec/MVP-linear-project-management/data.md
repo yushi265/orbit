@@ -96,7 +96,7 @@
 ## このレイヤーが依存する下位の契約
 
 - Cloudflare D1 Binding の `batch()`、トランザクション的な一括実行、`meta.changes` の取得。
-- Drizzle ORM の SQLite schema / migration API。Schema・Repository・Migration の具体的なファイル運用は [questions.md](./questions.md) Q-2 の回答で確定する。
+- Drizzle ORMのSQLite schema / migrationは `src/db/schema.ts`、`src/db/client.ts`、`src/db/repositories/`、`drizzle/0000_initial.sql` に固定した。ローカル主要Journeyは同じ境界のMemory Storeで検証し、Previewの実D1適用を別タスクとする。
 - Lease の時刻は Worker の時計ではなく、D1 側で評価した `databaseNow` を正本とする。
 
 ## 実装配置

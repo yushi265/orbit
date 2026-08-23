@@ -134,7 +134,7 @@ succeeded / rejected -> terminal（逆戻りなし）
 6. Heartbeat が止まり Lease が期限切れになった場合、`GET current` / `GET :id` / `continue` / `resume` の入口で D1 `databaseNow` を基準に paused + Lock idle へ遷移する。古い処理は `run_id + lock_token + lease_expires_at > now` に失敗する。
 7. Resume は paused / failed の同じ Run、同じ plan / cursor / dedupe 台帳を使い、`resume_count + 1`。failed の失敗 Step を running、後続 skipped を pending に戻す。
 
-`CHUNK_SIZE`、`RUN_LEASE_MS`、`HEARTBEAT_INTERVAL_MS` は [questions.md](./questions.md) Q-7 の Phase 0 結果で確定する。Heartbeat は Lease の 3 分の 1 未満とする不変条件だけを本 spec で固定する。
+`CHUNK_SIZE=25`、`RUN_LEASE_MS=30000`、`HEARTBEAT_INTERVAL_MS=5000`を初期運用値として固定する。HeartbeatはLeaseの3分の1未満とする不変条件を満たし、実Worker負荷に合わせた再計測はPreviewで行う。
 
 ### 検索 / Rich Text
 
@@ -153,7 +153,9 @@ succeeded / rejected -> terminal（逆戻りなし）
 
 - [shared.md](./shared.md) の Zod input / output、ErrorEnvelope、Run / Step 型、Canonical JSON。
 - [data.md](./data.md) の Owner scoped Repository、D1 `batch()`、CAS、Unique 制約、Runtime lock / Lease。
-- Cloudflare Access の `Cf-Access-Jwt-Assertion` と Access Policy。JWT 検証実装の library / JWKS 方式は Q-3 で確定する。
+- Cloudflare Accessの `Cf-Access-Jwt-Assertion` とAccess Policy。JWTは `src/server/auth.ts` の `jose` + JWKSでissuer / audience / emailを検証し、設定不足・不一致はfail-closedにする。
+
+画面内のMVP操作もPWAの同一Origin再検証とCloudflare Workers PreviewのSmokeを単純化するため、TanStack StartのJSON Server Route（`/api/v1/*`）を利用する。RouteはCORSを許可せず、`X-Requested-With`、Access JWT、shared Zod契約を必須にする。Background Runの5パスは将来の外部境界を想定した公開契約として同じRoute方式を使う。
 
 ## 実装配置
 

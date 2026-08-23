@@ -125,6 +125,38 @@ export interface Issue {
   updatedAt: number;
 }
 
+export interface IssueNote {
+  id: string;
+  userId: string;
+  issueId: string;
+  body: string;
+  createdAt: number;
+  editedAt: number | null;
+  deletedAt: number | null;
+}
+
+export type IssueRelationType = "blocking" | "blocked_by" | "related" | "duplicate";
+
+export interface IssueRelation {
+  id: string;
+  userId: string;
+  sourceIssueId: string;
+  targetIssueId: string;
+  type: IssueRelationType;
+  createdAt: number;
+}
+
+export interface IssueRelationView extends IssueRelation {
+  target: Pick<Issue, "id" | "identifier" | "title" | "statusId">;
+}
+
+export interface IssueDetail {
+  issue: Issue;
+  notes: IssueNote[];
+  relations: IssueRelationView[];
+  activity: ActivityView[];
+}
+
 export interface SavedView {
   id: string;
   userId: string;
@@ -160,6 +192,8 @@ export interface ActivityEvent {
   after: Record<string, unknown> | null;
   createdAt: number;
 }
+
+export type ActivityView = Omit<ActivityEvent, "mutationKey">;
 
 export interface OutboxEvent {
   id: string;

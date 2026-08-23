@@ -144,7 +144,7 @@ Browser E2E は AC-3（Mobile / Touch）、AC-5（Access / standalone PWA）、A
 ## 既存実装との関係（再利用 / 差分 / 衝突）
 
 - `src/`、`drizzle/`、TanStack Start Route、共有契約、D1 Schema、Owner / Issue Repository基盤を初回実装した。UIは `src/components/OrbitApp.tsx` に集約し、APIは `src/server/api.ts` と `/api/v1` Server Routeから公開する。
-- `docs/ai-dlc/codekb/` は実装開始時点ではREADMEのみだったため、Stage 2aで参照先の不在を確認した。今回の新しいIF / Schema / 既知の罠は次回ボルトで `codekb` に追記する。
+- `docs/ai-dlc/codekb/` は実装開始時点ではREADMEのみだったため、Stage 2aで参照先の不在を確認した。その後 `shared.md` を追加し、MVPのAPI / Schema / 既知の罠を記録している。新しいFeatureのIFは各specと同時に更新する。
 - `docs/architecture.md` の `ui / shared / service / data` 境界と依存方向を正本として採用し、要件側の `04-architecture.md` にある具体的なデータ契約・処理フローを本 spec の詳細契約へ分解する。
 - アプリ本体がないため既存実装との衝突はない。ただし最初の実装から、D1 の owner scope・共有 Zod・全 Mutation の lock / idempotency を共通境界として固定する。
 

@@ -2,6 +2,7 @@
 node_modules/
 .pnpm-store/
 .wrangler/
+.tanstack/
 
 # ビルド成果物
 *.tsbuildinfo

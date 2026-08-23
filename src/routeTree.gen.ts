@@ -39,6 +39,10 @@ import { Route as ApiV1ViewsIndexRouteImport } from './routes/api/v1/views/index
 import { Route as ApiV1ViewsViewIdRouteImport } from './routes/api/v1/views/$viewId'
 import { Route as ApiV1BackgroundRunsRunIdContinueRouteImport } from './routes/api/v1/background-runs/$runId/continue'
 import { Route as ApiV1BackgroundRunsRunIdResumeRouteImport } from './routes/api/v1/background-runs/$runId/resume'
+import { Route as ApiV1IssuesIssueIdNotesRouteImport } from './routes/api/v1/issues/$issueId/notes'
+import { Route as ApiV1IssuesIssueIdRelationsRouteImport } from './routes/api/v1/issues/$issueId/relations'
+import { Route as ApiV1IssuesIssueIdNotesNoteIdRouteImport } from './routes/api/v1/issues/$issueId/notes/$noteId'
+import { Route as ApiV1IssuesIssueIdRelationsRelationIdRouteImport } from './routes/api/v1/issues/$issueId/relations/$relationId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -196,6 +200,29 @@ const ApiV1BackgroundRunsRunIdResumeRoute =
     path: '/resume',
     getParentRoute: () => ApiV1BackgroundRunsRunIdRoute,
   } as any)
+const ApiV1IssuesIssueIdNotesRoute = ApiV1IssuesIssueIdNotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => ApiV1IssuesIssueIdRoute,
+} as any)
+const ApiV1IssuesIssueIdRelationsRoute =
+  ApiV1IssuesIssueIdRelationsRouteImport.update({
+    id: '/relations',
+    path: '/relations',
+    getParentRoute: () => ApiV1IssuesIssueIdRoute,
+  } as any)
+const ApiV1IssuesIssueIdNotesNoteIdRoute =
+  ApiV1IssuesIssueIdNotesNoteIdRouteImport.update({
+    id: '/$noteId',
+    path: '/$noteId',
+    getParentRoute: () => ApiV1IssuesIssueIdNotesRoute,
+  } as any)
+const ApiV1IssuesIssueIdRelationsRelationIdRoute =
+  ApiV1IssuesIssueIdRelationsRelationIdRouteImport.update({
+    id: '/$relationId',
+    path: '/$relationId',
+    getParentRoute: () => ApiV1IssuesIssueIdRelationsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -216,7 +243,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
-  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRoute
+  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
@@ -228,6 +255,10 @@ export interface FileRoutesByFullPath {
   '/api/v1/views/': typeof ApiV1ViewsIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
+  '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
+  '/api/v1/issues/$issueId/notes/$noteId': typeof ApiV1IssuesIssueIdNotesNoteIdRoute
+  '/api/v1/issues/$issueId/relations/$relationId': typeof ApiV1IssuesIssueIdRelationsRelationIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -248,7 +279,7 @@ export interface FileRoutesByTo {
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
-  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRoute
+  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
@@ -260,6 +291,10 @@ export interface FileRoutesByTo {
   '/api/v1/views': typeof ApiV1ViewsIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
+  '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
+  '/api/v1/issues/$issueId/notes/$noteId': typeof ApiV1IssuesIssueIdNotesNoteIdRoute
+  '/api/v1/issues/$issueId/relations/$relationId': typeof ApiV1IssuesIssueIdRelationsRelationIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -281,7 +316,7 @@ export interface FileRoutesById {
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
-  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRoute
+  '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
@@ -293,6 +328,10 @@ export interface FileRoutesById {
   '/api/v1/views/': typeof ApiV1ViewsIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
+  '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
+  '/api/v1/issues/$issueId/notes/$noteId': typeof ApiV1IssuesIssueIdNotesNoteIdRoute
+  '/api/v1/issues/$issueId/relations/$relationId': typeof ApiV1IssuesIssueIdRelationsRelationIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -327,6 +366,10 @@ export interface FileRouteTypes {
     | '/api/v1/views/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/issues/$issueId/notes'
+    | '/api/v1/issues/$issueId/relations'
+    | '/api/v1/issues/$issueId/notes/$noteId'
+    | '/api/v1/issues/$issueId/relations/$relationId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -359,6 +402,10 @@ export interface FileRouteTypes {
     | '/api/v1/views'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/issues/$issueId/notes'
+    | '/api/v1/issues/$issueId/relations'
+    | '/api/v1/issues/$issueId/notes/$noteId'
+    | '/api/v1/issues/$issueId/relations/$relationId'
   id:
     | '__root__'
     | '/'
@@ -391,6 +438,10 @@ export interface FileRouteTypes {
     | '/api/v1/views/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/issues/$issueId/notes'
+    | '/api/v1/issues/$issueId/relations'
+    | '/api/v1/issues/$issueId/notes/$noteId'
+    | '/api/v1/issues/$issueId/relations/$relationId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -412,7 +463,7 @@ export interface RootRouteChildren {
   ApiV1BackgroundRunsRunIdRoute: typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   ApiV1BackgroundRunsCurrentRoute: typeof ApiV1BackgroundRunsCurrentRoute
   ApiV1CyclesCycleIdRoute: typeof ApiV1CyclesCycleIdRoute
-  ApiV1IssuesIssueIdRoute: typeof ApiV1IssuesIssueIdRoute
+  ApiV1IssuesIssueIdRoute: typeof ApiV1IssuesIssueIdRouteWithChildren
   ApiV1NotificationsNotificationIdRoute: typeof ApiV1NotificationsNotificationIdRoute
   ApiV1ProjectsProjectIdRoute: typeof ApiV1ProjectsProjectIdRoute
   ApiV1ViewsViewIdRoute: typeof ApiV1ViewsViewIdRoute
@@ -636,6 +687,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1BackgroundRunsRunIdResumeRouteImport
       parentRoute: typeof ApiV1BackgroundRunsRunIdRoute
     }
+    '/api/v1/issues/$issueId/notes': {
+      id: '/api/v1/issues/$issueId/notes'
+      path: '/notes'
+      fullPath: '/api/v1/issues/$issueId/notes'
+      preLoaderRoute: typeof ApiV1IssuesIssueIdNotesRouteImport
+      parentRoute: typeof ApiV1IssuesIssueIdRoute
+    }
+    '/api/v1/issues/$issueId/relations': {
+      id: '/api/v1/issues/$issueId/relations'
+      path: '/relations'
+      fullPath: '/api/v1/issues/$issueId/relations'
+      preLoaderRoute: typeof ApiV1IssuesIssueIdRelationsRouteImport
+      parentRoute: typeof ApiV1IssuesIssueIdRoute
+    }
+    '/api/v1/issues/$issueId/notes/$noteId': {
+      id: '/api/v1/issues/$issueId/notes/$noteId'
+      path: '/$noteId'
+      fullPath: '/api/v1/issues/$issueId/notes/$noteId'
+      preLoaderRoute: typeof ApiV1IssuesIssueIdNotesNoteIdRouteImport
+      parentRoute: typeof ApiV1IssuesIssueIdNotesRoute
+    }
+    '/api/v1/issues/$issueId/relations/$relationId': {
+      id: '/api/v1/issues/$issueId/relations/$relationId'
+      path: '/$relationId'
+      fullPath: '/api/v1/issues/$issueId/relations/$relationId'
+      preLoaderRoute: typeof ApiV1IssuesIssueIdRelationsRelationIdRouteImport
+      parentRoute: typeof ApiV1IssuesIssueIdRelationsRoute
+    }
   }
 }
 
@@ -656,6 +735,49 @@ const ApiV1BackgroundRunsRunIdRouteWithChildren =
     ApiV1BackgroundRunsRunIdRouteChildren,
   )
 
+interface ApiV1IssuesIssueIdNotesRouteChildren {
+  ApiV1IssuesIssueIdNotesNoteIdRoute: typeof ApiV1IssuesIssueIdNotesNoteIdRoute
+}
+
+const ApiV1IssuesIssueIdNotesRouteChildren: ApiV1IssuesIssueIdNotesRouteChildren =
+  {
+    ApiV1IssuesIssueIdNotesNoteIdRoute: ApiV1IssuesIssueIdNotesNoteIdRoute,
+  }
+
+const ApiV1IssuesIssueIdNotesRouteWithChildren =
+  ApiV1IssuesIssueIdNotesRoute._addFileChildren(
+    ApiV1IssuesIssueIdNotesRouteChildren,
+  )
+
+interface ApiV1IssuesIssueIdRelationsRouteChildren {
+  ApiV1IssuesIssueIdRelationsRelationIdRoute: typeof ApiV1IssuesIssueIdRelationsRelationIdRoute
+}
+
+const ApiV1IssuesIssueIdRelationsRouteChildren: ApiV1IssuesIssueIdRelationsRouteChildren =
+  {
+    ApiV1IssuesIssueIdRelationsRelationIdRoute:
+      ApiV1IssuesIssueIdRelationsRelationIdRoute,
+  }
+
+const ApiV1IssuesIssueIdRelationsRouteWithChildren =
+  ApiV1IssuesIssueIdRelationsRoute._addFileChildren(
+    ApiV1IssuesIssueIdRelationsRouteChildren,
+  )
+
+interface ApiV1IssuesIssueIdRouteChildren {
+  ApiV1IssuesIssueIdNotesRoute: typeof ApiV1IssuesIssueIdNotesRouteWithChildren
+  ApiV1IssuesIssueIdRelationsRoute: typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
+}
+
+const ApiV1IssuesIssueIdRouteChildren: ApiV1IssuesIssueIdRouteChildren = {
+  ApiV1IssuesIssueIdNotesRoute: ApiV1IssuesIssueIdNotesRouteWithChildren,
+  ApiV1IssuesIssueIdRelationsRoute:
+    ApiV1IssuesIssueIdRelationsRouteWithChildren,
+}
+
+const ApiV1IssuesIssueIdRouteWithChildren =
+  ApiV1IssuesIssueIdRoute._addFileChildren(ApiV1IssuesIssueIdRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   InboxRoute: InboxRoute,
@@ -675,7 +797,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1BackgroundRunsRunIdRoute: ApiV1BackgroundRunsRunIdRouteWithChildren,
   ApiV1BackgroundRunsCurrentRoute: ApiV1BackgroundRunsCurrentRoute,
   ApiV1CyclesCycleIdRoute: ApiV1CyclesCycleIdRoute,
-  ApiV1IssuesIssueIdRoute: ApiV1IssuesIssueIdRoute,
+  ApiV1IssuesIssueIdRoute: ApiV1IssuesIssueIdRouteWithChildren,
   ApiV1NotificationsNotificationIdRoute: ApiV1NotificationsNotificationIdRoute,
   ApiV1ProjectsProjectIdRoute: ApiV1ProjectsProjectIdRoute,
   ApiV1ViewsViewIdRoute: ApiV1ViewsViewIdRoute,

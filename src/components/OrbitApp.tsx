@@ -10,8 +10,11 @@ import type {
   PublicRunViewModel as PublicRunSummary,
   SavedViewViewModel as SavedView,
   WorkflowStateViewModel as WorkflowState,
+  IssueDetailViewModel,
+  IssueNoteViewModel,
+  IssueRelationTypeViewModel,
 } from "../shared/view-models";
-import { ApiError, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
 type Section =
@@ -118,7 +121,39 @@ function OrbitAppInner(props: Props) {
   const [projectName, setProjectName] = useState("");
   const [run, setRun] = useState<PublicRunSummary | null>(null);
   const [runBusy, setRunBusy] = useState(false);
+  const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
+
+  function rememberIssueFocus(issueId: string) {
+    issueTriggerIdRef.current = issueId;
+    try {
+      window.sessionStorage.setItem("orbit.issue-focus", issueId);
+    } catch {
+      // Focus restoration remains best-effort when browser storage is unavailable.
+    }
+  }
+
+  function restoreIssueFocus() {
+    window.setTimeout(() => {
+      let issueId = issueTriggerIdRef.current;
+      try {
+        issueId ??= window.sessionStorage.getItem("orbit.issue-focus");
+      } catch {
+        // Ignore storage access failures and keep the in-memory fallback.
+      }
+      if (!issueId) return;
+      const trigger = document.querySelector<HTMLButtonElement>(
+        `button[data-issue-id="${issueId}"]`,
+      );
+      if (!trigger) return;
+      trigger.focus();
+      try {
+        window.sessionStorage.removeItem("orbit.issue-focus");
+      } catch {
+        // Ignore storage access failures after the focus was restored.
+      }
+    }, 40);
+  }
 
   const bootstrap = useQuery({
     queryKey: ["bootstrap"],
@@ -157,6 +192,10 @@ function OrbitAppInner(props: Props) {
   }, [data?.background.run]);
 
   useEffect(() => {
+    if (!composerOpen && !props.issueId) restoreIssueFocus();
+  }, [composerOpen, props.issueId]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const editing =
@@ -164,6 +203,16 @@ function OrbitAppInner(props: Props) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandOpen(true);
+        return;
+      }
+      if (event.key === "Escape") {
+        setCommandOpen(false);
+        setShortcutsOpen(false);
+        if (composerOpen && props.issueId) {
+          setSection("issues");
+          void router.navigate({ to: "/issues" as never }).then(restoreIssueFocus);
+        }
+        setComposerOpen(false);
         return;
       }
       if (editing) return;
@@ -175,17 +224,12 @@ function OrbitAppInner(props: Props) {
         event.preventDefault();
         setShortcutsOpen(true);
       }
-      if (event.key === "Escape") {
-        setCommandOpen(false);
-        setShortcutsOpen(false);
-        setComposerOpen(false);
-      }
       if (event.key.toLowerCase() === "b")
         setViewMode((mode) => (mode === "list" ? "board" : "list"));
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [composerOpen, props.issueId, router]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   const showToast = (kind: "success" | "error", text: string) => {
@@ -375,6 +419,12 @@ function OrbitAppInner(props: Props) {
       </div>
     );
 
+  function closeIssueDetail() {
+    setSection("issues");
+    setComposerOpen(false);
+    void router.navigate({ to: "/issues" }).then(restoreIssueFocus);
+  }
+
   const activeRun =
     run && ["pending", "running", "paused", "failed"].includes(run.status) ? run : null;
   return (
@@ -420,6 +470,7 @@ function OrbitAppInner(props: Props) {
               data={data}
               onNavigate={navigate}
               onOpenIssue={(issue) => {
+                rememberIssueFocus(issue.id);
                 setSection("issues");
                 setComposerOpen(true);
                 if (typeof window !== "undefined")
@@ -443,6 +494,7 @@ function OrbitAppInner(props: Props) {
               onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
               onCreate={() => setComposerOpen(true)}
               onOpenIssue={(issue) => {
+                rememberIssueFocus(issue.id);
                 setComposerOpen(true);
                 if (typeof window !== "undefined")
                   void router.navigate({ to: `/issues/${issue.id}` as never });
@@ -514,25 +566,27 @@ function OrbitAppInner(props: Props) {
         onCreate={() => setComposerOpen(true)}
       />
       {activeRun && <RunOverlay run={activeRun} busy={runBusy} onResume={resumeMaintenance} />}
-      {composerOpen && (
-        <IssueComposer
-          title={
-            props.issueId
-              ? (issues.find((item) => item.id === props.issueId)?.title ?? "")
-              : newTitle
-          }
-          setTitle={setNewTitle}
-          existingIssue={
-            props.issueId ? issues.find((item) => item.id === props.issueId) : undefined
-          }
-          onClose={() => {
-            setComposerOpen(false);
-            setNewTitle("");
-          }}
-          onSubmit={() => createIssue.mutate()}
-          busy={createIssue.isPending}
-        />
-      )}
+      {composerOpen &&
+        (props.issueId ? (
+          <IssueDetailPanel
+            issueId={props.issueId}
+            fallbackIssue={issues.find((item) => item.id === props.issueId)}
+            knownIssues={issues}
+            workflowStates={workflowStates}
+            onClose={closeIssueDetail}
+          />
+        ) : (
+          <IssueComposer
+            title={newTitle}
+            setTitle={setNewTitle}
+            onClose={() => {
+              setComposerOpen(false);
+              setNewTitle("");
+            }}
+            onSubmit={() => createIssue.mutate()}
+            busy={createIssue.isPending}
+          />
+        ))}
       {projectComposerOpen && (
         <Modal title="新しいProject" onClose={() => setProjectComposerOpen(false)}>
           <label className="field-label" htmlFor="project-name">
@@ -736,7 +790,7 @@ function HomeView({
 }: {
   data: BootstrapPayload;
   onNavigate: (section: Section) => void;
-  onOpenIssue: (issue: Issue) => void;
+  onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
 }) {
   const cycle = data.cycles.find((item) => item.status === "active");
   const cycleIssues = cycle ? data.issues.filter((item) => item.cycleId === cycle.id) : [];
@@ -831,7 +885,7 @@ function HomeView({
             issue={issue}
             state={data.workflowStates.find((item) => item.id === issue.statusId)}
             compact
-            onClick={() => onOpenIssue(issue)}
+            onClick={(trigger) => onOpenIssue(issue, trigger)}
           />
         ))}
       </div>
@@ -868,7 +922,7 @@ function IssuesView({
   pendingIssueId: string | null;
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   onCreate: () => void;
-  onOpenIssue: (issue: Issue) => void;
+  onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
 }) {
   const grouped = workflowStates
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
@@ -942,7 +996,7 @@ function IssuesView({
                   key={issue.id}
                   issue={issue}
                   state={state}
-                  onClick={() => onOpenIssue(issue)}
+                  onClick={(trigger) => onOpenIssue(issue, trigger)}
                 />
               ))}
             </div>
@@ -987,7 +1041,7 @@ function IssuesView({
                   checked ? [...selected, issue.id] : selected.filter((id) => id !== issue.id),
                 )
               }
-              onClick={() => onOpenIssue(issue)}
+              onClick={(trigger) => onOpenIssue(issue, trigger)}
               onUpdate={onUpdate}
             />
           ))}
@@ -1025,7 +1079,7 @@ function IssueRow({
   selected?: boolean;
   pending?: boolean;
   onSelect?: (checked: boolean) => void;
-  onClick?: () => void;
+  onClick?: (trigger: HTMLButtonElement) => void;
   onUpdate?: (issue: Issue, patch: Partial<Issue>) => void;
 }) {
   return (
@@ -1040,7 +1094,11 @@ function IssueRow({
           />
         )}
       </span>
-      <button className="issue-main" onClick={onClick}>
+      <button
+        className="issue-main"
+        data-issue-id={issue.id}
+        onClick={(event) => onClick?.(event.currentTarget)}
+      >
         <span className="issue-id">{issue.identifier}</span>
         <strong>{issue.title}</strong>
         {issue.description && !compact && (
@@ -1077,10 +1135,14 @@ function IssueCard({
 }: {
   issue: Issue;
   state: WorkflowState;
-  onClick: () => void;
+  onClick: (trigger: HTMLButtonElement) => void;
 }) {
   return (
-    <button className="issue-card" onClick={onClick}>
+    <button
+      className="issue-card"
+      data-issue-id={issue.id}
+      onClick={(event) => onClick(event.currentTarget)}
+    >
       <span className="issue-id">{issue.identifier}</span>
       <strong>{issue.title}</strong>
       <div>
@@ -1568,6 +1630,475 @@ function RunOverlay({
         <span className="run-safe-note">
           個人データはこのRunの所有者スコープ内だけを処理します。
         </span>
+      </div>
+    </div>
+  );
+}
+
+const relationLabels: Record<IssueRelationTypeViewModel, string> = {
+  blocking: "Blocks",
+  blocked_by: "Blocked by",
+  related: "Related",
+  duplicate: "Duplicate",
+};
+
+function textDocument(value: string) {
+  return {
+    type: "doc" as const,
+    content: value.split("\n").map((line) => ({
+      type: "paragraph" as const,
+      content: line ? [{ type: "text" as const, text: line }] : [],
+    })),
+  };
+}
+
+function IssueDetailPanel({
+  issueId,
+  fallbackIssue,
+  knownIssues,
+  workflowStates,
+  onClose,
+}: {
+  issueId: string;
+  fallbackIssue?: Issue;
+  knownIssues: Issue[];
+  workflowStates: WorkflowState[];
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const detailQuery = useQuery({
+    queryKey: ["issue-detail", issueId],
+    queryFn: () => apiGet<IssueDetailViewModel>(`/api/v1/issues/${issueId}`),
+  });
+  const detail = detailQuery.data;
+  const notFound = detailQuery.error instanceof ApiError && detailQuery.error.status === 404;
+  const issue = notFound ? undefined : (detail?.issue ?? fallbackIssue);
+  const [description, setDescription] = useState(issue?.description ?? "");
+  const [titleDraft, setTitleDraft] = useState(issue?.title ?? "");
+  const [noteBody, setNoteBody] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [relationTargetId, setRelationTargetId] = useState("");
+  const [relationType, setRelationType] = useState<IssueRelationTypeViewModel>("related");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [descriptionRetry, setDescriptionRetry] = useState<{
+    description: string;
+    title: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (issue) setDescription(issue.description);
+    if (issue) setTitleDraft(issue.title);
+  }, [issue?.id, issue?.description, issue?.title]);
+
+  async function saveDescription(nextDescription = description, nextTitle = titleDraft) {
+    if (!issue || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
+        idempotencyKey: idempotencyKey(),
+        version: issue.version,
+        patch: { title: nextTitle, descriptionJson: textDocument(nextDescription) },
+      });
+      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
+        current ? { ...current, issue: result.issue } : current,
+      );
+      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+        current
+          ? {
+              ...current,
+              issues: current.issues.map((item) =>
+                item.id === result.issue.id ? result.issue : item,
+              ),
+            }
+          : current,
+      );
+      await detailQuery.refetch();
+      setDescriptionRetry(null);
+    } catch (caught) {
+      setDescriptionRetry({ description: nextDescription, title: nextTitle });
+      if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+        const latest = await detailQuery.refetch();
+        if (latest.data) {
+          setDescription(latest.data.issue.description);
+          setTitleDraft(latest.data.issue.title);
+        } else {
+          setDescription(issue.description);
+          setTitleDraft(issue.title);
+        }
+      } else {
+        setDescription(issue.description);
+        setTitleDraft(issue.title);
+      }
+      setError(caught instanceof ApiError ? caught.message : "説明の保存に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addNote() {
+    if (!noteBody || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPost(`/api/v1/issues/${issueId}/notes`, {
+        idempotencyKey: idempotencyKey(),
+        body: noteBody,
+      });
+      setNoteBody("");
+      await detailQuery.refetch();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "メモの追加に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function editNote(note: IssueNoteViewModel) {
+    if (!noteDraft || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPatch(`/api/v1/issues/${issueId}/notes/${note.id}`, {
+        idempotencyKey: idempotencyKey(),
+        body: noteDraft,
+      });
+      setEditingNoteId(null);
+      setNoteDraft("");
+      await detailQuery.refetch();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "メモの保存に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeNote(noteId: string) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/issues/${issueId}/notes/${noteId}`);
+      await detailQuery.refetch();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "メモの削除に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addRelation() {
+    if (!relationTargetId || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPost(`/api/v1/issues/${issueId}/relations`, {
+        idempotencyKey: idempotencyKey(),
+        targetIssueId: relationTargetId,
+        type: relationType,
+      });
+      setRelationTargetId("");
+      await detailQuery.refetch();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Relationの追加に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeRelation(relationId: string) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/issues/${issueId}/relations/${relationId}`);
+      await detailQuery.refetch();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Relationの削除に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="issue-detail-title"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="detail-panel modal-panel">
+        <div className="detail-header">
+          <div>
+            <span className="eyebrow coral">{issue?.identifier ?? "ISSUE DETAIL"}</span>
+            <input
+              id="issue-detail-title"
+              className="detail-title-input"
+              aria-label="Issueタイトル"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+            />
+          </div>
+          <button
+            className="icon-button detail-close"
+            aria-label="Issue詳細を閉じる"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+        {detailQuery.isLoading && <div className="detail-skeleton">詳細を読み込んでいます…</div>}
+        {detailQuery.error && (
+          <div className="detail-error">
+            <strong>{notFound ? "Issueが見つかりません" : "Issue詳細を読み込めません"}</strong>
+            {notFound ? (
+              <button className="text-button" onClick={onClose}>
+                Issuesへ戻る →
+              </button>
+            ) : (
+              <button className="text-button" onClick={() => detailQuery.refetch()}>
+                再試行 →
+              </button>
+            )}
+          </div>
+        )}
+        {issue && (
+          <div className="detail-grid">
+            <section className="detail-main">
+              <div className="detail-properties">
+                <span className={`priority-badge ${priorityTone[issue.priority]}`}>
+                  {priorityLabel[issue.priority]}
+                </span>
+                <span className="status-pill active">Version {issue.version}</span>
+                <span className="status-pill">
+                  {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "Status"}
+                </span>
+                <span className="detail-date">更新 {formatDate(issue.updatedAt)}</span>
+              </div>
+              <label className="detail-label" htmlFor="issue-description">
+                Description
+              </label>
+              <textarea
+                id="issue-description"
+                className="detail-textarea"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="説明を追加…"
+                rows={6}
+              />
+              <div className="detail-actions">
+                <button
+                  className="button primary"
+                  disabled={
+                    saving || (description === issue.description && titleDraft === issue.title)
+                  }
+                  onClick={() => void saveDescription()}
+                >
+                  {saving ? "保存中…" : "説明を保存"}
+                </button>
+                <button className="button ghost" onClick={onClose}>
+                  閉じる
+                </button>
+              </div>
+              <section className="detail-section">
+                <div className="detail-section-heading">
+                  <div>
+                    <span className="eyebrow">NOTES</span>
+                    <h3>作業メモ</h3>
+                  </div>
+                  <span className="detail-count">{detail?.notes.length ?? 0}</span>
+                </div>
+                <div className="note-compose">
+                  <textarea
+                    aria-label="新しい作業メモ"
+                    value={noteBody}
+                    onChange={(event) => setNoteBody(event.target.value)}
+                    placeholder="調査結果や次の一手をメモ…"
+                    rows={3}
+                  />
+                  <button
+                    className="button secondary"
+                    disabled={saving || !noteBody}
+                    onClick={() => void addNote()}
+                  >
+                    メモを追加
+                  </button>
+                </div>
+                <div className="note-list">
+                  {detail?.notes.map((note) => (
+                    <article className="note-card" key={note.id}>
+                      {editingNoteId === note.id ? (
+                        <textarea
+                          aria-label="編集中の作業メモ"
+                          value={noteDraft}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                          rows={3}
+                        />
+                      ) : (
+                        <p className="note-body">{note.body}</p>
+                      )}
+                      <div className="note-footer">
+                        <span>
+                          {formatDate(note.editedAt ?? note.createdAt)}
+                          {note.editedAt ? " · 編集済み" : ""}
+                        </span>
+                        {editingNoteId === note.id ? (
+                          <>
+                            <button className="text-button" onClick={() => void editNote(note)}>
+                              保存
+                            </button>
+                            <button className="text-button" onClick={() => setEditingNoteId(null)}>
+                              取消
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="text-button"
+                              onClick={() => {
+                                setEditingNoteId(note.id);
+                                setNoteDraft(note.body);
+                              }}
+                            >
+                              編集
+                            </button>
+                            <button
+                              className="text-button danger"
+                              onClick={() => void removeNote(note.id)}
+                            >
+                              削除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                  {detail?.notes.length === 0 && (
+                    <p className="detail-empty">まだメモはありません。</p>
+                  )}
+                </div>
+              </section>
+              <section className="detail-section">
+                <div className="detail-section-heading">
+                  <div>
+                    <span className="eyebrow">RELATIONS</span>
+                    <h3>関連Issue</h3>
+                  </div>
+                  <span className="detail-count">{detail?.relations.length ?? 0}</span>
+                </div>
+                <div className="relation-compose">
+                  <select
+                    aria-label="Relation先"
+                    value={relationTargetId}
+                    onChange={(event) => setRelationTargetId(event.target.value)}
+                  >
+                    <option value="">Issueを選択…</option>
+                    {knownIssues
+                      .filter((item) => item.id !== issue.id)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.identifier} · {item.title}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    aria-label="Relation種別"
+                    value={relationType}
+                    onChange={(event) =>
+                      setRelationType(event.target.value as IssueRelationTypeViewModel)
+                    }
+                  >
+                    {Object.entries(relationLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="button secondary"
+                    disabled={saving || !relationTargetId}
+                    onClick={() => void addRelation()}
+                  >
+                    追加
+                  </button>
+                </div>
+                <div className="relation-list">
+                  {detail?.relations.map((relation) => (
+                    <div className="relation-card" key={relation.id}>
+                      <span className="relation-type">{relationLabels[relation.type]}</span>
+                      <button
+                        className="relation-target"
+                        onClick={() =>
+                          void router.navigate({ to: `/issues/${relation.target.id}` as never })
+                        }
+                      >
+                        <span className="issue-id">{relation.target.identifier}</span>
+                        <strong>{relation.target.title}</strong>
+                      </button>
+                      <button
+                        className="text-button danger"
+                        aria-label={`${relation.target.identifier}とのRelationを削除`}
+                        onClick={() => void removeRelation(relation.id)}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                  {detail?.relations.length === 0 && (
+                    <p className="detail-empty">関連Issueはありません。</p>
+                  )}
+                </div>
+              </section>
+            </section>
+            <aside className="detail-activity">
+              <span className="eyebrow">ACTIVITY</span>
+              <h3>変更履歴</h3>
+              <div className="activity-list">
+                {detail?.activity.map((event) => (
+                  <div className="activity-item" key={event.id}>
+                    <span className="activity-dot" />
+                    <div>
+                      <strong>{event.action}</strong>
+                      <span>{formatDate(event.createdAt)}</span>
+                    </div>
+                  </div>
+                ))}
+                {detail?.activity.length === 0 && (
+                  <p className="detail-empty">Activityはありません。</p>
+                )}
+              </div>
+            </aside>
+          </div>
+        )}
+        {error && (
+          <div className="detail-live-error" role="alert">
+            <span>{error}</span>
+            {descriptionRetry !== null && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  const retry = descriptionRetry;
+                  setDescription(retry.description);
+                  setTitleDraft(retry.title);
+                  setError(null);
+                  setDescriptionRetry(null);
+                  void saveDescription(retry.description, retry.title);
+                }}
+              >
+                説明を再試行
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

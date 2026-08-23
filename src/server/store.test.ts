@@ -55,18 +55,24 @@ describe("OrbitStore issue mutations", () => {
       id: issue.id,
       version: 1,
       idempotencyKey: "update-001",
-      patch: { priority: "high" },
+      patch: { priority: "high", description: "確定した説明" },
     });
 
     expect(updated.version).toBe(2);
+    expect(updated.description).toBe("確定した説明");
+    const activityCount = store.activities.length;
+    const outboxCount = store.outbox.length;
     expect(() =>
       store.updateIssue("owner", {
         id: issue.id,
         version: 1,
         idempotencyKey: "update-002",
-        patch: { priority: "urgent" },
+        patch: { priority: "urgent", description: "古い説明" },
       }),
     ).toThrowError(expect.objectContaining({ code: "ISSUE_VERSION_CONFLICT", status: 409 }));
+    expect(store.issues.get(issue.id)?.description).toBe("確定した説明");
+    expect(store.activities).toHaveLength(activityCount);
+    expect(store.outbox).toHaveLength(outboxCount);
     expect(store.activities.filter((event) => event.entityId === issue.id)).toHaveLength(2);
     expect(store.outbox.filter((event) => event.type === "issue.updated")).toHaveLength(1);
   });

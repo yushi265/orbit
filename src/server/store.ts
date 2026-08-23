@@ -4,6 +4,11 @@ import {
   Cycle,
   CycleSettings,
   Issue,
+  IssueDetail,
+  IssueNote,
+  IssueRelation,
+  IssueRelationType,
+  IssueRelationView,
   IssueQuery,
   Notification,
   Preferences,
@@ -67,6 +72,16 @@ export interface UpdateIssueInput {
   idempotencyKey: string;
   version: number;
   patch: IssuePatch;
+}
+
+export interface NoteMutationInput {
+  idempotencyKey: string;
+  body: string;
+}
+export interface RelationMutationInput {
+  idempotencyKey: string;
+  targetIssueId: string;
+  type: IssueRelationType;
 }
 
 export interface CreateProjectInput {
@@ -139,6 +154,22 @@ function validateTitle(title: string): void {
     throw validationError({ title: ["タイトルは1〜255文字で入力してください。"] });
 }
 
+function validateNoteBody(body: string): void {
+  const length = [...body].length;
+  if (length < 1 || length > 10_000)
+    throw validationError({ body: ["メモは1〜10,000文字で入力してください。"] });
+}
+
+function relationTypeFromPerspective(
+  type: IssueRelationType,
+  isSource: boolean,
+): IssueRelationType {
+  if (isSource) return type;
+  if (type === "blocking") return "blocked_by";
+  if (type === "blocked_by") return "blocking";
+  return type;
+}
+
 function defaultQuery(): IssueQuery {
   return {
     mode: "list",
@@ -166,6 +197,8 @@ export class OrbitStore {
   readonly cycles = new Map<string, Cycle>();
   readonly cycleSettings = new Map<string, CycleSettings>();
   readonly issues = new Map<string, Issue>();
+  readonly notes = new Map<string, IssueNote>();
+  readonly relations = new Map<string, IssueRelation>();
   readonly views = new Map<string, SavedView>();
   readonly notifications = new Map<string, Notification>();
   readonly activities: ActivityEvent[] = [];
@@ -488,6 +521,269 @@ export class OrbitStore {
     const issue = this.issues.get(issueId);
     if (!issue || issue.userId !== userId || issue.deletedAt) throw notFound();
     return issue;
+  }
+
+  getIssueDetail(userId: string, issueId: string): IssueDetail {
+    const issue = this.getIssue(userId, issueId);
+    const notes = [...this.notes.values()]
+      .filter(
+        (note) => note.userId === userId && note.issueId === issueId && note.deletedAt === null,
+      )
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const relations = [...this.relations.values()]
+      .filter(
+        (relation) =>
+          relation.userId === userId &&
+          (relation.sourceIssueId === issueId || relation.targetIssueId === issueId),
+      )
+      .flatMap((relation) => {
+        const targetId =
+          relation.sourceIssueId === issueId ? relation.targetIssueId : relation.sourceIssueId;
+        const target = this.issues.get(targetId);
+        if (!target || target.userId !== userId || target.deletedAt !== null) return [];
+        return {
+          ...relation,
+          type: relationTypeFromPerspective(relation.type, relation.sourceIssueId === issueId),
+          target: {
+            id: target.id,
+            identifier: target.identifier,
+            title: target.title,
+            statusId: target.statusId,
+          },
+        } satisfies IssueRelationView;
+      })
+      .sort((left, right) => right.createdAt - left.createdAt);
+    const activity = this.activities
+      .filter((event) => event.userId === userId && event.entityId === issueId)
+      .sort((left, right) => right.createdAt - left.createdAt);
+    return {
+      issue,
+      notes,
+      relations,
+      activity: activity.map(({ mutationKey: _mutationKey, ...publicEvent }) => publicEvent),
+    };
+  }
+
+  createIssueNote(userId: string, issueId: string, input: NoteMutationInput): IssueNote {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<IssueNote>(
+      userId,
+      "issue.note.create",
+      input.idempotencyKey,
+      { issueId, body: input.body },
+    );
+    if (existing) return existing;
+    const issue = this.getIssue(userId, issueId);
+    validateNoteBody(input.body);
+    const now = this.clock();
+    const note: IssueNote = {
+      id: createId("note"),
+      userId,
+      issueId: issue.id,
+      body: input.body,
+      createdAt: now,
+      editedAt: null,
+      deletedAt: null,
+    };
+    this.notes.set(note.id, note);
+    this.recordActivity(userId, "issue", issueId, "note.created", input.idempotencyKey, null, {
+      noteId: note.id,
+      bodyLength: [...note.body].length,
+    });
+    this.recordOutbox(userId, "issue.note.created", `issue.note.created:${note.id}`, {
+      issueId,
+      noteId: note.id,
+    });
+    this.recordReceipt(
+      userId,
+      "issue.note.create",
+      input.idempotencyKey,
+      { issueId, body: input.body },
+      note,
+    );
+    return note;
+  }
+
+  updateIssueNote(
+    userId: string,
+    issueId: string,
+    noteId: string,
+    input: NoteMutationInput,
+  ): IssueNote {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<IssueNote>(
+      userId,
+      "issue.note.update",
+      input.idempotencyKey,
+      { issueId, noteId, body: input.body },
+    );
+    if (existing) return existing;
+    this.getIssue(userId, issueId);
+    const note = this.notes.get(noteId);
+    if (!note || note.userId !== userId || note.issueId !== issueId || note.deletedAt !== null)
+      throw notFound();
+    validateNoteBody(input.body);
+    const before = note.body;
+    note.body = input.body;
+    note.editedAt = this.clock();
+    this.recordActivity(
+      userId,
+      "issue",
+      issueId,
+      "note.updated",
+      input.idempotencyKey,
+      { noteId, bodyLength: [...before].length },
+      { noteId, bodyLength: [...note.body].length },
+    );
+    this.recordOutbox(
+      userId,
+      "issue.note.updated",
+      `issue.note.updated:${note.id}:${input.idempotencyKey}`,
+      { issueId, noteId },
+    );
+    this.recordReceipt(
+      userId,
+      "issue.note.update",
+      input.idempotencyKey,
+      { issueId, noteId, body: input.body },
+      note,
+    );
+    return note;
+  }
+
+  deleteIssueNote(userId: string, issueId: string, noteId: string, idempotencyKey: string): void {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<boolean>(userId, "issue.note.delete", idempotencyKey, {
+      issueId,
+      noteId,
+    });
+    if (existing !== null) return;
+    this.getIssue(userId, issueId);
+    const note = this.notes.get(noteId);
+    if (!note || note.userId !== userId || note.issueId !== issueId || note.deletedAt !== null)
+      throw notFound();
+    note.deletedAt = this.clock();
+    this.recordActivity(
+      userId,
+      "issue",
+      issueId,
+      "note.deleted",
+      idempotencyKey,
+      { noteId },
+      { noteId, deletedAt: note.deletedAt },
+    );
+    this.recordOutbox(userId, "issue.note.deleted", `issue.note.deleted:${note.id}`, {
+      issueId,
+      noteId,
+    });
+    this.recordReceipt(userId, "issue.note.delete", idempotencyKey, { issueId, noteId }, true);
+  }
+
+  createIssueRelation(
+    userId: string,
+    issueId: string,
+    input: RelationMutationInput,
+  ): IssueRelation {
+    this.assertUnlocked(userId);
+    const existingReceipt = this.checkReceipt<IssueRelation>(
+      userId,
+      "issue.relation.create",
+      input.idempotencyKey,
+      { issueId, ...input },
+    );
+    if (existingReceipt) return existingReceipt;
+    const source = this.getIssue(userId, issueId);
+    const target = this.getIssue(userId, input.targetIssueId);
+    if (source.id === target.id)
+      throw validationError({ targetIssueId: ["自分自身にはRelationを作成できません。"] });
+    const [sourceIssueId, targetIssueId] =
+      input.type === "related" ? [source.id, target.id].sort() : [source.id, target.id];
+    const duplicate = [...this.relations.values()].find(
+      (relation) =>
+        relation.userId === userId &&
+        relation.sourceIssueId === sourceIssueId &&
+        relation.targetIssueId === targetIssueId &&
+        relation.type === input.type,
+    );
+    if (duplicate) {
+      this.recordReceipt(
+        userId,
+        "issue.relation.create",
+        input.idempotencyKey,
+        { issueId, ...input },
+        duplicate,
+      );
+      return duplicate;
+    }
+    const relation: IssueRelation = {
+      id: createId("relation"),
+      userId,
+      sourceIssueId,
+      targetIssueId,
+      type: input.type,
+      createdAt: this.clock(),
+    };
+    this.relations.set(relation.id, relation);
+    this.recordActivity(userId, "issue", issueId, "relation.created", input.idempotencyKey, null, {
+      relationId: relation.id,
+      targetIssueId,
+      type: relation.type,
+    });
+    this.recordOutbox(userId, "issue.relation.created", `issue.relation.created:${relation.id}`, {
+      issueId,
+      relationId: relation.id,
+    });
+    this.recordReceipt(
+      userId,
+      "issue.relation.create",
+      input.idempotencyKey,
+      { issueId, ...input },
+      relation,
+    );
+    return relation;
+  }
+
+  deleteIssueRelation(
+    userId: string,
+    issueId: string,
+    relationId: string,
+    idempotencyKey: string,
+  ): void {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<boolean>(userId, "issue.relation.delete", idempotencyKey, {
+      issueId,
+      relationId,
+    });
+    if (existing !== null) return;
+    this.getIssue(userId, issueId);
+    const relation = this.relations.get(relationId);
+    if (
+      !relation ||
+      relation.userId !== userId ||
+      (relation.sourceIssueId !== issueId && relation.targetIssueId !== issueId)
+    )
+      throw notFound();
+    this.relations.delete(relationId);
+    this.recordActivity(
+      userId,
+      "issue",
+      issueId,
+      "relation.deleted",
+      idempotencyKey,
+      { relationId, type: relation.type },
+      null,
+    );
+    this.recordOutbox(userId, "issue.relation.deleted", `issue.relation.deleted:${relation.id}`, {
+      issueId,
+      relationId,
+    });
+    this.recordReceipt(
+      userId,
+      "issue.relation.delete",
+      idempotencyKey,
+      { issueId, relationId },
+      true,
+    );
   }
 
   listIssues(userId: string, query: Partial<IssueQuery> = {}): Issue[] {

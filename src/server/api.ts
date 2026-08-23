@@ -9,12 +9,17 @@ import {
   CreateViewInput,
   MaintenanceRunInput,
   ContinueRunInput,
+  NoteMutationInput,
+  RelationMutationInput,
 } from "./store";
 import { IssueQuery, priorities } from "./model";
 import {
   continueRunInputSchema,
   createIssueInputSchema,
+  issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
+  noteMutationSchema,
+  relationMutationSchema,
   resumeRunInputSchema,
   updateIssueInputSchema,
 } from "../shared/contracts";
@@ -37,10 +42,13 @@ function parseContract<T>(
 
 function textFromDocument(value: unknown): string {
   if (!value || typeof value !== "object") return "";
-  const node = value as { text?: unknown; content?: unknown };
+  const node = value as { type?: unknown; text?: unknown; content?: unknown };
   const ownText = typeof node.text === "string" ? node.text : "";
-  const children = Array.isArray(node.content) ? node.content.map(textFromDocument).join(" ") : "";
-  return `${ownText} ${children}`.trim();
+  const separator = node.type === "doc" ? "\n" : "";
+  const children = Array.isArray(node.content)
+    ? node.content.map(textFromDocument).join(separator)
+    : "";
+  return `${ownText}${children}`;
 }
 
 function pickFields(
@@ -113,9 +121,76 @@ export async function createIssue(request: Request): Promise<Response> {
 }
 
 export async function getIssue(request: Request, issueId: string): Promise<Response> {
-  return withOwner(request, async ({ owner, requestId }) =>
-    json({ issue: getOrbitStore(owner.userId).getIssue(owner.userId, issueId) }, 200, requestId),
-  );
+  return withOwner(request, async ({ owner, requestId }) => {
+    const detail = getOrbitStore(owner.userId).getIssueDetail(owner.userId, issueId);
+    return json(issueDetailResponseSchema.parse(detail), 200, requestId);
+  });
+}
+
+export async function createIssueNote(request: Request, issueId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(noteMutationSchema, await parseBody(request)) as NoteMutationInput;
+    return json(
+      { note: getOrbitStore(owner.userId).createIssueNote(owner.userId, issueId, input) },
+      201,
+      requestId,
+    );
+  });
+}
+
+export async function updateIssueNote(
+  request: Request,
+  issueId: string,
+  noteId: string,
+): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(noteMutationSchema, await parseBody(request)) as NoteMutationInput;
+    return json(
+      { note: getOrbitStore(owner.userId).updateIssueNote(owner.userId, issueId, noteId, input) },
+      200,
+      requestId,
+    );
+  });
+}
+
+export async function deleteIssueNote(
+  request: Request,
+  issueId: string,
+  noteId: string,
+): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const key = request.headers.get("Idempotency-Key");
+    if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    getOrbitStore(owner.userId).deleteIssueNote(owner.userId, issueId, noteId, key);
+    return json({ ok: true }, 200, requestId);
+  });
+}
+
+export async function createIssueRelation(request: Request, issueId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      relationMutationSchema,
+      await parseBody(request),
+    ) as RelationMutationInput;
+    return json(
+      { relation: getOrbitStore(owner.userId).createIssueRelation(owner.userId, issueId, input) },
+      201,
+      requestId,
+    );
+  });
+}
+
+export async function deleteIssueRelation(
+  request: Request,
+  issueId: string,
+  relationId: string,
+): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const key = request.headers.get("Idempotency-Key");
+    if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    getOrbitStore(owner.userId).deleteIssueRelation(owner.userId, issueId, relationId, key);
+    return json({ ok: true }, 200, requestId);
+  });
 }
 
 export async function updateIssue(request: Request, issueId: string): Promise<Response> {
@@ -128,12 +203,13 @@ export async function updateIssue(request: Request, issueId: string): Promise<Re
       idempotencyKey: body.idempotencyKey,
     };
     const parsed = parseContract(updateIssueInputSchema, rawInput);
+    const { descriptionJson, ...patchWithoutDocument } = parsed.patch;
     const input = {
       ...parsed,
       patch: {
-        ...parsed.patch,
-        ...(parsed.patch.descriptionJson
-          ? { description: textFromDocument(parsed.patch.descriptionJson) }
+        ...patchWithoutDocument,
+        ...(descriptionJson !== undefined
+          ? { description: textFromDocument(descriptionJson) }
           : {}),
       },
     } as unknown as UpdateIssueInput;

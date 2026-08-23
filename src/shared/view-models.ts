@@ -63,6 +63,43 @@ export interface IssueViewModel {
   createdAt: number;
   updatedAt: number;
 }
+
+export interface IssueNoteViewModel {
+  id: string;
+  userId: string;
+  issueId: string;
+  body: string;
+  createdAt: number;
+  editedAt: number | null;
+  deletedAt: number | null;
+}
+export type IssueRelationTypeViewModel = "blocking" | "blocked_by" | "related" | "duplicate";
+export interface IssueRelationViewModel {
+  id: string;
+  userId: string;
+  sourceIssueId: string;
+  targetIssueId: string;
+  type: IssueRelationTypeViewModel;
+  createdAt: number;
+  target: Pick<IssueViewModel, "id" | "identifier" | "title" | "statusId">;
+}
+export interface ActivityViewModel {
+  id: string;
+  userId: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  actorType: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: number;
+}
+export interface IssueDetailViewModel {
+  issue: IssueViewModel;
+  notes: IssueNoteViewModel[];
+  relations: IssueRelationViewModel[];
+  activity: ActivityViewModel[];
+}
 export interface ProjectViewModel {
   id: string;
   userId: string;

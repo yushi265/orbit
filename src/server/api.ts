@@ -10,8 +10,11 @@ import {
   CreateViewInput,
   MaintenanceRunInput,
   ContinueRunInput,
+  BulkIssueInput,
   NoteMutationInput,
   RelationMutationInput,
+  CreateLabelInput,
+  UpdateLabelInput,
   UpdateCycleMetadataInput,
   UpdateViewInput,
 } from "./store";
@@ -23,6 +26,9 @@ import {
   issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
   noteMutationSchema,
+  bulkIssueMutationSchema,
+  labelMutationSchema,
+  labelUpdateSchema,
   projectCreateMutationSchema,
   projectMetadataMutationSchema,
   relationMutationSchema,
@@ -100,6 +106,7 @@ function parseQuery(request: Request): Partial<IssueQuery> {
       statusIds: url.searchParams.get("status")?.split(",").filter(Boolean),
       projectIds: url.searchParams.get("project")?.split(",").filter(Boolean),
       cycleIds: url.searchParams.get("cycle")?.split(",").filter(Boolean),
+      labelIds: url.searchParams.get("label")?.split(",").filter(Boolean),
       due: (url.searchParams.get("due") as IssueQuery["filter"]["due"]) || undefined,
     },
     order: (url.searchParams.get("order") as IssueQuery["order"]) || "manual",
@@ -290,6 +297,58 @@ export async function listProjects(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
     json({ items: getOrbitStore(owner.userId).listProjects(owner.userId) }, 200, requestId),
   );
+}
+
+export async function listLabels(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) =>
+    json({ items: getOrbitStore(owner.userId).listLabels(owner.userId) }, 200, requestId),
+  );
+}
+
+export async function createLabel(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(labelMutationSchema, await parseBody(request)) as CreateLabelInput;
+    return json(
+      { label: getOrbitStore(owner.userId).createLabel(owner.userId, input) },
+      201,
+      requestId,
+    );
+  });
+}
+
+export async function updateLabel(request: Request, labelId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(labelUpdateSchema, await parseBody(request)) as UpdateLabelInput;
+    return json(
+      { label: getOrbitStore(owner.userId).updateLabel(owner.userId, labelId, input) },
+      200,
+      requestId,
+    );
+  });
+}
+
+export async function deleteLabel(request: Request, labelId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const mutationKey = request.headers.get("Idempotency-Key");
+    if (!mutationKey)
+      throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    getOrbitStore(owner.userId).deleteLabel(owner.userId, labelId, mutationKey);
+    return json({ ok: true }, 200, requestId);
+  });
+}
+
+export async function bulkUpdateIssues(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      bulkIssueMutationSchema,
+      await parseBody(request),
+    ) as BulkIssueInput;
+    return json(
+      { items: getOrbitStore(owner.userId).bulkUpdateIssues(owner.userId, input) },
+      200,
+      requestId,
+    );
+  });
 }
 
 export async function createProject(request: Request): Promise<Response> {

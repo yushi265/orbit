@@ -125,6 +125,13 @@ export interface Issue {
   updatedAt: number;
 }
 
+export interface Label {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+}
+
 export interface IssueNote {
   id: string;
   userId: string;
@@ -280,6 +287,7 @@ export interface BootstrapPayload {
   workflowStates: WorkflowState[];
   projectStatuses: ProjectStatus[];
   issues: Issue[];
+  labels: Label[];
   projects: Project[];
   cycles: Cycle[];
   views: SavedView[];

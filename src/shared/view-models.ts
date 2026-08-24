@@ -63,6 +63,12 @@ export interface IssueViewModel {
   createdAt: number;
   updatedAt: number;
 }
+export interface LabelViewModel {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+}
 
 export interface IssueNoteViewModel {
   id: string;
@@ -183,6 +189,7 @@ export interface BootstrapViewModel {
   workflowStates: WorkflowStateViewModel[];
   projectStatuses: ProjectStatusViewModel[];
   issues: IssueViewModel[];
+  labels: LabelViewModel[];
   projects: ProjectViewModel[];
   cycles: CycleViewModel[];
   views: SavedViewViewModel[];

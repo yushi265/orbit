@@ -1,4 +1,5 @@
 export * from "./background-runs";
+export * from "./bulk";
 export * from "./cycles";
 export * from "./enums";
 export * from "./errors";
@@ -7,4 +8,5 @@ export * from "./projects";
 export * from "./rich-text";
 export * from "./text";
 export * from "./issue-detail";
+export * from "./labels";
 export * from "./views";

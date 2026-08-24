@@ -4,6 +4,7 @@ import {
   Cycle,
   CycleSettings,
   Issue,
+  Label,
   IssueDetail,
   IssueNote,
   IssueRelation,
@@ -28,7 +29,15 @@ import {
 } from "./model";
 import { conflict, locked, notFound, validationError } from "./errors";
 import { canonicalMutationJson } from "../shared/canonical-json";
-import type { CycleMetadataMutation, SavedViewUpdate } from "../shared/contracts";
+import {
+  labelColorSchema,
+  labelNameSchema,
+  type BulkIssueMutation,
+  type CycleMetadataMutation,
+  type LabelMutation,
+  type LabelUpdate,
+  type SavedViewUpdate,
+} from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 
 type Lock = {
@@ -112,6 +121,9 @@ export interface CreateViewInput {
   layout?: Record<string, boolean>;
 }
 export type UpdateViewInput = SavedViewUpdate;
+export type CreateLabelInput = LabelMutation;
+export type UpdateLabelInput = LabelUpdate;
+export type BulkIssueInput = BulkIssueMutation;
 
 export interface MaintenanceRunInput {
   kind: "maintenance";
@@ -201,6 +213,7 @@ export class OrbitStore {
   readonly cycles = new Map<string, Cycle>();
   readonly cycleSettings = new Map<string, CycleSettings>();
   readonly issues = new Map<string, Issue>();
+  readonly labels = new Map<string, Label>();
   readonly notes = new Map<string, IssueNote>();
   readonly relations = new Map<string, IssueRelation>();
   readonly views = new Map<string, SavedView>();
@@ -369,6 +382,127 @@ export class OrbitStore {
       .sort((a, b) => a.position - b.position);
   }
 
+  listLabels(userId: string): Label[] {
+    return [...this.labels.values()]
+      .filter((item) => item.userId === userId)
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private validateLabelName(name: string): string {
+    const normalized = name.trim();
+    if (!labelNameSchema.safeParse(normalized).success)
+      throw validationError({ name: ["Label名は1〜50文字で入力してください。"] });
+    return normalized;
+  }
+
+  private validateLabelColor(color: string): string {
+    if (!labelColorSchema.safeParse(color).success)
+      throw validationError({ color: ["色は#RRGGBB形式で指定してください。"] });
+    return color.toUpperCase();
+  }
+
+  private ownedLabelIds(userId: string, labelIds: string[] | undefined): string[] {
+    const normalized = [...new Set(labelIds ?? [])];
+    for (const labelId of normalized) {
+      const label = this.labels.get(labelId);
+      if (!label || label.userId !== userId) throw notFound();
+    }
+    return normalized;
+  }
+
+  createLabel(userId: string, input: CreateLabelInput): Label {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Label>(userId, "label.create", input.idempotencyKey, input);
+    if (existing) return existing;
+    const name = this.validateLabelName(input.name);
+    const color = this.validateLabelColor(input.color);
+    if (this.listLabels(userId).some((item) => item.name === name))
+      throw validationError({ name: ["同じ名前のLabelが既にあります。"] });
+    const label: Label = { id: createId("label"), userId, name, color };
+    this.labels.set(label.id, label);
+    this.recordActivity(userId, "label", label.id, "created", input.idempotencyKey, null, {
+      name: label.name,
+      color: label.color,
+    });
+    this.recordOutbox(userId, "label.created", `label.created:${label.id}`, { labelId: label.id });
+    this.recordReceipt(userId, "label.create", input.idempotencyKey, input, label);
+    return label;
+  }
+
+  updateLabel(userId: string, labelId: string, input: UpdateLabelInput): Label {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Label>(userId, "label.update", input.idempotencyKey, {
+      labelId,
+      ...input,
+    });
+    if (existing) return existing;
+    const label = this.labels.get(labelId);
+    if (!label || label.userId !== userId) throw notFound();
+    if (input.name === undefined && input.color === undefined)
+      throw validationError({ name: ["nameまたはcolorを指定してください。"] });
+    const name = input.name === undefined ? label.name : this.validateLabelName(input.name);
+    const color = input.color === undefined ? label.color : this.validateLabelColor(input.color);
+    if (
+      name !== label.name &&
+      this.listLabels(userId).some((item) => item.id !== labelId && item.name === name)
+    )
+      throw validationError({ name: ["同じ名前のLabelが既にあります。"] });
+    const before = { ...label };
+    label.name = name;
+    label.color = color;
+    this.recordActivity(userId, "label", label.id, "updated", input.idempotencyKey, before, {
+      ...label,
+    });
+    this.recordOutbox(
+      userId,
+      "label.updated",
+      `label.updated:${label.id}:${input.idempotencyKey}`,
+      {
+        labelId: label.id,
+      },
+    );
+    this.recordReceipt(userId, "label.update", input.idempotencyKey, { labelId, ...input }, label);
+    return label;
+  }
+
+  deleteLabel(userId: string, labelId: string, idempotencyKey: string): void {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<boolean>(userId, "label.delete", idempotencyKey, {
+      labelId,
+    });
+    if (existing !== null) return;
+    const label = this.labels.get(labelId);
+    if (!label || label.userId !== userId) throw notFound();
+    let detached = 0;
+    for (const issue of this.issues.values()) {
+      if (issue.userId !== userId || !issue.labelIds.includes(labelId)) continue;
+      const before = { version: issue.version, labelIds: [...issue.labelIds] };
+      issue.labelIds = issue.labelIds.filter((id) => id !== labelId);
+      issue.version += 1;
+      issue.updatedAt = this.clock();
+      this.recordActivity(
+        userId,
+        "issue",
+        issue.id,
+        "updated",
+        `${idempotencyKey}:${issue.id}`,
+        before,
+        { version: issue.version, labelIds: [...issue.labelIds] },
+      );
+      this.recordOutbox(
+        userId,
+        "issue.updated",
+        `issue.updated:${issue.id}:label-delete:${idempotencyKey}`,
+        { issueId: issue.id, version: issue.version },
+      );
+      detached += 1;
+    }
+    this.labels.delete(labelId);
+    this.recordActivity(userId, "label", labelId, "deleted", idempotencyKey, { ...label }, null);
+    this.recordOutbox(userId, "label.deleted", `label.deleted:${labelId}`, { labelId, detached });
+    this.recordReceipt(userId, "label.delete", idempotencyKey, { labelId }, true);
+  }
+
   private assertOwner(userId: string): void {
     if (!this.users.has(userId)) this.ensureOwner(userId);
   }
@@ -486,6 +620,7 @@ export class OrbitStore {
       ![1, 2, 3, 5, 8].includes(input.estimate)
     )
       throw validationError({ estimate: ["見積は1 / 2 / 3 / 5 / 8から選択してください。"] });
+    const labelIds = this.ownedLabelIds(userId, input.labelIds);
     const now = this.clock();
     const number = preferences.issueCounter + 1;
     const issue: Issue = {
@@ -502,7 +637,7 @@ export class OrbitStore {
       projectId: input.projectId ?? null,
       cycleId: input.cycleId ?? null,
       parentId: input.parentId ?? null,
-      labelIds: input.labelIds ?? [],
+      labelIds,
       position: [...this.issues.values()].filter((item) => item.userId === userId).length,
       version: 1,
       archivedAt: null,
@@ -879,8 +1014,10 @@ export class OrbitStore {
       const cycle = this.cycles.get(patch.cycleId);
       if (!cycle || cycle.userId !== userId) throw notFound();
     }
+    const labelIds =
+      patch.labelIds === undefined ? undefined : this.ownedLabelIds(userId, patch.labelIds);
     const before = { ...issue };
-    Object.assign(issue, patch);
+    Object.assign(issue, { ...patch, ...(labelIds === undefined ? {} : { labelIds }) });
     issue.version += 1;
     issue.updatedAt = this.clock();
     this.recordActivity(
@@ -898,6 +1035,96 @@ export class OrbitStore {
     });
     this.recordReceipt(userId, "issue.update", input.idempotencyKey, input, issue);
     return issue;
+  }
+
+  bulkUpdateIssues(userId: string, input: BulkIssueInput): Issue[] {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Issue[]>(userId, "issue.bulk", input.idempotencyKey, input);
+    if (existing) return existing;
+    const issueIds = [...new Set(input.issueIds)];
+    if (issueIds.length < 1 || issueIds.length > 100)
+      throw validationError({ issueIds: ["対象Issueは1〜100件で指定してください。"] });
+    const patchFields = Object.values(input.patch).filter((value) => value !== undefined);
+    if (patchFields.length !== 1)
+      throw validationError({ patch: ["一括更新は一度に1項目だけ指定してください。"] });
+    if (input.patch.labelIds !== undefined && input.patch.labelIds.length > 1)
+      throw validationError({ labelIds: ["一括適用できるLabelは1件までです。"] });
+    const issues = issueIds.map((issueId) => {
+      const issue = this.issues.get(issueId);
+      if (!issue || issue.userId !== userId || issue.deletedAt) throw notFound();
+      return issue;
+    });
+    const patch = input.patch;
+    if (patch.statusId) {
+      const status = this.workflowStates.get(patch.statusId);
+      if (!status || status.userId !== userId) throw notFound();
+    }
+    if (patch.projectId) {
+      const project = this.projects.get(patch.projectId);
+      if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    }
+    if (patch.cycleId) {
+      const cycle = this.cycles.get(patch.cycleId);
+      if (!cycle || cycle.userId !== userId) throw notFound();
+    }
+    if (patch.priority && !priorities.includes(patch.priority))
+      throw validationError({ priority: ["優先度が不正です。"] });
+    const labelIds =
+      patch.labelIds === undefined ? undefined : this.ownedLabelIds(userId, patch.labelIds);
+    const issueSnapshots = structuredClone(issues);
+    const activityLength = this.activities.length;
+    const outboxLength = this.outbox.length;
+    const receiptKey = `${userId}:${input.idempotencyKey}`;
+    try {
+      const updated = issues.map((issue) => {
+        const before = {
+          version: issue.version,
+          statusId: issue.statusId,
+          priority: issue.priority,
+          cycleId: issue.cycleId,
+          projectId: issue.projectId,
+          labelIds: [...issue.labelIds],
+        };
+        Object.assign(issue, {
+          ...patch,
+          ...(labelIds === undefined ? {} : { labelIds }),
+          version: issue.version + 1,
+          updatedAt: this.clock(),
+        });
+        this.recordActivity(
+          userId,
+          "issue",
+          issue.id,
+          "bulk_updated",
+          `${input.idempotencyKey}:${issue.id}`,
+          before,
+          {
+            version: issue.version,
+            statusId: issue.statusId,
+            priority: issue.priority,
+            cycleId: issue.cycleId,
+            projectId: issue.projectId,
+            labelIds: [...issue.labelIds],
+          },
+        );
+        this.recordOutbox(
+          userId,
+          "issue.bulk_updated",
+          `issue.bulk_updated:${issue.id}:${input.idempotencyKey}`,
+          { issueId: issue.id, version: issue.version },
+        );
+        return issue;
+      });
+      this.recordReceipt(userId, "issue.bulk", input.idempotencyKey, input, updated);
+      return updated;
+    } catch (error) {
+      issues.forEach((issue, index) => Object.assign(issue, issueSnapshots[index]));
+      this.activities.splice(activityLength);
+      this.outbox.splice(outboxLength);
+      this.receipts.delete(receiptKey);
+      throw error;
+    }
   }
 
   archiveIssue(userId: string, issueId: string, idempotencyKey: string): Issue {
@@ -1334,6 +1561,7 @@ export class OrbitStore {
       workflowStates: this.ownedWorkflowStates(userId),
       projectStatuses: this.ownedProjectStatuses(userId),
       issues: this.listIssues(userId),
+      labels: this.listLabels(userId),
       projects: this.listProjects(userId),
       cycles: this.listCycles(userId),
       views: this.listViews(userId),

@@ -1,4 +1,4 @@
-const CACHE_NAME = "orbit-static-v2";
+const CACHE_NAME = "orbit-static-v3";
 const STATIC_ASSET = /\.(?:js|css|svg|png|webp|ico|woff2?)$/i;
 const DEV_ASSET = /^(?:\/src\/|\/@|\/node_modules\/)/;
 

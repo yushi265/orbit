@@ -28,6 +28,8 @@ import {
 } from "./model";
 import { conflict, locked, notFound, validationError } from "./errors";
 import { canonicalMutationJson } from "../shared/canonical-json";
+import type { CycleMetadataMutation } from "../shared/contracts";
+import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 
 type Lock = {
   userId: string;
@@ -83,6 +85,7 @@ export interface RelationMutationInput {
   targetIssueId: string;
   type: IssueRelationType;
 }
+export type UpdateCycleMetadataInput = CycleMetadataMutation;
 
 export interface CreateProjectInput {
   idempotencyKey: string;
@@ -1063,12 +1066,68 @@ export class OrbitStore {
       .sort((a, b) => a.startsAt - b.startsAt);
   }
 
+  updateCycleMetadata(userId: string, cycleId: string, input: UpdateCycleMetadataInput): Cycle {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Cycle>(
+      userId,
+      "cycle.metadata.update",
+      input.idempotencyKey,
+      { cycleId, ...input },
+    );
+    if (existing) return existing;
+    const cycle = this.cycles.get(cycleId);
+    if (!cycle || cycle.userId !== userId) throw notFound();
+    if (
+      input.nameOverride !== undefined &&
+      input.nameOverride !== null &&
+      ([...input.nameOverride].length < 1 || [...input.nameOverride].length > 100)
+    )
+      throw validationError({ nameOverride: ["Cycle名は1〜100文字で入力してください。"] });
+    if (input.description !== undefined && [...input.description].length > 2_000)
+      throw validationError({ description: ["説明は2,000文字以内で入力してください。"] });
+    if (input.nameOverride !== undefined) cycle.nameOverride = input.nameOverride;
+    if (input.description !== undefined) cycle.description = input.description;
+    this.recordActivity(userId, "cycle", cycle.id, "updated", input.idempotencyKey, null, {
+      nameOverride: cycle.nameOverride,
+      descriptionLength: [...cycle.description].length,
+    });
+    this.recordOutbox(
+      userId,
+      "cycle.updated",
+      `cycle.updated:${cycle.id}:${input.idempotencyKey}`,
+      { cycleId: cycle.id },
+    );
+    this.recordReceipt(
+      userId,
+      "cycle.metadata.update",
+      input.idempotencyKey,
+      { cycleId, ...input },
+      cycle,
+    );
+    return cycle;
+  }
+
+  getCycleMetrics(userId: string, cycleId: string): CycleMetrics {
+    const cycle = this.cycles.get(cycleId);
+    if (!cycle || cycle.userId !== userId) throw notFound();
+    const issues = [...this.issues.values()].filter(
+      (issue) => issue.userId === userId && issue.cycleId === cycle.id && !issue.deletedAt,
+    );
+    return calculateCycleMetrics(issues, this.ownedWorkflowStates(userId));
+  }
+
   closeCycle(userId: string, cycleId: string, idempotencyKey: string, runId?: string): Cycle {
     this.assertUnlocked(userId, runId);
     validateKey(idempotencyKey);
+    const request = { cycleId, runId: runId ?? null };
+    const existing = this.checkReceipt<Cycle>(userId, "cycle.close", idempotencyKey, request);
+    if (existing) return existing;
     const cycle = this.cycles.get(cycleId);
     if (!cycle || cycle.userId !== userId) throw notFound();
-    if (cycle.status === "completed") return cycle;
+    if (cycle.status === "completed") {
+      this.recordReceipt(userId, "cycle.close", idempotencyKey, request, cycle);
+      return cycle;
+    }
     const next =
       this.listCycles(userId).find((item) => item.number === cycle.number + 1) ??
       this.createNextCycle(userId, cycle);
@@ -1107,6 +1166,7 @@ export class OrbitStore {
       cycleId: cycle.id,
       moved: moveable.length,
     });
+    this.recordReceipt(userId, "cycle.close", idempotencyKey, request, cycle);
     return cycle;
   }
 

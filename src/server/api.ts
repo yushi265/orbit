@@ -11,11 +11,13 @@ import {
   ContinueRunInput,
   NoteMutationInput,
   RelationMutationInput,
+  UpdateCycleMetadataInput,
 } from "./store";
 import { IssueQuery, priorities } from "./model";
 import {
   continueRunInputSchema,
   createIssueInputSchema,
+  cycleMetadataMutationSchema,
   issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
   noteMutationSchema,
@@ -348,6 +350,20 @@ export async function closeCycle(request: Request, cycleId: string): Promise<Res
       requestId,
     ),
   );
+}
+
+export async function updateCycleMetadata(request: Request, cycleId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      cycleMetadataMutationSchema,
+      await parseBody(request),
+    ) as UpdateCycleMetadataInput;
+    return json(
+      { cycle: getOrbitStore(owner.userId).updateCycleMetadata(owner.userId, cycleId, input) },
+      200,
+      requestId,
+    );
+  });
 }
 
 export async function listViews(request: Request): Promise<Response> {

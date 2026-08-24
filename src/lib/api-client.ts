@@ -52,7 +52,16 @@ export function apiGet<T>(path: string): Promise<T> {
   return apiRequest<T>(path);
 }
 export function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) });
+  const headers = new Headers();
+  if (
+    body &&
+    typeof body === "object" &&
+    "idempotencyKey" in body &&
+    typeof body.idempotencyKey === "string"
+  ) {
+    headers.set("Idempotency-Key", body.idempotencyKey);
+  }
+  return apiRequest<T>(path, { method: "POST", headers, body: JSON.stringify(body) });
 }
 export function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return apiRequest<T>(path, { method: "PATCH", body: JSON.stringify(body) });

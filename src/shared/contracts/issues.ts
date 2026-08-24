@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { estimateSchema, prioritySchema, type Priority } from "./enums";
 import { tiptapDocumentSchema } from "./rich-text";
+import { boundedUnicodeString } from "./text";
 
 const opaqueIdSchema = z.string().min(1);
 const unixMillisecondsSchema = z.number().int().finite();
@@ -14,10 +15,11 @@ export const mutationMetaSchema = z
   .strict();
 
 const issueFieldsShape = {
-  title: z.string().refine((value) => {
-    const codePointLength = Array.from(value).length;
-    return codePointLength >= 1 && codePointLength <= 255;
-  }, "title は Unicode code point で 1〜255 文字である必要があります。"),
+  title: boundedUnicodeString(
+    1,
+    255,
+    "title は Unicode code point で 1〜255 文字である必要があります。",
+  ),
   descriptionJson: tiptapDocumentSchema.optional(),
   statusId: opaqueIdSchema.optional(),
   priority: prioritySchema.optional(),

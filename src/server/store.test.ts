@@ -136,6 +136,13 @@ describe("OrbitStore cycle and background runs", () => {
     expect(store.issues.get(canceled.id)?.cycleId).toBe(cycle);
     expect(store.cycleHistory).toHaveLength(2);
     expect(store.outbox.filter((event) => event.type === "cycle.completed")).toHaveLength(1);
+    const outboxCount = store.outbox.length;
+    const receiptCount = store.receipts.size;
+    const cycleCount = store.cycles.size;
+    expect(store.closeCycle("owner", cycle, "close-cycle-1").status).toBe("completed");
+    expect(store.outbox).toHaveLength(outboxCount);
+    expect(store.receipts.size).toBe(receiptCount);
+    expect(store.cycles.size).toBe(cycleCount);
   });
 
   it("[状態遷移] Background Runはlock中の業務Mutationを423で拒否し、3 Stepを順序実行する", () => {

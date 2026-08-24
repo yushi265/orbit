@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   bootstrap,
+  closeCycle,
   continueBackgroundRun,
   createIssue,
   createIssueNote,
@@ -9,6 +10,7 @@ import {
   deleteIssueRelation,
   getIssue,
   startBackgroundRun,
+  updateCycleMetadata,
   updateIssueNote,
   updateIssue,
 } from "./api";
@@ -224,6 +226,183 @@ describe("HTTP service boundary", () => {
       noteId,
     );
     expect(missingDeleteKey.status).toBe(400);
+  });
+
+  it("[代表値] Cycle metadata APIは再表示可能なCycleを返す", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycleId = (await body<{ cycles: Array<{ id: string }> }>(initial)).cycles[0].id;
+    const input = {
+      idempotencyKey: "cycle-api-meta-1",
+      nameOverride: "集中Cycle",
+      description: "今週の集中テーマ",
+    };
+    const updated = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", input),
+      cycleId,
+    );
+    expect(updated.status).toBe(200);
+    const updatedBody = await body<{ cycle: { nameOverride: string; description: string } }>(
+      updated,
+    );
+    expect(updatedBody.cycle).toMatchObject({
+      nameOverride: "集中Cycle",
+      description: "今週の集中テーマ",
+    });
+    const replay = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", input),
+      cycleId,
+    );
+    expect(replay.status).toBe(200);
+    expect((await body<{ cycle: { nameOverride: string } }>(replay)).cycle.nameOverride).toBe(
+      "集中Cycle",
+    );
+    const conflict = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", {
+        ...input,
+        nameOverride: "別Cycle",
+      }),
+      cycleId,
+    );
+    expect(conflict.status).toBe(409);
+    expect((await body<{ error: { code: string } }>(conflict)).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED",
+    );
+    const invalid = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", {
+        idempotencyKey: "cycle-api-meta-invalid",
+        nameOverride: "",
+      }),
+      cycleId,
+    );
+    expect(invalid.status).toBe(400);
+    expect(
+      (await body<{ error: { code: string; fieldErrors: Record<string, string[]> } }>(invalid))
+        .error,
+    ).toMatchObject({ code: "VALIDATION_ERROR", fieldErrors: { nameOverride: expect.any(Array) } });
+    const missing = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", {
+        idempotencyKey: "cycle-api-meta-missing",
+        description: "対象なし",
+      }),
+      "missing-cycle",
+    );
+    expect(missing.status).toBe(404);
+    expect((await body<{ error: { code: string } }>(missing)).error.code).toBe(
+      "RESOURCE_NOT_FOUND",
+    );
+    await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "cycle-api-meta-lock",
+      }),
+    );
+    const locked = await updateCycleMetadata(
+      mutation("http://orbit.local/api/v1/cycles", "PATCH", {
+        idempotencyKey: "cycle-api-meta-locked",
+        description: "ロック中",
+      }),
+      cycleId,
+    );
+    expect(locked.status).toBe(423);
+    expect((await body<{ error: { code: string } }>(locked)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
+  });
+
+  it("[状態遷移] Cycle close APIの同一Idempotency-Key再送は同じ結果に収束する", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycleId = (await body<{ cycles: Array<{ id: string }> }>(initial)).cycles[0].id;
+    const closeRequest = () =>
+      new Request("http://orbit.local/api/v1/cycles", {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "cycle-close-api-1",
+        },
+      });
+    const first = await closeCycle(closeRequest(), cycleId);
+    const replay = await closeCycle(closeRequest(), cycleId);
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect((await body<{ cycle: { status: string } }>(replay)).cycle.status).toBe("completed");
+    const after = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const afterBody = await body<{
+      cycles: Array<{ id: string }>;
+      issues: Array<{ title: string; cycleId: string | null }>;
+    }>(after);
+    expect(afterBody.cycles).toHaveLength(2);
+    expect(
+      afterBody.issues.find((issue) => issue.title === "Mobileの一覧を磨く")?.cycleId,
+    ).not.toBe(cycleId);
+  });
+
+  it("[状態遷移] IssueのCycle追加・解除は既存version CASとlockを通る", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycleId = (await body<{ cycles: Array<{ id: string }> }>(initial)).cycles[0].id;
+    const created = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "cycle-assignment-api-issue",
+        title: "Cycle割当対象",
+      }),
+    );
+    const issue = (await body<{ issue: { id: string; version: number } }>(created)).issue;
+    const assigned = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "cycle-assignment-api-add",
+        version: issue.version,
+        patch: { cycleId },
+      }),
+      issue.id,
+    );
+    expect(assigned.status).toBe(200);
+    const assignedIssue = (await body<{ issue: { version: number; cycleId: string } }>(assigned))
+      .issue;
+    expect(assignedIssue).toMatchObject({ version: 2, cycleId });
+    const stale = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "cycle-assignment-api-stale",
+        version: 1,
+        patch: { cycleId: null },
+      }),
+      issue.id,
+    );
+    expect(stale.status).toBe(409);
+    expect((await body<{ error: { code: string } }>(stale)).error.code).toBe(
+      "ISSUE_VERSION_CONFLICT",
+    );
+    const removed = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "cycle-assignment-api-remove",
+        version: assignedIssue.version,
+        patch: { cycleId: null },
+      }),
+      issue.id,
+    );
+    expect(removed.status).toBe(200);
+    expect(
+      (await body<{ issue: { version: number; cycleId: string | null } }>(removed)).issue,
+    ).toMatchObject({
+      version: 3,
+      cycleId: null,
+    });
+    await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "cycle-assignment-api-lock",
+      }),
+    );
+    const locked = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "cycle-assignment-api-locked",
+        version: 3,
+        patch: { cycleId: null },
+      }),
+      issue.id,
+    );
+    expect(locked.status).toBe(423);
+    expect((await body<{ error: { code: string } }>(locked)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
   });
 
   it("[異常系] Detail APIは不存在 / validation / lockをErrorEnvelopeへ変換する", async () => {

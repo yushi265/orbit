@@ -4,6 +4,7 @@
 
 - `/api/v1/bootstrap`、`/api/v1/issues`、`/api/v1/projects`、`/api/v1/cycles`、`/api/v1/search`、`/api/v1/views`、`/api/v1/notifications`、`/api/v1/preferences`、`/api/v1/background-runs/*` をTanStack Start Server Routeで公開する（参照: `src/server/api.ts`、`src/routes/api/v1/`）。
 - Issue detailは `GET /api/v1/issues/:issueId` で `issue / notes / relations / activity` を返し、Notes / RelationsのMutationはIssue配下のnested Routeを使う（参照: `src/server/api.ts`、`src/routes/api/v1/issues/$issueId/`）。
+- Cycle workspaceは既存BootstrapのCycle / Issueを使い、`PATCH /api/v1/cycles/:cycleId` でmetadataを更新する。Cycle closeのPOSTとIssue PATCHのCycle割当は既存Routeを再利用する（参照: `src/server/api.ts`、`src/routes/api/v1/cycles/`）。
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
 
 ## 主要データ構造
@@ -26,4 +27,4 @@
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace作業中 / 2026-08-24
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace作業中 / 2026-08-24

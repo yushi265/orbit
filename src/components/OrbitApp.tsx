@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   BootstrapViewModel as BootstrapPayload,
   CycleViewModel as Cycle,
@@ -14,6 +20,7 @@ import type {
   IssueNoteViewModel,
   IssueRelationTypeViewModel,
 } from "../shared/view-models";
+import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -121,6 +128,7 @@ function OrbitAppInner(props: Props) {
   const [projectName, setProjectName] = useState("");
   const [run, setRun] = useState<PublicRunSummary | null>(null);
   const [runBusy, setRunBusy] = useState(false);
+  const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
 
@@ -290,8 +298,24 @@ function OrbitAppInner(props: Props) {
       );
       showToast("success", "変更を保存しました");
     },
-    onError: (error, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(["bootstrap"], context.previous);
+    onError: async (error, variables, context) => {
+      if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      } else if (context?.previous) {
+        const previousIssue = context.previous.issues.find(
+          (item) => item.id === variables.issue.id,
+        );
+        queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+          current && previousIssue
+            ? {
+                ...current,
+                issues: current.issues.map((item) =>
+                  item.id === previousIssue.id ? previousIssue : item,
+                ),
+              }
+            : current,
+        );
+      }
       showToast(
         "error",
         error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT"
@@ -402,6 +426,20 @@ function OrbitAppInner(props: Props) {
     }
   }
 
+  async function closeCycle(cycle: Cycle) {
+    if (cycleCloseBusy) return;
+    setCycleCloseBusy(true);
+    try {
+      await apiPost(`/api/v1/cycles/${cycle.id}`, { idempotencyKey: idempotencyKey() });
+      showToast("success", "Cycleを完了しました");
+      await refresh();
+    } catch (error) {
+      showToast("error", error instanceof ApiError ? error.message : "Cycleの更新に失敗しました");
+    } finally {
+      setCycleCloseBusy(false);
+    }
+  }
+
   if (bootstrap.isLoading)
     return (
       <div className="loading-screen">
@@ -507,19 +545,13 @@ function OrbitAppInner(props: Props) {
             <CyclesView
               cycles={cycles}
               issues={issues}
-              onClose={(cycle) =>
-                apiPost(`/api/v1/cycles/${cycle.id}`, {})
-                  .then(() => {
-                    showToast("success", "Cycleを完了しました");
-                    refresh();
-                  })
-                  .catch((error) =>
-                    showToast(
-                      "error",
-                      error instanceof ApiError ? error.message : "Cycleの更新に失敗しました",
-                    ),
-                  )
-              }
+              workflowStates={workflowStates}
+              pendingIssueId={pendingIssueId}
+              onUpdateIssue={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onRefresh={refresh}
+              onNavigateIssues={() => void navigate("issues")}
+              closeBusy={cycleCloseBusy}
+              onClose={(cycle) => void closeCycle(cycle)}
             />
           )}
           {section === "projects" && (
@@ -796,10 +828,7 @@ function HomeView({
 }) {
   const cycle = data.cycles.find((item) => item.status === "active");
   const cycleIssues = cycle ? data.issues.filter((item) => item.cycleId === cycle.id) : [];
-  const completed = cycleIssues.filter(
-    (item) =>
-      data.workflowStates.find((state) => state.id === item.statusId)?.category === "completed",
-  ).length;
+  const cycleMetrics = calculateCycleMetrics(cycleIssues, data.workflowStates);
   return (
     <div className="page">
       <div className="page-heading">
@@ -819,7 +848,7 @@ function HomeView({
           <div className="card-top">
             <div>
               <span className="eyebrow coral">CURRENT CYCLE</span>
-              <h2>{cycle?.name ?? "Active Cycleなし"}</h2>
+              <h2>{cycle?.nameOverride ?? cycle?.name ?? "Active Cycleなし"}</h2>
               <p>
                 {cycle ? formatRange(cycle.startsAt, cycle.endsAt) : "次のCycleを設定しましょう"}
               </p>
@@ -831,22 +860,20 @@ function HomeView({
               <div className="progress-line">
                 <span
                   style={{
-                    width: `${cycleIssues.length ? Math.round((completed / cycleIssues.length) * 100) : 0}%`,
+                    width: `${cycleMetrics.progressPercent}%`,
                   }}
                 />
               </div>
               <div className="cycle-stats">
                 <div>
                   <strong>
-                    {completed}
-                    <small> / {cycleIssues.length}</small>
+                    {cycleMetrics.completed}
+                    <small> / {cycleMetrics.total - cycleMetrics.canceled}</small>
                   </strong>
                   <span>完了したIssue</span>
                 </div>
                 <div>
-                  <strong>
-                    {cycleIssues.reduce((sum, item) => sum + (item.estimate ?? 0), 0)}
-                  </strong>
+                  <strong>{cycleMetrics.estimateTotal}</strong>
                   <span>Scope points</span>
                 </div>
                 <button className="text-button" onClick={() => onNavigate("cycles")}>
@@ -1162,18 +1189,129 @@ function IssueCard({
 function CyclesView({
   cycles,
   issues,
+  workflowStates,
+  pendingIssueId,
+  onUpdateIssue,
+  onRefresh,
+  onNavigateIssues,
+  closeBusy,
   onClose,
 }: {
   cycles: Cycle[];
   issues: Issue[];
+  workflowStates: WorkflowState[];
+  pendingIssueId: string | null;
+  onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
+  onRefresh: () => void;
+  onNavigateIssues: () => void;
+  closeBusy: boolean;
   onClose: (cycle: Cycle) => void;
 }) {
-  const current = cycles.find((cycle) => cycle.status === "active");
-  const cycleIssues = current ? issues.filter((issue) => issue.cycleId === current.id) : [];
-  const prioritized = cycleIssues.filter((issue) => issue.priority !== "no_priority").length;
-  const progress = Math.min(100, Math.round((prioritized / Math.max(1, cycleIssues.length)) * 100));
+  const [tab, setTab] = useState<CycleTab>("current");
+  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [assignmentTargetId, setAssignmentTargetId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const tabCycles = cycles.filter((cycle) => cycleTabForStatus(cycle.status) === tab);
+  const selectedCycle =
+    tabCycles.find((cycle) => cycle.id === selectedCycleId) ?? tabCycles[0] ?? null;
+  const cycleIssues = selectedCycle
+    ? issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt)
+    : [];
+  const availableIssues = issues.filter((issue) => !issue.cycleId && !issue.deletedAt);
+  const metrics = calculateCycleMetrics(cycleIssues, workflowStates);
+
+  useEffect(() => {
+    if (!selectedCycle) {
+      setSelectedCycleId(tabCycles[0]?.id ?? null);
+      return;
+    }
+    setSelectedCycleId((current) => (current === selectedCycle.id ? current : selectedCycle.id));
+    setNameDraft(selectedCycle.nameOverride ?? selectedCycle.name);
+    setDescriptionDraft(selectedCycle.description);
+    setAssignmentTargetId("");
+    setEditing(false);
+    setError(null);
+  }, [
+    selectedCycle?.id,
+    selectedCycle?.name,
+    selectedCycle?.nameOverride,
+    selectedCycle?.description,
+  ]);
+
+  function cancelMetadataEdit() {
+    if (selectedCycle) {
+      setNameDraft(selectedCycle.nameOverride ?? selectedCycle.name);
+      setDescriptionDraft(selectedCycle.description);
+    }
+    setEditing(false);
+    setError(null);
+  }
+
+  function handleMetadataKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelMetadataEdit();
+    }
+  }
+
+  async function saveMetadata() {
+    if (!selectedCycle || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPatch(`/api/v1/cycles/${selectedCycle.id}`, {
+        idempotencyKey: idempotencyKey(),
+        nameOverride: nameDraft === selectedCycle.name ? null : nameDraft,
+        description: descriptionDraft,
+      });
+      setEditing(false);
+      onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "IDEMPOTENCY_KEY_REUSED") {
+        await onRefresh();
+        setError("別の内容で保存されました。最新のCycleを読み込みました。");
+      } else if (caught instanceof ApiError && caught.fieldErrors) {
+        setError(Object.values(caught.fieldErrors).flat().join(" "));
+      } else {
+        setError(caught instanceof ApiError ? caught.message : "Cycleの保存に失敗しました。");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function assignIssue() {
+    if (!selectedCycle || !assignmentTargetId || selectedCycle.status === "completed") return;
+    const issue = issues.find((item) => item.id === assignmentTargetId);
+    if (!issue) return;
+    onUpdateIssue(issue, { cycleId: selectedCycle.id });
+    setAssignmentTargetId("");
+  }
+
   return (
     <div className="page">
+      {closeBusy && (
+        <div
+          className="cycle-blocking-overlay"
+          role="status"
+          tabIndex={0}
+          autoFocus
+          onKeyDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <div className="cycle-blocking-card">
+            <span className="run-spinner">◌</span>
+            <strong>Cycleを完了しています</strong>
+            <span>繰越処理が終わるまで操作できません。</span>
+          </div>
+        </div>
+      )}
       <div className="page-heading compact-heading">
         <div>
           <span className="eyebrow">PLANNING / CYCLES</span>
@@ -1182,54 +1320,178 @@ function CyclesView({
         </div>
         <button
           className="button secondary"
-          onClick={() => current && onClose(current)}
-          disabled={!current}
+          onClick={() => selectedCycle?.status === "active" && onClose(selectedCycle)}
+          disabled={closeBusy || selectedCycle?.status !== "active"}
         >
-          Cycleを完了
+          {closeBusy ? "完了処理中…" : "Cycleを完了"}
         </button>
       </div>
       <div className="cycle-tabs">
-        <button className="selected">Current</button>
-        <button>Upcoming</button>
-        <button>Past</button>
+        {(["current", "upcoming", "past"] as const).map((value) => (
+          <button
+            className={tab === value ? "selected" : ""}
+            aria-selected={tab === value}
+            disabled={closeBusy}
+            key={value}
+            onClick={() => setTab(value)}
+          >
+            {value === "current" ? "Current" : value === "upcoming" ? "Upcoming" : "Past"}
+            <span className="cycle-tab-count">
+              {cycles.filter((cycle) => cycleTabForStatus(cycle.status) === value).length}
+            </span>
+          </button>
+        ))}
       </div>
-      {current ? (
-        <section className="detail-card cycle-detail">
-          <div className="detail-card-head">
+      {selectedCycle ? (
+        <section className="detail-card cycle-detail cycle-workspace">
+          <div className="detail-card-head cycle-workspace-head">
             <div>
-              <span className="eyebrow coral">ACTIVE CYCLE · #{current.number}</span>
-              <h2>{current.name}</h2>
-              <p>{formatRange(current.startsAt, current.endsAt)}</p>
+              <span className="eyebrow coral">
+                {selectedCycle.status.toUpperCase()} CYCLE · #{selectedCycle.number}
+              </span>
+              {editing ? (
+                <input
+                  className="text-input cycle-name-input"
+                  aria-label="Cycle名"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onKeyDown={handleMetadataKeyDown}
+                />
+              ) : (
+                <h2>{selectedCycle.nameOverride ?? selectedCycle.name}</h2>
+              )}
+              <p>{formatRange(selectedCycle.startsAt, selectedCycle.endsAt)}</p>
             </div>
-            <span className="large-orbit">◒</span>
+            <div className="cycle-head-actions">
+              <span className="large-orbit">◒</span>
+              <button
+                className="button ghost"
+                onClick={() => (editing ? cancelMetadataEdit() : setEditing(true))}
+                disabled={saving || closeBusy}
+              >
+                {editing ? "取消" : "編集"}
+              </button>
+            </div>
+          </div>
+          {editing && (
+            <div className="cycle-metadata-editor" onKeyDown={handleMetadataKeyDown}>
+              <label className="field-label" htmlFor="cycle-description">
+                Description
+              </label>
+              <textarea
+                id="cycle-description"
+                className="text-input cycle-description-input"
+                value={descriptionDraft}
+                onChange={(event) => setDescriptionDraft(event.target.value)}
+                rows={3}
+              />
+              <button
+                className="button primary"
+                onClick={() => void saveMetadata()}
+                disabled={saving}
+              >
+                {saving ? "保存中…" : "Cycleを保存"}
+              </button>
+            </div>
+          )}
+          {!editing && selectedCycle.description && (
+            <p className="cycle-description">{selectedCycle.description}</p>
+          )}
+          <div className="cycle-metrics" aria-label="Cycle進捗">
+            <div>
+              <strong>{cycleIssues.length}</strong>
+              <span>Issues</span>
+            </div>
+            <div>
+              <strong>{metrics.completed}</strong>
+              <span>Completed</span>
+            </div>
+            <div>
+              <strong>{metrics.progressPercent}%</strong>
+              <span>Progress</span>
+            </div>
+            <div>
+              <strong>{metrics.estimateTotal}</strong>
+              <span>Estimate</span>
+            </div>
           </div>
           <div className="detail-progress">
             <div className="progress-line">
-              <span style={{ width: `${progress}%` }} />
+              <span style={{ width: `${metrics.progressPercent}%` }} />
             </div>
             <div className="progress-caption">
-              <strong>{cycleIssues.length} Issues</strong>
-              <span>{prioritized} with priority</span>
+              <strong>
+                {metrics.completed} / {metrics.total - metrics.canceled} completed
+              </strong>
+              <span>{metrics.canceled} canceled</span>
             </div>
           </div>
+          {selectedCycle.status !== "completed" && (
+            <div className="cycle-assignment">
+              <label className="field-label" htmlFor="cycle-issue-target">
+                Issueを追加
+              </label>
+              <select
+                id="cycle-issue-target"
+                aria-label="Cycleへ追加するIssue"
+                value={assignmentTargetId}
+                disabled={closeBusy}
+                onChange={(event) => setAssignmentTargetId(event.target.value)}
+              >
+                <option value="">Issueを選択…</option>
+                {availableIssues.map((issue) => (
+                  <option key={issue.id} value={issue.id}>
+                    {issue.identifier} · {issue.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="button secondary"
+                onClick={assignIssue}
+                disabled={closeBusy || !assignmentTargetId}
+              >
+                追加
+              </button>
+            </div>
+          )}
+          {error && (
+            <div className="detail-live-error" role="alert">
+              {error}
+            </div>
+          )}
           <div className="cycle-list">
             {cycleIssues.map((issue) => (
-              <div className="mini-issue" key={issue.id}>
+              <div className="mini-issue cycle-issue-row" key={issue.id}>
                 <span className={`priority-dot ${priorityTone[issue.priority]}`} />
                 <span className="issue-id">{issue.identifier}</span>
                 <strong>{issue.title}</strong>
+                <span className="cycle-issue-status">
+                  {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "—"}
+                </span>
                 <span className="mini-points">
                   {issue.estimate ? `${issue.estimate} pts` : "—"}
                 </span>
+                {selectedCycle.status !== "completed" && (
+                  <button
+                    className="text-button danger"
+                    onClick={() => onUpdateIssue(issue, { cycleId: null })}
+                    disabled={closeBusy || pendingIssueId === issue.id}
+                  >
+                    解除
+                  </button>
+                )}
               </div>
             ))}
+            {cycleIssues.length === 0 && (
+              <p className="detail-empty">このCycleにIssueはありません。</p>
+            )}
           </div>
         </section>
       ) : (
         <EmptyState
-          title="Active Cycleはありません"
-          action="Upcomingを確認"
-          onAction={() => undefined}
+          title={tab === "current" ? "Active Cycleはありません" : "Cycleはありません"}
+          action={tab === "current" ? "Upcomingを確認" : "Issuesを見る"}
+          onAction={() => (tab === "current" ? setTab("upcoming") : onNavigateIssues())}
         />
       )}
       <div className="section-heading">
@@ -1240,14 +1502,22 @@ function CyclesView({
       </div>
       <div className="timeline-list">
         {cycles.map((cycle) => (
-          <div className="timeline-row" key={cycle.id}>
+          <button
+            className={`timeline-row cycle-row-button ${selectedCycleId === cycle.id ? "selected" : ""}`}
+            key={cycle.id}
+            disabled={closeBusy}
+            onClick={() => {
+              setTab(cycleTabForStatus(cycle.status));
+              setSelectedCycleId(cycle.id);
+            }}
+          >
             <span className={`timeline-dot ${cycle.status}`} />
             <div>
-              <strong>{cycle.name}</strong>
+              <strong>{cycle.nameOverride ?? cycle.name}</strong>
               <span>{formatRange(cycle.startsAt, cycle.endsAt)}</span>
             </div>
             <span className={`status-pill ${cycle.status}`}>{cycle.status}</span>
-          </div>
+          </button>
         ))}
       </div>
     </div>

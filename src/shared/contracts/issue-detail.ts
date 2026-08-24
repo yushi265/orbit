@@ -1,16 +1,17 @@
 import { z } from "zod";
 import { mutationMetaSchema } from "./issues";
+import { boundedUnicodeString } from "./text";
 
 export const relationTypeValues = ["blocking", "blocked_by", "related", "duplicate"] as const;
 export const relationTypeSchema = z.enum(relationTypeValues);
 const detailMutationMetaSchema = z.strictObject({
   idempotencyKey: mutationMetaSchema.shape.idempotencyKey,
 });
-export const noteBodySchema = z.string().superRefine((value, context) => {
-  const length = Array.from(value).length;
-  if (length < 1 || length > 10_000)
-    context.addIssue({ code: "custom", message: "body must contain 1..10000 Unicode code points" });
-});
+export const noteBodySchema = boundedUnicodeString(
+  1,
+  10_000,
+  "body must contain 1..10000 Unicode code points",
+);
 export const noteMutationSchema = z.strictObject({
   ...detailMutationMetaSchema.shape,
   body: noteBodySchema,

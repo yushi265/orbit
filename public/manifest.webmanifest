@@ -12,6 +12,6 @@
   "theme_color": "#ff6b57",
   "lang": "ja",
   "icons": [
-    { "src": "/icon.svg", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icon.svg?v=2", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

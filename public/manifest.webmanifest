@@ -2,12 +2,16 @@
   "name": "Orbit — 個人用プロジェクト管理",
   "short_name": "Orbit",
   "description": "Issue、Cycle、Projectを軽快に管理する個人用ワークスペース",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait-primary",
   "background_color": "#f7f8fa",
   "theme_color": "#ff6b57",
   "lang": "ja",
   "icons": [
-    { "src": "/icon.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icon.svg", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

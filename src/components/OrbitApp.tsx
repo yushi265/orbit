@@ -3208,6 +3208,30 @@ function IssueDetailPanel({
     }
   }
 
+  async function trashIssue() {
+    if (!issue || saving) return;
+    if (typeof window !== "undefined" && !window.confirm("このIssueをゴミ箱へ移動しますか？"))
+      return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPost(`/api/v1/issues/${issue.id}?action=trash`, {
+        idempotencyKey: idempotencyKey(),
+      });
+      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+        current
+          ? { ...current, issues: current.issues.filter((item) => item.id !== issue.id) }
+          : current,
+      );
+      queryClient.removeQueries({ queryKey: ["issue-detail", issue.id] });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Issueの削除に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function addNote() {
     if (!noteBody || saving) return;
     setSaving(true);
@@ -3376,6 +3400,13 @@ function IssueDetailPanel({
                 </button>
                 <button className="button ghost" onClick={onClose}>
                   閉じる
+                </button>
+                <button
+                  className="button ghost danger"
+                  disabled={saving}
+                  onClick={() => void trashIssue()}
+                >
+                  ゴミ箱へ
                 </button>
               </div>
               <section className="detail-section">

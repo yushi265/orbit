@@ -1460,9 +1460,9 @@ export class OrbitStore {
 
   trashIssue(userId: string, issueId: string, idempotencyKey: string): Issue {
     this.assertUnlocked(userId);
-    const issue = this.getIssue(userId, issueId);
     const receipt = this.checkReceipt<Issue>(userId, "issue.trash", idempotencyKey, { issueId });
     if (receipt) return receipt;
+    const issue = this.getIssue(userId, issueId);
     issue.deletedAt = this.clock();
     issue.updatedAt = this.clock();
     issue.version += 1;

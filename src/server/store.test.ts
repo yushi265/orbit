@@ -76,6 +76,23 @@ describe("OrbitStore issue mutations", () => {
     expect(store.activities.filter((event) => event.entityId === issue.id)).toHaveLength(2);
     expect(store.outbox.filter((event) => event.type === "issue.updated")).toHaveLength(1);
   });
+
+  it("[状態遷移] Issueをゴミ箱へ移動し、同じKeyの再送をNo-opにする", () => {
+    const { store } = setup();
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "create-trash-001",
+      title: "削除対象",
+    });
+
+    const trashed = store.trashIssue("owner", issue.id, "trash-001");
+    expect(trashed.deletedAt).not.toBeNull();
+    expect(store.listIssues("owner")).toHaveLength(0);
+    expect(store.trashIssue("owner", issue.id, "trash-001")).toEqual(trashed);
+
+    const restored = store.restoreIssue("owner", issue.id, "restore-001");
+    expect(restored.deletedAt).toBeNull();
+    expect(store.listIssues("owner")).toHaveLength(1);
+  });
 });
 
 describe("OrbitStore cycle and background runs", () => {

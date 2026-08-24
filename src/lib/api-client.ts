@@ -30,7 +30,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     | null;
   if (response.status === 401 && typeof window !== "undefined") {
     const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.location.assign(`/cdn-cgi/access/login?returnTo=${encodeURIComponent(returnTo)}`);
+    window.location.assign(returnTo || "/");
   }
   if (!response.ok) {
     const error =

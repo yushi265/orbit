@@ -20,6 +20,7 @@
 - `auth.ts`は認証・Owner照合だけを担い、業務Storeの生成を持たない。
 - `http.ts`はRequest Sessionのライフサイクルを担う。
 - `api.ts`は`withOwner`から受け取った`store`を使用し、Storeの永続化方式を知らない。
+- `src/routes/cdn-cgi/access/login.ts`は、AccessのログインCallbackがWorkerへ到達した場合だけ、相対`returnTo`を同一Originへ戻す。外部URLへのRedirectや認証の代替は行わない。
 
 ## テストケース
 

@@ -24,6 +24,7 @@ import { Route as SettingsSectionRouteImport } from './routes/settings/$section'
 import { Route as ApiV1BootstrapRouteImport } from './routes/api/v1/bootstrap'
 import { Route as ApiV1PreferencesRouteImport } from './routes/api/v1/preferences'
 import { Route as ApiV1SearchRouteImport } from './routes/api/v1/search'
+import { Route as CdnCgiAccessLoginRouteImport } from './routes/cdn-cgi/access/login'
 import { Route as ApiV1BackgroundRunsIndexRouteImport } from './routes/api/v1/background-runs/index'
 import { Route as ApiV1BackgroundRunsRunIdRouteImport } from './routes/api/v1/background-runs/$runId'
 import { Route as ApiV1BackgroundRunsCurrentRouteImport } from './routes/api/v1/background-runs/current'
@@ -120,6 +121,11 @@ const ApiV1PreferencesRoute = ApiV1PreferencesRouteImport.update({
 const ApiV1SearchRoute = ApiV1SearchRouteImport.update({
   id: '/api/v1/search',
   path: '/api/v1/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CdnCgiAccessLoginRoute = CdnCgiAccessLoginRouteImport.update({
+  id: '/cdn-cgi/access/login',
+  path: '/cdn-cgi/access/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiV1BackgroundRunsIndexRoute =
@@ -258,6 +264,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
+  '/cdn-cgi/access/login': typeof CdnCgiAccessLoginRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
@@ -297,6 +304,7 @@ export interface FileRoutesByTo {
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
+  '/cdn-cgi/access/login': typeof CdnCgiAccessLoginRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
@@ -337,6 +345,7 @@ export interface FileRoutesById {
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
+  '/cdn-cgi/access/login': typeof CdnCgiAccessLoginRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRoute
@@ -378,6 +387,7 @@ export interface FileRouteTypes {
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
     | '/api/v1/search'
+    | '/cdn-cgi/access/login'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
     | '/api/v1/cycles/$cycleId'
@@ -417,6 +427,7 @@ export interface FileRouteTypes {
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
     | '/api/v1/search'
+    | '/cdn-cgi/access/login'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
     | '/api/v1/cycles/$cycleId'
@@ -456,6 +467,7 @@ export interface FileRouteTypes {
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
     | '/api/v1/search'
+    | '/cdn-cgi/access/login'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
     | '/api/v1/cycles/$cycleId'
@@ -496,6 +508,7 @@ export interface RootRouteChildren {
   ApiV1BootstrapRoute: typeof ApiV1BootstrapRoute
   ApiV1PreferencesRoute: typeof ApiV1PreferencesRoute
   ApiV1SearchRoute: typeof ApiV1SearchRoute
+  CdnCgiAccessLoginRoute: typeof CdnCgiAccessLoginRoute
   ApiV1BackgroundRunsRunIdRoute: typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   ApiV1BackgroundRunsCurrentRoute: typeof ApiV1BackgroundRunsCurrentRoute
   ApiV1CyclesCycleIdRoute: typeof ApiV1CyclesCycleIdRoute
@@ -619,6 +632,13 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/search'
       fullPath: '/api/v1/search'
       preLoaderRoute: typeof ApiV1SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cdn-cgi/access/login': {
+      id: '/cdn-cgi/access/login'
+      path: '/cdn-cgi/access/login'
+      fullPath: '/cdn-cgi/access/login'
+      preLoaderRoute: typeof CdnCgiAccessLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/background-runs/': {
@@ -854,6 +874,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1BootstrapRoute: ApiV1BootstrapRoute,
   ApiV1PreferencesRoute: ApiV1PreferencesRoute,
   ApiV1SearchRoute: ApiV1SearchRoute,
+  CdnCgiAccessLoginRoute: CdnCgiAccessLoginRoute,
   ApiV1BackgroundRunsRunIdRoute: ApiV1BackgroundRunsRunIdRouteWithChildren,
   ApiV1BackgroundRunsCurrentRoute: ApiV1BackgroundRunsCurrentRoute,
   ApiV1CyclesCycleIdRoute: ApiV1CyclesCycleIdRoute,

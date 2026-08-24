@@ -6,7 +6,7 @@
 - 機能概要: CycleのCurrent / Upcoming / Past、metadata、Issue割当、進捗を強化する。
 - Stage宣言の結果: Tier 1 / spec / TDD / 品質ゲート / self-reviewを実行。最終Must 0。
 - トークン実測: 未計測
-- 着手日 / 完了日: 2026-08-24 / 未完了
+- 着手日 / 完了日: 2026-08-24 / 2026-08-24
 
 ## 各Stageの気づき
 
@@ -17,6 +17,7 @@
 | 3+4 TDD | closeの冪等性、Issue CAS再取得、shared metrics、metadata Escapeをレビュー指摘から追加した。 |
 | 5 静的解析 | 11 files / 72 tests、typecheck / lint / format / build / refereeを通過した。 |
 | 6 セルフレビュー | 3観点の最終Must 0。UIはlocal browser smokeをE2E任意の既存方針と突合して受容した。 |
+| 8 成果提示 | Cycle workspaceをmainへコミットし、progress.mdは除去した。 |
 
 ## 振り返り（KPT）
 

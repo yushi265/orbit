@@ -9,7 +9,7 @@
 - `APP_ENV=production` とD1 bindingを含む最終設定をdry-runで確認済み
 - 本番の業務データはD1 Snapshot Adapter経由で永続化する実装へ切り替え済みです。正規化Repositoryへの段階移行はRelease hardeningの残課題です。
 - Cloudflare Accessの `OWNER_USER_ID` / `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` はSecretとして未設定です。
-- D1の初期Migration（`0000_initial.sql`）は適用済みです。Snapshot Migration（`0001_*.sql`）とOwner行の作成は未完了です。
+- D1の初期Migration（`0000_initial.sql`）とSnapshot Migration（`0001_*.sql`）は適用済みです。Owner行の作成は未完了です。
 
 `pnpm run deploy:preflight` は、Worker名・production環境・D1 IDを検査します。開発用設定のまま本番へ送る事故を防ぐため、D1 IDが未設定の場合は失敗します。
 
@@ -48,11 +48,10 @@ D1 Migrationは失敗時にロールバックされるため、先にMigration�
 
 ## 4. 本番切替前の残タスク
 
-1. `pnpm run db:migrate:production`を再実行し、`0001_*.sql`を本番D1へ適用する。
-2. `OWNER_USER_ID`に対応する`users`行をD1へ作成し、Bootstrap / Owner lookupを実D1で確認する。
-3. Accessで対象HostnameをSelf-hosted applicationとして保護し、許可メールを1件に限定する。
-4. `GET /api/v1/bootstrap`の認証済み200、未認証401、他Owner 404をPreviewで確認する。
-5. Issue / Cycle / Project / Label / Bulk / Inboxの主要操作とBackground Run中423を実D1でSmokeする。
+1. `OWNER_USER_ID`に対応する`users`行をD1へ作成し、Bootstrap / Owner lookupを実D1で確認する。
+2. Accessで対象HostnameをSelf-hosted applicationとして保護し、許可メールを1件に限定する。
+3. `GET /api/v1/bootstrap`の認証済み200、未認証401、他Owner 404をPreviewで確認する。
+4. Issue / Cycle / Project / Label / Bulk / Inboxの主要操作とBackground Run中423を実D1でSmokeする。
 
 ## 5. デプロイ
 

@@ -9,13 +9,12 @@
     {
       "binding": "DB",
       "database_name": "orbit",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "53d2ce53-5326-47da-95b6-386732c50a9b",
       "migrations_dir": "drizzle"
     }
   ],
   "vars": {
-    "APP_ENV": "development",
-    "DEV_OWNER_USER_ID": "dev-owner"
+    "APP_ENV": "development"
   },
   "env": {
     "production": {
@@ -26,7 +25,7 @@
         {
           "binding": "DB",
           "database_name": "orbit",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "53d2ce53-5326-47da-95b6-386732c50a9b",
           "migrations_dir": "drizzle"
         }
       ]

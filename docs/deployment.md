@@ -2,14 +2,16 @@
 
 ## 現在の判定
 
-WorkerのbuildとWrangler dry-runは通過しますが、次の値が未確定のため本番デプロイはまだ実行しません。
+本番用D1 `orbit` の作成、Wrangler認証、productionビルド、preflight、dry-runまで完了しています。
 
-- `wrangler.jsonc` の `database_id` はプレースホルダーです。
-- Wrangler認証は未接続です。`pnpm exec wrangler whoami` で確認できます。
+- D1: `orbit`（APAC、`53d2ce53-5326-47da-95b6-386732c50a9b`）
+- Worker: `orbit-project-manager-production` を生成する設定を確認済み
+- `APP_ENV=production` とD1 bindingを含む最終設定をdry-runで確認済み
 - アプリ本体の業務データは現在 `OrbitStore`（Memory Store）を使うPreview実装で、本番D1 Repositoryへの切替はRelease hardeningの残課題です。
 - Cloudflare Accessの `OWNER_USER_ID` / `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` はSecretとして未設定です。
+- D1の初期Migration（`0000_initial.sql`）は適用済みです。Owner行の作成は未完了です。
 
-`pnpm run deploy:preflight` はD1 IDがプレースホルダーの間は意図的に失敗します。これにより、開発用設定のまま本番へ送る事故を防ぎます。
+`pnpm run deploy:preflight` は、Worker名・production環境・D1 IDを検査します。開発用設定のまま本番へ送る事故を防ぐため、D1 IDが未設定の場合は失敗します。
 
 ## 1. Cloudflare側の準備
 
@@ -21,7 +23,7 @@ pnpm exec wrangler whoami
 pnpm exec wrangler d1 create orbit
 ```
 
-`d1 create`で得た本番D1 IDを、`wrangler.jsonc`のtop-levelと`env.production.d1_databases`の両方へ設定します。IDやAccessの秘密値はGitへ保存しません。
+`d1 create`で得た本番D1 IDを、`wrangler.jsonc`のtop-levelと`env.production.d1_databases`の両方へ設定します。IDやAccessの秘密値はGitへ保存しません。現在のD1 IDは設定済みです。
 
 ## 2. Access Secretの登録
 
@@ -54,13 +56,13 @@ D1 Migrationは失敗時にロールバックされるため、先にMigration�
 
 ## 5. デプロイ
 
-本番Data adapterとAccess確認が終わった後に実行します。
+本番Data adapter、Owner行、Access確認が終わった後に実行します。
 
 ```bash
 pnpm deploy
 ```
 
-`pnpm deploy`はbuild → preflight → production D1 migration → `wrangler deploy --env production --keep-vars`の順で実行します。失敗した場合はWorkerを公開せず、エラー原因を解消して再実行してください。
+`pnpm deploy`はproduction build（`CLOUDFLARE_ENV=production`）→ preflight → production D1 migration → `wrangler deploy --keep-vars`の順で実行します。失敗した場合はWorkerを公開せず、エラー原因を解消して再実行してください。
 
 ## 6. ロールバック・確認
 

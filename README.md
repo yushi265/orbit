@@ -16,7 +16,7 @@ pnpm dev
 
 ローカル開発では `DEV_OWNER_USER_ID`（既定値 `dev-owner`）を使った明示的な開発Ownerへフォールバックします。Cloudflare Access環境では `APP_ENV=production`、`OWNER_USER_ID`、`OWNER_EMAIL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD` をWorker Secret / Environmentへ設定してください。JWTは `jose` とAccess JWKSで署名・issuer・audience・emailを検証し、失敗時はfail-closedになります。
 
-MVPのローカルデータはWorkerの開発Storeで保持されます。D1用の正規化Schemaと初期Migration、Owner / Issue Repositoryの基盤は `src/db/` と `drizzle/` に含まれています。本番D1へ適用する前に `wrangler.jsonc` のプレースホルダー `database_id` を対象D1のIDへ置き換え、`pnpm db:migrate` 相当の運用手順を環境側で確定してください。
+MVPのローカルデータはWorkerの開発Storeで保持されます。D1用の正規化Schemaと初期Migration、Owner / Issue Repositoryの基盤は `src/db/` と `drizzle/` に含まれています。本番デプロイの進捗と残タスクは [`docs/deployment.md`](./docs/deployment.md) を参照してください。現時点では、本番Data adapter、Cloudflare AccessのSecret、Owner行の準備が必要です。
 
 品質ゲート:
 

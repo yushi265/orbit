@@ -7,6 +7,7 @@
 - Cycle workspaceは既存BootstrapのCycle / Issueを使い、`PATCH /api/v1/cycles/:cycleId` でmetadataを更新する。Cycle closeのPOSTとIssue PATCHのCycle割当は既存Routeを再利用する（参照: `src/server/api.ts`、`src/routes/api/v1/cycles/`）。
 - Project workspaceはBootstrapのProject / Issueを使い、既存`PATCH /api/v1/projects/:projectId`をmetadata更新に再利用する。Saved Viewは`POST/PATCH/DELETE /api/v1/views*`でOwner scopedに管理する（参照: `src/server/api.ts`、`src/routes/api/v1/projects/`、`src/routes/api/v1/views/`）。
 - Label / Bulk workspaceはBootstrapの`labels`とIssueの`labelIds`を使い、Label CRUDを`/api/v1/labels*`、複数Issue更新を`POST /api/v1/issues/bulk`で公開する。現段階はMemory StoreのOwner / Lock / Receipt / Activity / Outbox境界を正本とする（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/labels/`、`src/routes/api/v1/issues/bulk.ts`）。
+- Inbox / NotificationはBootstrapの`notifications`と既存`PATCH /api/v1/notifications/:notificationId`を再利用し、strict `NotificationReadMutation`で個別既読・全件既読・Issue / Project / Cycle遷移を行う。通知生成は別スコープとする（参照: `src/components/OrbitApp.tsx`、`src/server/api.ts`、`src/shared/contracts/notifications.ts`）。
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
 
 ## 主要データ構造

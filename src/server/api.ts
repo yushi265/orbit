@@ -29,6 +29,7 @@ import {
   bulkIssueMutationSchema,
   labelMutationSchema,
   labelUpdateSchema,
+  notificationReadMutationSchema,
   projectCreateMutationSchema,
   projectMetadataMutationSchema,
   relationMutationSchema,
@@ -511,14 +512,14 @@ export async function markNotification(
   notificationId: string,
 ): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const body = await parseBody(request);
+    const input = parseContract(notificationReadMutationSchema, await parseBody(request));
     return json(
       {
         notification: getOrbitStore(owner.userId).markNotification(
           owner.userId,
           notificationId,
-          body.read !== false,
-          String(body.idempotencyKey ?? keyFromRequest(request)),
+          input.read,
+          input.idempotencyKey,
         ),
       },
       200,

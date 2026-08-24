@@ -9,4 +9,5 @@ export * from "./rich-text";
 export * from "./text";
 export * from "./issue-detail";
 export * from "./labels";
+export * from "./notifications";
 export * from "./views";

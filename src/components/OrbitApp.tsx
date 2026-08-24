@@ -34,7 +34,7 @@ type Section =
   | "inbox"
   | "views"
   | "settings";
-type Props = { initialSection?: Section; issueId?: string; projectId?: string };
+type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
 
 const priorityLabel: Record<Issue["priority"], string> = {
   no_priority: "No priority",
@@ -363,6 +363,44 @@ function OrbitAppInner(props: Props) {
     await router.navigate({ to: path as never });
   }
 
+  async function markNotificationRead(notification: BootstrapPayload["notifications"][number]) {
+    if (notification.readAt) return;
+    await apiPatch(`/api/v1/notifications/${notification.id}`, {
+      idempotencyKey: idempotencyKey(),
+      read: true,
+    });
+  }
+
+  async function openNotification(notification: BootstrapPayload["notifications"][number]) {
+    await markNotificationRead(notification);
+    await refresh();
+    if (notification.entityType === "issue" && notification.entityId) {
+      setSection("issues");
+      setComposerOpen(true);
+      await router.navigate({ to: `/issues/${notification.entityId}` as never });
+    } else if (notification.entityType === "project" && notification.entityId) {
+      setSection("projects");
+      await router.navigate({ to: `/projects/${notification.entityId}` as never });
+    } else if (notification.entityType === "cycle" && notification.entityId) {
+      setSection("cycles");
+      await router.navigate({ to: `/cycles/${notification.entityId}` as never });
+    } else {
+      await navigate("inbox");
+    }
+  }
+
+  async function markAllNotifications() {
+    const unreadNotifications = notifications.filter((notification) => !notification.readAt);
+    const results = await Promise.allSettled(
+      unreadNotifications.map((notification) => markNotificationRead(notification)),
+    );
+    await refresh();
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (rejected) throw rejected.reason;
+  }
+
   async function continueMaintenance(initial: PublicRunSummary): Promise<PublicRunSummary> {
     let current = initial;
     setRun(current);
@@ -605,11 +643,13 @@ function OrbitAppInner(props: Props) {
             <CyclesView
               cycles={cycles}
               issues={issues}
+              cycleId={props.cycleId}
               workflowStates={workflowStates}
               pendingIssueId={pendingIssueId}
               onUpdateIssue={(issue, patch) => updateIssue.mutate({ issue, patch })}
               onRefresh={refresh}
               onNavigateIssues={() => void navigate("issues")}
+              onNavigateCycles={() => void navigate("cycles")}
               closeBusy={cycleCloseBusy}
               onClose={(cycle) => void closeCycle(cycle)}
             />
@@ -638,7 +678,14 @@ function OrbitAppInner(props: Props) {
               }}
             />
           )}
-          {section === "inbox" && <InboxView notifications={notifications} />}
+          {section === "inbox" && (
+            <InboxView
+              notifications={notifications}
+              onOpenNotification={openNotification}
+              onMarkAllRead={markAllNotifications}
+              onNavigateIssues={() => void navigate("issues")}
+            />
+          )}
           {section === "views" && (
             <ViewsView
               views={data.views}
@@ -1478,33 +1525,38 @@ function IssueCard({
 
 function CyclesView({
   cycles,
+  cycleId,
   issues,
   workflowStates,
   pendingIssueId,
   onUpdateIssue,
   onRefresh,
   onNavigateIssues,
+  onNavigateCycles,
   closeBusy,
   onClose,
 }: {
   cycles: Cycle[];
+  cycleId?: string;
   issues: Issue[];
   workflowStates: WorkflowState[];
   pendingIssueId: string | null;
   onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
   onRefresh: () => void;
   onNavigateIssues: () => void;
+  onNavigateCycles: () => void;
   closeBusy: boolean;
   onClose: (cycle: Cycle) => void;
 }) {
   const [tab, setTab] = useState<CycleTab>("current");
-  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
+  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(cycleId ?? null);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [assignmentTargetId, setAssignmentTargetId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const routeCycle = cycleId ? (cycles.find((cycle) => cycle.id === cycleId) ?? null) : null;
   const tabCycles = cycles.filter((cycle) => cycleTabForStatus(cycle.status) === tab);
   const selectedCycle =
     tabCycles.find((cycle) => cycle.id === selectedCycleId) ?? tabCycles[0] ?? null;
@@ -1513,6 +1565,14 @@ function CyclesView({
     : [];
   const availableIssues = issues.filter((issue) => !issue.cycleId && !issue.deletedAt);
   const metrics = calculateCycleMetrics(cycleIssues, workflowStates);
+
+  useEffect(() => {
+    if (!cycleId) return;
+    const routeCycle = cycles.find((cycle) => cycle.id === cycleId);
+    if (!routeCycle) return;
+    setTab(cycleTabForStatus(routeCycle.status));
+    setSelectedCycleId(routeCycle.id);
+  }, [cycleId, cycles]);
 
   useEffect(() => {
     if (!selectedCycle) {
@@ -1531,6 +1591,18 @@ function CyclesView({
     selectedCycle?.nameOverride,
     selectedCycle?.description,
   ]);
+
+  if (cycleId && !routeCycle) {
+    return (
+      <div className="page error-screen">
+        <span className="eyebrow coral">CYCLE DETAIL</span>
+        <h1>Cycleが見つかりません</h1>
+        <button className="button secondary" onClick={onNavigateCycles}>
+          Cyclesへ戻る
+        </button>
+      </div>
+    );
+  }
 
   function cancelMetadataEdit() {
     if (selectedCycle) {
@@ -2205,7 +2277,69 @@ function SearchView({
   );
 }
 
-function InboxView({ notifications }: { notifications: BootstrapPayload["notifications"] }) {
+function InboxView({
+  notifications,
+  onOpenNotification,
+  onMarkAllRead,
+  onNavigateIssues,
+}: {
+  notifications: BootstrapPayload["notifications"];
+  onOpenNotification: (notification: BootstrapPayload["notifications"][number]) => Promise<void>;
+  onMarkAllRead: () => Promise<void>;
+  onNavigateIssues: () => void;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [allBusy, setAllBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryNotification, setRetryNotification] = useState<
+    BootstrapPayload["notifications"][number] | null
+  >(null);
+  const [errorAction, setErrorAction] = useState<"individual" | "all" | null>(null);
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+
+  async function open(notification: BootstrapPayload["notifications"][number]) {
+    setBusyId(notification.id);
+    setError(null);
+    try {
+      await onOpenNotification(notification);
+      setRetryNotification(null);
+      setErrorAction(null);
+    } catch (caught) {
+      setRetryNotification(notification);
+      setErrorAction("individual");
+      setError(
+        caught instanceof ApiError && caught.fieldErrors
+          ? Object.values(caught.fieldErrors).flat().join(" ")
+          : caught instanceof ApiError
+            ? caught.message
+            : "通知の処理に失敗しました。",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function markAll() {
+    setAllBusy(true);
+    setError(null);
+    try {
+      await onMarkAllRead();
+      setRetryNotification(null);
+      setErrorAction(null);
+    } catch (caught) {
+      setErrorAction("all");
+      setError(
+        caught instanceof ApiError && caught.fieldErrors
+          ? Object.values(caught.fieldErrors).flat().join(" ")
+          : caught instanceof ApiError
+            ? caught.message
+            : "通知を既読にできませんでした。",
+      );
+    } finally {
+      setAllBusy(false);
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-heading compact-heading">
@@ -2214,28 +2348,65 @@ function InboxView({ notifications }: { notifications: BootstrapPayload["notific
           <h1>Inbox</h1>
           <p className="subheading">あなたのワークスペースの変化。</p>
         </div>
-        <button className="button ghost">すべて既読</button>
+        <button
+          className="button ghost"
+          onClick={() => void markAll()}
+          disabled={!unreadCount || allBusy || Boolean(busyId)}
+        >
+          {allBusy ? "更新中…" : "すべて既読"}
+        </button>
       </div>
+      {error && (
+        <div className="detail-live-error" role="alert">
+          {error}
+          <button
+            className="text-button"
+            onClick={() =>
+              errorAction === "individual" && retryNotification
+                ? void open(retryNotification)
+                : void markAll()
+            }
+            disabled={allBusy || Boolean(busyId) || (!unreadCount && errorAction !== "individual")}
+          >
+            再試行
+          </button>
+        </div>
+      )}
       <div className="inbox-list">
         {notifications.map((notification) => (
           <div
             className={`notification-row ${notification.readAt ? "read" : ""}`}
             key={notification.id}
           >
-            <span className="notification-icon">{notification.type === "overdue" ? "!" : "✦"}</span>
-            <div>
-              <strong>{notification.title}</strong>
-              <p>{notification.body}</p>
-              <span>{formatDate(notification.createdAt)}</span>
-            </div>
-            <button className="more">•••</button>
+            <button
+              className="notification-main"
+              onClick={() => void open(notification)}
+              disabled={Boolean(busyId) || allBusy}
+            >
+              <span className="notification-icon">
+                {notification.type === "overdue" ? "!" : "✦"}
+              </span>
+              <span className="notification-copy">
+                <strong>{notification.title}</strong>
+                <span>{notification.body}</span>
+                <small>{formatDate(notification.createdAt)}</small>
+              </span>
+            </button>
+            <button
+              className="more"
+              aria-label={`${notification.title}を開く`}
+              onClick={() => void open(notification)}
+              disabled={Boolean(busyId) || allBusy}
+            >
+              •••
+            </button>
           </div>
         ))}
         {notifications.length === 0 && (
           <EmptyState
             title="新しい通知はありません"
             action="Issueを見る"
-            onAction={() => undefined}
+            onAction={onNavigateIssues}
           />
         )}
       </div>

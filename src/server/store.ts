@@ -368,6 +368,23 @@ export class OrbitStore {
         true,
       );
     });
+    const demoIssue = this.listIssues(userId)[0];
+    if (demoIssue) {
+      // Dev-only fixture so the local Inbox journey is observable; production notification generation stays out of scope.
+      const notificationId = createId("notification");
+      this.notifications.set(notificationId, {
+        id: notificationId,
+        userId,
+        type: "due_soon",
+        title: `${demoIssue.identifier}の期限が近づいています`,
+        body: "Issueを確認して、次の一手を決めましょう。",
+        entityType: "issue",
+        entityId: demoIssue.id,
+        readAt: null,
+        deletedAt: null,
+        createdAt: now,
+      });
+    }
   }
 
   ownedWorkflowStates(userId: string): WorkflowState[] {
@@ -1537,7 +1554,7 @@ export class OrbitStore {
   ): Notification {
     this.assertUnlocked(userId);
     const notification = this.notifications.get(id);
-    if (!notification || notification.userId !== userId) throw notFound();
+    if (!notification || notification.userId !== userId || notification.deletedAt) throw notFound();
     const existing = this.checkReceipt<Notification>(userId, "notification.read", idempotencyKey, {
       id,
       read,

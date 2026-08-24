@@ -96,7 +96,7 @@
 ## このレイヤーが依存する下位の契約
 
 - Cloudflare D1 Binding の `batch()`、トランザクション的な一括実行、`meta.changes` の取得。
-- Drizzle ORMのSQLite schema / migrationは `src/db/schema.ts`、`src/db/client.ts`、`src/db/repositories/`、`drizzle/0000_initial.sql` に固定した。ローカル主要Journeyは同じ境界のMemory Storeで検証し、Previewの実D1適用を別タスクとする。
+- Drizzle ORMのSQLite schema / migrationは `src/db/schema.ts`、`src/db/client.ts`、`src/db/repositories/`、`drizzle/0000_initial.sql` に固定し、現行Storeの全モデルを欠落なく永続化するSnapshot Adapterを `src/db/repositories/store-snapshot.ts` と `drizzle/0001_*.sql` に追加した。ローカル主要JourneyはMemory Store、本番RequestはD1 Snapshotを使い、ドメイン単位の正規化Repository移行は別Release hardeningとする。
 - Lease の時刻は Worker の時計ではなく、D1 側で評価した `databaseNow` を正本とする。
 
 ## 実装配置
@@ -106,6 +106,7 @@
 - `src/db/repositories/owner.ts`
 - `src/db/repositories/preferences.ts`
 - `src/db/repositories/issues.ts`
+- `src/db/repositories/store-snapshot.ts`: 現行Storeの本番永続化bridge
 - `src/db/repositories/cycles.ts`
 - `src/db/repositories/projects.ts`
 - `src/db/repositories/views.ts`

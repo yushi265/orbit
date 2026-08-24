@@ -7,9 +7,9 @@
 - D1: `orbit`（APAC、`53d2ce53-5326-47da-95b6-386732c50a9b`）
 - Worker: `orbit-project-manager-production` を生成する設定を確認済み
 - `APP_ENV=production` とD1 bindingを含む最終設定をdry-runで確認済み
-- アプリ本体の業務データは現在 `OrbitStore`（Memory Store）を使うPreview実装で、本番D1 Repositoryへの切替はRelease hardeningの残課題です。
+- 本番の業務データはD1 Snapshot Adapter経由で永続化する実装へ切り替え済みです。正規化Repositoryへの段階移行はRelease hardeningの残課題です。
 - Cloudflare Accessの `OWNER_USER_ID` / `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` はSecretとして未設定です。
-- D1の初期Migration（`0000_initial.sql`）は適用済みです。Owner行の作成は未完了です。
+- D1の初期Migration（`0000_initial.sql`）は適用済みです。Snapshot Migration（`0001_*.sql`）とOwner行の作成は未完了です。
 
 `pnpm run deploy:preflight` は、Worker名・production環境・D1 IDを検査します。開発用設定のまま本番へ送る事故を防ぐため、D1 IDが未設定の場合は失敗します。
 
@@ -48,7 +48,7 @@ D1 Migrationは失敗時にロールバックされるため、先にMigration�
 
 ## 4. 本番切替前の残タスク
 
-1. `src/db/repositories/`を使う本番Data adapterを実装し、Memory Storeを本番経路から外す。
+1. `pnpm run db:migrate:production`を再実行し、`0001_*.sql`を本番D1へ適用する。
 2. `OWNER_USER_ID`に対応する`users`行をD1へ作成し、Bootstrap / Owner lookupを実D1で確認する。
 3. Accessで対象HostnameをSelf-hosted applicationとして保護し、許可メールを1件に限定する。
 4. `GET /api/v1/bootstrap`の認証済み200、未認証401、他Owner 404をPreviewで確認する。
@@ -56,7 +56,7 @@ D1 Migrationは失敗時にロールバックされるため、先にMigration�
 
 ## 5. デプロイ
 
-本番Data adapter、Owner行、Access確認が終わった後に実行します。
+Snapshot Migration、Owner行、Access確認が終わった後に実行します。
 
 ```bash
 pnpm deploy

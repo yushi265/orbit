@@ -631,6 +631,19 @@ export const userRuntimeLocks = sqliteTable(
   ],
 );
 
+export const orbitStoreSnapshots = sqliteTable(
+  "orbit_store_snapshots",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version", { mode: "number" }).notNull().default(0),
+    stateJson: text("state_json").notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [check("orbit_store_snapshots_version_check", sql`${table.version} >= 0`)],
+);
+
 export const schema = {
   users,
   userPreferences,
@@ -657,6 +670,7 @@ export const schema = {
   backgroundRunSteps,
   backgroundEffectDedupes,
   userRuntimeLocks,
+  orbitStoreSnapshots,
 };
 
 export type Schema = typeof schema;

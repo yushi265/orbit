@@ -40,13 +40,43 @@ import {
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 
-type Lock = {
+export type OrbitStoreLock = {
   userId: string;
   runId: string | null;
   token: string | null;
   status: "idle" | "running";
   leaseExpiresAt: number | null;
 };
+
+export interface OrbitStoreSnapshot {
+  users: User[];
+  preferences: Preferences[];
+  workflowStates: WorkflowState[];
+  projectStatuses: ProjectStatus[];
+  projects: Project[];
+  cycles: Cycle[];
+  cycleSettings: CycleSettings[];
+  issues: Issue[];
+  labels: Label[];
+  notes: IssueNote[];
+  relations: IssueRelation[];
+  views: SavedView[];
+  notifications: Notification[];
+  activities: ActivityEvent[];
+  outbox: OutboxEvent[];
+  receipts: MutationReceipt[];
+  runs: BackgroundRun[];
+  locks: OrbitStoreLock[];
+  cycleHistory: Array<{
+    id: string;
+    userId: string;
+    issueId: string;
+    fromCycleId: string;
+    toCycleId: string;
+    movedAt: number;
+  }>;
+  seededUsers: string[];
+}
 
 type IssuePatch = Partial<
   Pick<
@@ -222,7 +252,7 @@ export class OrbitStore {
   readonly outbox: OutboxEvent[] = [];
   readonly receipts = new Map<string, MutationReceipt>();
   readonly runs = new Map<string, BackgroundRun>();
-  readonly locks = new Map<string, Lock>();
+  readonly locks = new Map<string, OrbitStoreLock>();
   readonly cycleHistory: Array<{
     id: string;
     userId: string;
@@ -234,6 +264,257 @@ export class OrbitStore {
   private seededUsers = new Set<string>();
 
   constructor(private readonly clock: () => number = nowMs) {}
+
+  toSnapshot(): OrbitStoreSnapshot {
+    return structuredClone({
+      users: [...this.users.values()],
+      preferences: [...this.preferences.values()],
+      workflowStates: [...this.workflowStates.values()],
+      projectStatuses: [...this.projectStatuses.values()],
+      projects: [...this.projects.values()],
+      cycles: [...this.cycles.values()],
+      cycleSettings: [...this.cycleSettings.values()],
+      issues: [...this.issues.values()],
+      labels: [...this.labels.values()],
+      notes: [...this.notes.values()],
+      relations: [...this.relations.values()],
+      views: [...this.views.values()],
+      notifications: [...this.notifications.values()],
+      activities: this.activities,
+      outbox: this.outbox,
+      receipts: [...this.receipts.values()],
+      runs: [...this.runs.values()],
+      locks: [...this.locks.values()],
+      cycleHistory: this.cycleHistory,
+      seededUsers: [...this.seededUsers],
+    });
+  }
+
+  static fromSnapshot(
+    snapshot: unknown,
+    clock: () => number = nowMs,
+    ownerUserId?: string,
+  ): OrbitStore {
+    if (!OrbitStore.isSnapshot(snapshot, ownerUserId))
+      throw new Error("Invalid OrbitStore snapshot");
+    const source = structuredClone(snapshot);
+    const store = new OrbitStore(clock);
+    const setById = <T extends { id: string }>(target: Map<string, T>, values: T[]) => {
+      values.forEach((value) => target.set(value.id, value));
+    };
+    const setByUserId = <T extends { userId: string }>(target: Map<string, T>, values: T[]) => {
+      values.forEach((value) => target.set(value.userId, value));
+    };
+
+    setById(store.users, source.users);
+    setByUserId(store.preferences, source.preferences);
+    setById(store.workflowStates, source.workflowStates);
+    setById(store.projectStatuses, source.projectStatuses);
+    setById(store.projects, source.projects);
+    setById(store.cycles, source.cycles);
+    setByUserId(store.cycleSettings, source.cycleSettings);
+    setById(store.issues, source.issues);
+    setById(store.labels, source.labels);
+    setById(store.notes, source.notes);
+    setById(store.relations, source.relations);
+    setById(store.views, source.views);
+    setById(store.notifications, source.notifications);
+    source.runs.forEach((run) => store.runs.set(run.run_id, run));
+    setByUserId(store.locks, source.locks);
+    store.activities.push(...source.activities);
+    store.outbox.push(...source.outbox);
+    source.receipts.forEach((receipt) =>
+      store.receipts.set(`${receipt.userId}:${receipt.idempotencyKey}`, receipt),
+    );
+    store.cycleHistory.push(...source.cycleHistory);
+    store.seededUsers = new Set(source.seededUsers);
+    return store;
+  }
+
+  private static isSnapshot(value: unknown, ownerUserId?: string): value is OrbitStoreSnapshot {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<OrbitStoreSnapshot>;
+    const arrays = [
+      "users",
+      "preferences",
+      "workflowStates",
+      "projectStatuses",
+      "projects",
+      "cycles",
+      "cycleSettings",
+      "issues",
+      "labels",
+      "notes",
+      "relations",
+      "views",
+      "notifications",
+      "activities",
+      "outbox",
+      "receipts",
+      "runs",
+      "locks",
+      "cycleHistory",
+      "seededUsers",
+    ];
+    if (!arrays.every((key) => Array.isArray(candidate[key as keyof OrbitStoreSnapshot])))
+      return false;
+
+    const isRecord = (entry: unknown): entry is Record<string, unknown> =>
+      typeof entry === "object" && entry !== null && !Array.isArray(entry);
+    const items = (key: keyof OrbitStoreSnapshot): unknown[] => candidate[key] as unknown[];
+    const hasFields = (key: keyof OrbitStoreSnapshot, fields: string[]) =>
+      items(key).every(
+        (entry) => isRecord(entry) && fields.every((field) => typeof entry[field] === "string"),
+      );
+    const hasTypes = (
+      key: keyof OrbitStoreSnapshot,
+      fields: { strings?: string[]; numbers?: string[]; booleans?: string[] },
+    ) =>
+      items(key).every((entry) => {
+        if (!isRecord(entry)) return false;
+        return (
+          (fields.strings ?? []).every((field) => typeof entry[field] === "string") &&
+          (fields.numbers ?? []).every((field) => typeof entry[field] === "number") &&
+          (fields.booleans ?? []).every((field) => typeof entry[field] === "boolean")
+        );
+      });
+    const hasObjects = (key: keyof OrbitStoreSnapshot, fields: string[]) =>
+      items(key).every(
+        (entry) =>
+          isRecord(entry) &&
+          fields.every(
+            (field) =>
+              typeof entry[field] === "object" &&
+              entry[field] !== null &&
+              !Array.isArray(entry[field]),
+          ),
+      );
+    const hasIdOwner = [
+      "workflowStates",
+      "projectStatuses",
+      "projects",
+      "cycles",
+      "issues",
+      "labels",
+      "notes",
+      "relations",
+      "views",
+      "notifications",
+      "activities",
+      "outbox",
+      "cycleHistory",
+    ].every((key) => hasFields(key as keyof OrbitStoreSnapshot, ["id", "userId"]));
+    const valid =
+      hasTypes("users", { strings: ["id", "name", "email"], numbers: ["createdAt"] }) &&
+      hasTypes("preferences", {
+        strings: ["userId", "timezone", "locale", "theme"],
+        numbers: ["issueCounter"],
+        booleans: ["estimateEnabled"],
+      }) &&
+      hasTypes("workflowStates", {
+        strings: ["id", "userId", "name", "category", "color"],
+        numbers: ["position"],
+        booleans: ["isDefault"],
+      }) &&
+      hasTypes("projectStatuses", {
+        strings: ["id", "userId", "name", "category", "color"],
+        numbers: ["position"],
+        booleans: ["isDefault"],
+      }) &&
+      hasTypes("projects", {
+        strings: ["id", "userId", "name", "statusId", "priority", "color", "icon", "description"],
+        numbers: ["createdAt", "updatedAt"],
+      }) &&
+      hasTypes("cycles", {
+        strings: ["id", "userId", "name", "description", "status"],
+        numbers: ["number", "startsAt", "endsAt"],
+        booleans: ["scheduleOverridden"],
+      }) &&
+      hasTypes("labels", { strings: ["id", "userId", "name", "color"] }) &&
+      hasTypes("notes", {
+        strings: ["id", "userId", "issueId", "body"],
+        numbers: ["createdAt"],
+      }) &&
+      hasTypes("relations", {
+        strings: ["id", "userId", "sourceIssueId", "targetIssueId", "type"],
+        numbers: ["createdAt"],
+      }) &&
+      hasTypes("views", {
+        strings: ["id", "userId", "name"],
+        numbers: ["createdAt", "updatedAt"],
+      }) &&
+      hasObjects("views", ["query", "layout"]) &&
+      hasTypes("cycleSettings", {
+        strings: ["userId"],
+        numbers: ["durationWeeks", "cooldownWeeks", "startWeekday", "futureCount"],
+        booleans: ["enabled"],
+      }) &&
+      hasTypes("issues", {
+        strings: ["id", "userId", "title", "statusId", "priority"],
+        numbers: ["number", "position", "version", "createdAt", "updatedAt"],
+      }) &&
+      hasTypes("notifications", {
+        strings: ["id", "userId", "type", "title", "body", "entityType"],
+      }) &&
+      hasTypes("activities", {
+        strings: ["id", "userId", "entityType", "entityId", "action", "actorType", "mutationKey"],
+        numbers: ["createdAt"],
+      }) &&
+      hasTypes("outbox", {
+        strings: ["id", "userId", "type", "dedupeKey", "status"],
+        numbers: ["attemptCount", "createdAt"],
+      }) &&
+      hasTypes("receipts", {
+        strings: ["userId", "idempotencyKey", "requestHash", "operation"],
+        numbers: ["createdAt", "expiresAt"],
+      }) &&
+      hasTypes("runs", {
+        strings: ["run_id", "user_id", "kind", "status", "idempotencyKey", "requestHash"],
+        numbers: ["requested_at", "resume_count"],
+      }) &&
+      hasObjects("runs", ["progress", "stepStatuses", "stepCursors"]) &&
+      hasTypes("cycleHistory", {
+        strings: ["id", "userId", "issueId", "fromCycleId", "toCycleId"],
+        numbers: ["movedAt"],
+      }) &&
+      hasTypes("locks", { strings: ["userId", "status"] }) &&
+      hasIdOwner &&
+      items("seededUsers").every((entry) => typeof entry === "string");
+    if (!valid) return false;
+    if (!ownerUserId) return true;
+
+    const ownerScoped = [
+      "preferences",
+      "workflowStates",
+      "projectStatuses",
+      "projects",
+      "cycles",
+      "cycleSettings",
+      "issues",
+      "labels",
+      "notes",
+      "relations",
+      "views",
+      "notifications",
+      "activities",
+      "outbox",
+      "receipts",
+      "cycleHistory",
+      "locks",
+    ] as const;
+    const scopedToOwner = ownerScoped.every((key) =>
+      items(key).every((entry) => {
+        if (!isRecord(entry)) return false;
+        return entry.userId === ownerUserId;
+      }),
+    );
+    return (
+      scopedToOwner &&
+      items("users").every((entry) => isRecord(entry) && entry.id === ownerUserId) &&
+      items("runs").every((entry) => isRecord(entry) && entry.user_id === ownerUserId) &&
+      items("seededUsers").every((entry) => entry === ownerUserId)
+    );
+  }
 
   ensureOwner(userId: string, email = "you@orbit.local", seedDemo = false): User {
     const existing = this.users.get(userId);

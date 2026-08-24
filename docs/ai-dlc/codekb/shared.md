@@ -7,12 +7,13 @@
 - Cycle workspaceは既存BootstrapのCycle / Issueを使い、`PATCH /api/v1/cycles/:cycleId` でmetadataを更新する。Cycle closeのPOSTとIssue PATCHのCycle割当は既存Routeを再利用する（参照: `src/server/api.ts`、`src/routes/api/v1/cycles/`）。
 - Project workspaceはBootstrapのProject / Issueを使い、既存`PATCH /api/v1/projects/:projectId`をmetadata更新に再利用する。Saved Viewは`POST/PATCH/DELETE /api/v1/views*`でOwner scopedに管理する（参照: `src/server/api.ts`、`src/routes/api/v1/projects/`、`src/routes/api/v1/views/`）。
 - Label / Bulk workspaceはBootstrapの`labels`とIssueの`labelIds`を使い、Label CRUDを`/api/v1/labels*`、複数Issue更新を`POST /api/v1/issues/bulk`で公開する。現段階はMemory StoreのOwner / Lock / Receipt / Activity / Outbox境界を正本とする（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/labels/`、`src/routes/api/v1/issues/bulk.ts`）。
+- 本番APIは`withOwner`でOwner単位のD1 Snapshot Sessionを開き、成功Response後だけVersion CAS保存する。ローカルはMemory Storeを維持し、本番でD1 Bindingが無い場合はフォールバックしない（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 - Inbox / NotificationはBootstrapの`notifications`と既存`PATCH /api/v1/notifications/:notificationId`を再利用し、strict `NotificationReadMutation`で個別既読・全件既読・Issue / Project / Cycle遷移を行う。通知生成は別スコープとする（参照: `src/components/OrbitApp.tsx`、`src/server/api.ts`、`src/shared/contracts/notifications.ts`）。
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
 
 ## 主要データ構造
 
-- D1 / Drizzleの25テーブルとOwner scopeは `src/db/schema.ts`、初期DDLは `drizzle/0000_initial.sql` を正本とする。
+- D1 / Drizzleの26テーブルとOwner scopeは `src/db/schema.ts`、初期DDLは `drizzle/0000_initial.sql`、Snapshot bridgeは `drizzle/0001_*.sql` を正本とする。
 - Preview未接続のローカルMVPは `OrbitStore` のOwner別Memory Storeを使う（参照: `src/server/store.ts`）。
 - Notes / Relationsは既存D1テーブルを再利用し、Memory Storeでは `notes` / `relations` MapとOwner / Lock / Receipt / Activity / Outboxを同じ境界で適用する（参照: `src/server/store.ts`）。
 
@@ -29,7 +30,8 @@
 - Cloudflare Vite pluginのSSR buildはWranglerログをユーザープリファレンスへ書こうとするため、制限環境では `WRANGLER_LOG_PATH` を明示して検証する（出典: Stage 5実行ログ）。
 - `pnpm` はnode_modulesの再構成を非TTYで確認すると停止するため、CI / 自動実行では `.npmrc` の `confirmModulesPurge=false` を使う（参照: `.npmrc`）。
 - Bulkはpatchを1属性に限定し、参照先を全件検証してから適用する。Activity mutation keyはIssueごとにsuffixを付け、全体Receiptとは分離する（参照: `src/shared/contracts/bulk.ts`、`src/server/store.ts`）。
+- SnapshotのVersion CASは既存Snapshotの読み取りではVersionを進めず、成功したMutationまたはSnapshot未作成時の初回成功GETだけがD1行を初期化・更新する。既存Versionとの不一致は`D1_WRITE_CONFLICT`になる（参照: `src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace作業中 / 2026-08-24
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / 2026-08-24

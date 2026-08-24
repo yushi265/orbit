@@ -41,6 +41,12 @@ ui  →  shared ← service → data
 - `shared` は `ui` / `service` の双方から利用されるが、どちらにも依存しない。
 - 認証済みユーザーのスコープ、入力検証、versionによる楽観的ロックは `service` 境界で担保する。
 
+## 永続化モード
+
+- ローカル開発は既存の`OrbitStore`（Memory Store）を使い、主要な画面Journeyを高速に検証する。
+- productionは`withOwner`のRequest SessionがD1 Snapshotをロードし、成功したRequestだけをOwner単位のVersion CASで保存する。D1 Bindingが無い場合にMemory Storeへフォールバックしない。
+- `src/db/`の正規化Schema / Repositoryは段階移行の正本として残し、Snapshot表は現行`OrbitStore`の全モデルを欠落なく永続化するためのMVP bridgeとする。
+
 ## ドメイン境界（初期予定）
 
 MVPでは単一 Worker 内のモジュールとして次を分ける。独立したサービスや別デプロイにはしない。
@@ -58,7 +64,7 @@ MVPでは単一 Worker 内のモジュールとして次を分ける。独立し
 ## 未確定事項
 
 - TanStack Startの具体的なRoute配置とServer Functionの切り分け
-- D1 Repositoryのファイル構成とMigration運用
+- D1 Snapshotからドメイン単位の正規化Repositoryへ移行する時期・単位とMigration運用
 - Cloudflare Access JWT検証ライブラリ・鍵取得の実装方法
 - D1 Chunk Runnerのローカルテスト方法とLease復旧手順
 

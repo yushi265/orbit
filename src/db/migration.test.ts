@@ -49,4 +49,17 @@ describe("初期 Drizzle migration", () => {
     expect(migration).toContain("background_run_steps_run_step_unique");
     expect(migration).toContain("background_effect_dedupes_user_step_key_unique");
   });
+
+  it("Snapshot migrationにowner scopedなVersion CAS表を含む", () => {
+    const migrationDirectory = resolve(process.cwd(), "drizzle");
+    const migrationFile = readdirSync(migrationDirectory)
+      .filter((name) => /^0001_.*\.sql$/.test(name))
+      .sort()[0];
+
+    expect(migrationFile).toBeDefined();
+    const migration = readFileSync(resolve(migrationDirectory, migrationFile), "utf8");
+    expect(migration).toContain("CREATE TABLE `orbit_store_snapshots`");
+    expect(migration).toContain("`user_id` text PRIMARY KEY NOT NULL");
+    expect(migration).toContain("orbit_store_snapshots_version_check");
+  });
 });

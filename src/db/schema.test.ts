@@ -18,6 +18,7 @@ import {
   mutationReceipts,
   notificationPreferences,
   notifications,
+  orbitStoreSnapshots,
   outboxEvents,
   projectStatuses,
   projects,
@@ -56,6 +57,7 @@ const schemaTables = {
   backgroundRunSteps,
   backgroundEffectDedupes,
   userRuntimeLocks,
+  orbitStoreSnapshots,
 } as const;
 
 function tableConfig(table: (typeof schemaTables)[keyof typeof schemaTables]) {
@@ -119,6 +121,7 @@ describe("Drizzle schema", () => {
       recentIssueViews: "recent_issue_views",
       recentSearches: "recent_searches",
       notifications: "notifications",
+      orbitStoreSnapshots: "orbit_store_snapshots",
       notificationPreferences: "notification_preferences",
       activityEvents: "activity_events",
       outboxEvents: "outbox_events",
@@ -167,6 +170,12 @@ describe("Drizzle schema", () => {
     expect(columnNames(backgroundRunSteps)).toEqual(
       expect.arrayContaining(["run_id", "user_id", "step", "status", "cursor", "dedupe_key"]),
     );
+    expect(columnNames(orbitStoreSnapshots)).toEqual([
+      "user_id",
+      "version",
+      "state_json",
+      "updated_at",
+    ]);
   });
 
   it("[代表値＋制約] owner 境界と主要な unique / index を schema に持つ", () => {
@@ -174,6 +183,7 @@ describe("Drizzle schema", () => {
     expect(tableConfig(issues).foreignKeys.length).toBeGreaterThan(0);
     expect(tableConfig(backgroundRunSteps).foreignKeys.length).toBeGreaterThan(0);
     expect(tableConfig(userRuntimeLocks).foreignKeys.length).toBeGreaterThan(0);
+    expect(tableConfig(orbitStoreSnapshots).foreignKeys.length).toBeGreaterThan(0);
 
     expect(hasIndex(issues, ["user_id", "status_id", "updated_at"])).toBe(true);
     expect(hasIndex(issues, ["user_id", "cycle_id", "position"])).toBe(true);

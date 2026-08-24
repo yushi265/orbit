@@ -1,9 +1,16 @@
 import { resolveOwner, OwnerContext } from "./auth";
 import { ServiceError } from "./errors";
+import { openStoreSession } from "./store-session";
+import type { OrbitStore } from "./store";
 
 export interface HandlerContext {
-  owner: OwnerContext;
+  owner: OwnerContext & { store: OrbitStore };
   requestId: string;
+}
+
+export interface HandlerDependencies {
+  resolveOwner?: typeof resolveOwner;
+  openStoreSession?: typeof openStoreSession;
 }
 
 export function requestId(): string {
@@ -56,6 +63,7 @@ export async function parseBody(request: Request): Promise<Record<string, unknow
 export async function withOwner(
   request: Request,
   handler: (context: HandlerContext) => Promise<Response>,
+  dependencies: HandlerDependencies = {},
 ): Promise<Response> {
   const id = requestId();
   try {
@@ -65,8 +73,16 @@ export async function withOwner(
     ) {
       throw new ServiceError(400, "VALIDATION_ERROR", "同一OriginのMutationだけを受け付けます。");
     }
-    const owner = await resolveOwner(request);
-    return await handler({ owner, requestId: id });
+    const resolvedOwner = await (dependencies.resolveOwner ?? resolveOwner)(request);
+    const session = await (dependencies.openStoreSession ?? openStoreSession)(
+      resolvedOwner.userId,
+      resolvedOwner.email,
+    );
+    const owner = { ...resolvedOwner, store: session.store };
+    const response = await handler({ owner, requestId: id });
+    const isMutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
+    if (response.ok && (isMutation || session.needsInitialPersist)) await session.persist();
+    return response;
   } catch (error) {
     if (error instanceof ServiceError) return errorResponse(error, id);
     console.error(JSON.stringify({ requestId: id, error: "internal_error" }));

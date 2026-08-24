@@ -96,6 +96,7 @@ describe("ErrorEnvelope", () => {
       RESOURCE_NOT_FOUND: 404,
       ISSUE_VERSION_CONFLICT: 409,
       IDEMPOTENCY_KEY_REUSED: 409,
+      D1_WRITE_CONFLICT: 409,
       OPERATION_IN_PROGRESS: 423,
       RUN_REQUIRES_RESUME: 409,
       BACKGROUND_RUN_REJECTED: 409,
@@ -129,6 +130,16 @@ describe("ErrorEnvelope", () => {
           message: "安全なエラー",
           requestId: "request-1",
           lock_token: "must-not-leak",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      errorEnvelopeSchema.safeParse({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "安全なエラー",
+          requestId: "request-1",
+          state_json: "must-not-leak",
         },
       }).success,
     ).toBe(false);

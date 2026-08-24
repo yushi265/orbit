@@ -2,7 +2,6 @@ import { z } from "zod";
 import { json, keyFromRequest, parseBody, parseNumber, withOwner } from "./http";
 import { validationError } from "./errors";
 import {
-  getOrbitStore,
   CreateIssueInput,
   UpdateIssueInput,
   CreateProjectInput,
@@ -117,17 +116,13 @@ function parseQuery(request: Request): Partial<IssueQuery> {
 
 export async function bootstrap(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json(getOrbitStore(owner.userId).bootstrap(owner.userId), 200, requestId),
+    json(owner.store.bootstrap(owner.userId), 200, requestId),
   );
 }
 
 export async function listIssues(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json(
-      { items: getOrbitStore(owner.userId).listIssues(owner.userId, parseQuery(request)) },
-      200,
-      requestId,
-    ),
+    json({ items: owner.store.listIssues(owner.userId, parseQuery(request)) }, 200, requestId),
   );
 }
 
@@ -143,14 +138,14 @@ export async function createIssue(request: Request): Promise<Response> {
       ...parsed,
       description: textFromDocument(parsed.descriptionJson),
     } as unknown as CreateIssueInput;
-    const issue = getOrbitStore(owner.userId).createIssue(owner.userId, input);
+    const issue = owner.store.createIssue(owner.userId, input);
     return json({ issue }, 201, requestId);
   });
 }
 
 export async function getIssue(request: Request, issueId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const detail = getOrbitStore(owner.userId).getIssueDetail(owner.userId, issueId);
+    const detail = owner.store.getIssueDetail(owner.userId, issueId);
     return json(issueDetailResponseSchema.parse(detail), 200, requestId);
   });
 }
@@ -159,7 +154,7 @@ export async function createIssueNote(request: Request, issueId: string): Promis
   return withOwner(request, async ({ owner, requestId }) => {
     const input = parseContract(noteMutationSchema, await parseBody(request)) as NoteMutationInput;
     return json(
-      { note: getOrbitStore(owner.userId).createIssueNote(owner.userId, issueId, input) },
+      { note: owner.store.createIssueNote(owner.userId, issueId, input) },
       201,
       requestId,
     );
@@ -174,7 +169,7 @@ export async function updateIssueNote(
   return withOwner(request, async ({ owner, requestId }) => {
     const input = parseContract(noteMutationSchema, await parseBody(request)) as NoteMutationInput;
     return json(
-      { note: getOrbitStore(owner.userId).updateIssueNote(owner.userId, issueId, noteId, input) },
+      { note: owner.store.updateIssueNote(owner.userId, issueId, noteId, input) },
       200,
       requestId,
     );
@@ -189,7 +184,7 @@ export async function deleteIssueNote(
   return withOwner(request, async ({ owner, requestId }) => {
     const key = request.headers.get("Idempotency-Key");
     if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
-    getOrbitStore(owner.userId).deleteIssueNote(owner.userId, issueId, noteId, key);
+    owner.store.deleteIssueNote(owner.userId, issueId, noteId, key);
     return json({ ok: true }, 200, requestId);
   });
 }
@@ -201,7 +196,7 @@ export async function createIssueRelation(request: Request, issueId: string): Pr
       await parseBody(request),
     ) as RelationMutationInput;
     return json(
-      { relation: getOrbitStore(owner.userId).createIssueRelation(owner.userId, issueId, input) },
+      { relation: owner.store.createIssueRelation(owner.userId, issueId, input) },
       201,
       requestId,
     );
@@ -216,7 +211,7 @@ export async function deleteIssueRelation(
   return withOwner(request, async ({ owner, requestId }) => {
     const key = request.headers.get("Idempotency-Key");
     if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
-    getOrbitStore(owner.userId).deleteIssueRelation(owner.userId, issueId, relationId, key);
+    owner.store.deleteIssueRelation(owner.userId, issueId, relationId, key);
     return json({ ok: true }, 200, requestId);
   });
 }
@@ -241,7 +236,7 @@ export async function updateIssue(request: Request, issueId: string): Promise<Re
           : {}),
       },
     } as unknown as UpdateIssueInput;
-    const issue = getOrbitStore(owner.userId).updateIssue(owner.userId, input);
+    const issue = owner.store.updateIssue(owner.userId, input);
     return json({ issue }, 200, requestId);
   });
 }
@@ -250,11 +245,7 @@ export async function archiveIssue(request: Request, issueId: string): Promise<R
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: getOrbitStore(owner.userId).archiveIssue(
-          owner.userId,
-          issueId,
-          keyFromRequest(request),
-        ),
+        issue: owner.store.archiveIssue(owner.userId, issueId, keyFromRequest(request)),
       },
       200,
       requestId,
@@ -266,11 +257,7 @@ export async function restoreIssue(request: Request, issueId: string): Promise<R
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: getOrbitStore(owner.userId).restoreIssue(
-          owner.userId,
-          issueId,
-          keyFromRequest(request),
-        ),
+        issue: owner.store.restoreIssue(owner.userId, issueId, keyFromRequest(request)),
       },
       200,
       requestId,
@@ -282,11 +269,7 @@ export async function trashIssue(request: Request, issueId: string): Promise<Res
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: getOrbitStore(owner.userId).trashIssue(
-          owner.userId,
-          issueId,
-          keyFromRequest(request),
-        ),
+        issue: owner.store.trashIssue(owner.userId, issueId, keyFromRequest(request)),
       },
       200,
       requestId,
@@ -296,35 +279,27 @@ export async function trashIssue(request: Request, issueId: string): Promise<Res
 
 export async function listProjects(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: getOrbitStore(owner.userId).listProjects(owner.userId) }, 200, requestId),
+    json({ items: owner.store.listProjects(owner.userId) }, 200, requestId),
   );
 }
 
 export async function listLabels(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: getOrbitStore(owner.userId).listLabels(owner.userId) }, 200, requestId),
+    json({ items: owner.store.listLabels(owner.userId) }, 200, requestId),
   );
 }
 
 export async function createLabel(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const input = parseContract(labelMutationSchema, await parseBody(request)) as CreateLabelInput;
-    return json(
-      { label: getOrbitStore(owner.userId).createLabel(owner.userId, input) },
-      201,
-      requestId,
-    );
+    return json({ label: owner.store.createLabel(owner.userId, input) }, 201, requestId);
   });
 }
 
 export async function updateLabel(request: Request, labelId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const input = parseContract(labelUpdateSchema, await parseBody(request)) as UpdateLabelInput;
-    return json(
-      { label: getOrbitStore(owner.userId).updateLabel(owner.userId, labelId, input) },
-      200,
-      requestId,
-    );
+    return json({ label: owner.store.updateLabel(owner.userId, labelId, input) }, 200, requestId);
   });
 }
 
@@ -333,7 +308,7 @@ export async function deleteLabel(request: Request, labelId: string): Promise<Re
     const mutationKey = request.headers.get("Idempotency-Key");
     if (!mutationKey)
       throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
-    getOrbitStore(owner.userId).deleteLabel(owner.userId, labelId, mutationKey);
+    owner.store.deleteLabel(owner.userId, labelId, mutationKey);
     return json({ ok: true }, 200, requestId);
   });
 }
@@ -344,11 +319,7 @@ export async function bulkUpdateIssues(request: Request): Promise<Response> {
       bulkIssueMutationSchema,
       await parseBody(request),
     ) as BulkIssueInput;
-    return json(
-      { items: getOrbitStore(owner.userId).bulkUpdateIssues(owner.userId, input) },
-      200,
-      requestId,
-    );
+    return json({ items: owner.store.bulkUpdateIssues(owner.userId, input) }, 200, requestId);
   });
 }
 
@@ -359,11 +330,7 @@ export async function createProject(request: Request): Promise<Response> {
       ...body,
       idempotencyKey: bodyMutationKey(body, request),
     }) as CreateProjectInput;
-    return json(
-      { project: getOrbitStore(owner.userId).createProject(owner.userId, input) },
-      201,
-      requestId,
-    );
+    return json({ project: owner.store.createProject(owner.userId, input) }, 201, requestId);
   });
 }
 
@@ -389,11 +356,7 @@ export async function updateProject(request: Request, projectId: string): Promis
       patch,
       idempotencyKey,
     } as unknown as UpdateProjectInput;
-    return json(
-      { project: getOrbitStore(owner.userId).updateProject(owner.userId, input) },
-      200,
-      requestId,
-    );
+    return json({ project: owner.store.updateProject(owner.userId, input) }, 200, requestId);
   });
 }
 
@@ -401,11 +364,7 @@ export async function archiveProject(request: Request, projectId: string): Promi
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        project: getOrbitStore(owner.userId).archiveProject(
-          owner.userId,
-          projectId,
-          keyFromRequest(request),
-        ),
+        project: owner.store.archiveProject(owner.userId, projectId, keyFromRequest(request)),
       },
       200,
       requestId,
@@ -415,7 +374,7 @@ export async function archiveProject(request: Request, projectId: string): Promi
 
 export async function listCycles(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: getOrbitStore(owner.userId).listCycles(owner.userId) }, 200, requestId),
+    json({ items: owner.store.listCycles(owner.userId) }, 200, requestId),
   );
 }
 
@@ -423,11 +382,7 @@ export async function closeCycle(request: Request, cycleId: string): Promise<Res
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        cycle: getOrbitStore(owner.userId).closeCycle(
-          owner.userId,
-          cycleId,
-          keyFromRequest(request),
-        ),
+        cycle: owner.store.closeCycle(owner.userId, cycleId, keyFromRequest(request)),
       },
       200,
       requestId,
@@ -442,7 +397,7 @@ export async function updateCycleMetadata(request: Request, cycleId: string): Pr
       await parseBody(request),
     ) as UpdateCycleMetadataInput;
     return json(
-      { cycle: getOrbitStore(owner.userId).updateCycleMetadata(owner.userId, cycleId, input) },
+      { cycle: owner.store.updateCycleMetadata(owner.userId, cycleId, input) },
       200,
       requestId,
     );
@@ -451,7 +406,7 @@ export async function updateCycleMetadata(request: Request, cycleId: string): Pr
 
 export async function listViews(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: getOrbitStore(owner.userId).listViews(owner.userId) }, 200, requestId),
+    json({ items: owner.store.listViews(owner.userId) }, 200, requestId),
   );
 }
 
@@ -462,11 +417,7 @@ export async function createView(request: Request): Promise<Response> {
       ...body,
       idempotencyKey: bodyMutationKey(body, request),
     }) as CreateViewInput;
-    return json(
-      { view: getOrbitStore(owner.userId).createView(owner.userId, input) },
-      201,
-      requestId,
-    );
+    return json({ view: owner.store.createView(owner.userId, input) }, 201, requestId);
   });
 }
 
@@ -477,11 +428,7 @@ export async function updateView(request: Request, viewId: string): Promise<Resp
       ...body,
       idempotencyKey: bodyMutationKey(body, request),
     }) as UpdateViewInput;
-    return json(
-      { view: getOrbitStore(owner.userId).updateView(owner.userId, viewId, input) },
-      200,
-      requestId,
-    );
+    return json({ view: owner.store.updateView(owner.userId, viewId, input) }, 200, requestId);
   });
 }
 
@@ -489,7 +436,7 @@ export async function deleteView(request: Request, viewId: string): Promise<Resp
   return withOwner(request, async ({ owner, requestId }) => {
     const mutationKey = request.headers.get("Idempotency-Key");
     if (!mutationKey) throw validationError({ idempotencyKey: ["冪等性キーを指定してください。"] });
-    getOrbitStore(owner.userId).deleteView(owner.userId, viewId, mutationKey);
+    owner.store.deleteView(owner.userId, viewId, mutationKey);
     return json({ ok: true }, 200, requestId);
   });
 }
@@ -497,13 +444,13 @@ export async function deleteView(request: Request, viewId: string): Promise<Resp
 export async function searchIssues(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const query = new URL(request.url).searchParams.get("q") ?? "";
-    return json({ items: getOrbitStore(owner.userId).search(owner.userId, query) }, 200, requestId);
+    return json({ items: owner.store.search(owner.userId, query) }, 200, requestId);
   });
 }
 
 export async function listNotifications(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: getOrbitStore(owner.userId).listNotifications(owner.userId) }, 200, requestId),
+    json({ items: owner.store.listNotifications(owner.userId) }, 200, requestId),
   );
 }
 
@@ -515,7 +462,7 @@ export async function markNotification(
     const input = parseContract(notificationReadMutationSchema, await parseBody(request));
     return json(
       {
-        notification: getOrbitStore(owner.userId).markNotification(
+        notification: owner.store.markNotification(
           owner.userId,
           notificationId,
           input.read,
@@ -533,7 +480,7 @@ export async function updatePreferences(request: Request): Promise<Response> {
     const body = await parseBody(request);
     return json(
       {
-        preferences: getOrbitStore(owner.userId).updatePreferences(
+        preferences: owner.store.updatePreferences(
           owner.userId,
           pickFields(body, ["timezone", "locale", "theme", "estimateEnabled"]),
           String(body.idempotencyKey ?? keyFromRequest(request)),
@@ -549,15 +496,15 @@ export async function startBackgroundRun(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
     const input = parseContract(maintenanceRunCreateInputSchema, body) as MaintenanceRunInput;
-    const run = getOrbitStore(owner.userId).startRun(owner.userId, input);
-    return json({ run: getOrbitStore(owner.userId).publicRun(run) }, 202, requestId);
+    const run = owner.store.startRun(owner.userId, input);
+    return json({ run: owner.store.publicRun(run) }, 202, requestId);
   });
 }
 
 export async function currentBackgroundRun(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const run = getOrbitStore(owner.userId).currentRun(owner.userId);
-    return json({ run: run ? getOrbitStore(owner.userId).publicRun(run) : null }, 200, requestId);
+    const run = owner.store.currentRun(owner.userId);
+    return json({ run: run ? owner.store.publicRun(run) : null }, 200, requestId);
   });
 }
 
@@ -565,9 +512,7 @@ export async function getBackgroundRun(request: Request, runId: string): Promise
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        run: getOrbitStore(owner.userId).publicRun(
-          getOrbitStore(owner.userId).getRun(owner.userId, runId),
-        ),
+        run: owner.store.publicRun(owner.store.getRun(owner.userId, runId)),
       },
       200,
       requestId,
@@ -582,7 +527,7 @@ export async function continueBackgroundRun(request: Request, runId: string): Pr
       expected_cursor: body.expected_cursor,
       idempotencyKey: body.idempotencyKey,
     }) as ContinueRunInput;
-    const store = getOrbitStore(owner.userId);
+    const store = owner.store;
     return json(
       store.continueRun(owner.userId, runId, input, store.lockTokenFor(owner.userId, runId)),
       200,
@@ -597,10 +542,6 @@ export async function resumeBackgroundRun(request: Request, runId: string): Prom
     parseContract(resumeRunInputSchema, {
       idempotencyKey: body.idempotencyKey,
     });
-    return json(
-      { run: getOrbitStore(owner.userId).resumeRun(owner.userId, runId) },
-      200,
-      requestId,
-    );
+    return json({ run: owner.store.resumeRun(owner.userId, runId) }, 200, requestId);
   });
 }

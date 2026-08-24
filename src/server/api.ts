@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { json, keyFromRequest, parseBody, parseNumber, withOwner } from "./http";
 import { validationError } from "./errors";
 import {
@@ -12,6 +13,7 @@ import {
   NoteMutationInput,
   RelationMutationInput,
   UpdateCycleMetadataInput,
+  UpdateViewInput,
 } from "./store";
 import { IssueQuery, priorities } from "./model";
 import {
@@ -21,10 +23,26 @@ import {
   issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
   noteMutationSchema,
+  projectCreateMutationSchema,
+  projectMetadataMutationSchema,
   relationMutationSchema,
   resumeRunInputSchema,
+  savedViewMutationSchema,
+  savedViewUpdateSchema,
   updateIssueInputSchema,
 } from "../shared/contracts";
+
+const projectMetadataPatchEnvelopeSchema = z.strictObject({
+  idempotencyKey: z.string().min(1).optional(),
+  patch: z.unknown(),
+});
+const projectMetadataPatchSchema = projectMetadataMutationSchema.omit({ idempotencyKey: true });
+
+function bodyMutationKey(body: Record<string, unknown>, request: Request): unknown {
+  return Object.prototype.hasOwnProperty.call(body, "idempotencyKey")
+    ? body.idempotencyKey
+    : request.headers.get("Idempotency-Key");
+}
 
 function parseContract<T>(
   schema: {
@@ -277,10 +295,10 @@ export async function listProjects(request: Request): Promise<Response> {
 export async function createProject(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
-    const input = {
+    const input = parseContract(projectCreateMutationSchema, {
       ...body,
-      idempotencyKey: String(body.idempotencyKey ?? keyFromRequest(request)),
-    } as unknown as CreateProjectInput;
+      idempotencyKey: bodyMutationKey(body, request),
+    }) as CreateProjectInput;
     return json(
       { project: getOrbitStore(owner.userId).createProject(owner.userId, input) },
       201,
@@ -292,19 +310,24 @@ export async function createProject(request: Request): Promise<Response> {
 export async function updateProject(request: Request, projectId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
+    const parsed = Object.prototype.hasOwnProperty.call(body, "patch")
+      ? (() => {
+          const envelope = parseContract(projectMetadataPatchEnvelopeSchema, body);
+          const patch = parseContract(projectMetadataPatchSchema, envelope.patch);
+          return parseContract(projectMetadataMutationSchema, {
+            ...patch,
+            idempotencyKey: envelope.idempotencyKey ?? request.headers.get("Idempotency-Key"),
+          });
+        })()
+      : parseContract(projectMetadataMutationSchema, {
+          ...body,
+          idempotencyKey: bodyMutationKey(body, request),
+        });
+    const { idempotencyKey, ...patch } = parsed;
     const input = {
       id: projectId,
-      patch: pickFields((body.patch ?? {}) as Record<string, unknown>, [
-        "name",
-        "description",
-        "statusId",
-        "priority",
-        "color",
-        "icon",
-        "startAt",
-        "targetAt",
-      ]),
-      idempotencyKey: String(body.idempotencyKey ?? keyFromRequest(request)),
+      patch,
+      idempotencyKey,
     } as unknown as UpdateProjectInput;
     return json(
       { project: getOrbitStore(owner.userId).updateProject(owner.userId, input) },
@@ -375,10 +398,10 @@ export async function listViews(request: Request): Promise<Response> {
 export async function createView(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
-    const input = {
+    const input = parseContract(savedViewMutationSchema, {
       ...body,
-      idempotencyKey: String(body.idempotencyKey ?? keyFromRequest(request)),
-    } as unknown as CreateViewInput;
+      idempotencyKey: bodyMutationKey(body, request),
+    }) as CreateViewInput;
     return json(
       { view: getOrbitStore(owner.userId).createView(owner.userId, input) },
       201,
@@ -387,9 +410,26 @@ export async function createView(request: Request): Promise<Response> {
   });
 }
 
+export async function updateView(request: Request, viewId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const body = await parseBody(request);
+    const input = parseContract(savedViewUpdateSchema, {
+      ...body,
+      idempotencyKey: bodyMutationKey(body, request),
+    }) as UpdateViewInput;
+    return json(
+      { view: getOrbitStore(owner.userId).updateView(owner.userId, viewId, input) },
+      200,
+      requestId,
+    );
+  });
+}
+
 export async function deleteView(request: Request, viewId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    getOrbitStore(owner.userId).deleteView(owner.userId, viewId, keyFromRequest(request));
+    const mutationKey = request.headers.get("Idempotency-Key");
+    if (!mutationKey) throw validationError({ idempotencyKey: ["冪等性キーを指定してください。"] });
+    getOrbitStore(owner.userId).deleteView(owner.userId, viewId, mutationKey);
     return json({ ok: true }, 200, requestId);
   });
 }

@@ -28,7 +28,7 @@ import {
 } from "./model";
 import { conflict, locked, notFound, validationError } from "./errors";
 import { canonicalMutationJson } from "../shared/canonical-json";
-import type { CycleMetadataMutation } from "../shared/contracts";
+import type { CycleMetadataMutation, SavedViewUpdate } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 
 type Lock = {
@@ -111,6 +111,7 @@ export interface CreateViewInput {
   query: IssueQuery;
   layout?: Record<string, boolean>;
 }
+export type UpdateViewInput = SavedViewUpdate;
 
 export interface MaintenanceRunInput {
   kind: "maintenance";
@@ -439,7 +440,7 @@ export class OrbitStore {
       operation,
       idempotencyKey,
       requestHash: requestHash(operation, input),
-      response,
+      response: structuredClone(response),
       createdAt: this.clock(),
       expiresAt: this.clock() + THIRTY_DAYS,
     });
@@ -457,7 +458,7 @@ export class OrbitStore {
     const hash = requestHash(operation, input);
     if (hash !== existing.requestHash)
       throw conflict("IDEMPOTENCY_KEY_REUSED", "同じキーで異なる内容は送信できません。");
-    return existing.response as T;
+    return structuredClone(existing.response) as T;
   }
 
   createIssue(userId: string, input: CreateIssueInput, bypassLock = false): Issue {
@@ -956,8 +957,19 @@ export class OrbitStore {
       input,
     );
     if (existing) return existing;
-    if (!input.name.trim() || input.name.length > 100)
+    if (!input.name.trim() || [...input.name].length > 100)
       throw validationError({ name: ["プロジェクト名は1〜100文字で入力してください。"] });
+    if (input.description !== undefined && [...input.description].length > 2_000)
+      throw validationError({ description: ["説明は2,000文字以内で入力してください。"] });
+    for (const field of ["startAt", "targetAt"] as const) {
+      const value = input[field];
+      if (
+        value !== undefined &&
+        value !== null &&
+        (!Number.isInteger(value) || !Number.isFinite(value))
+      )
+        throw validationError({ [field]: ["日時は整数のtimestampまたはnullで指定してください。"] });
+    }
     const status = input.statusId
       ? this.projectStatuses.get(input.statusId)
       : this.ownedProjectStatuses(userId).find((item) => item.isDefault);
@@ -996,6 +1008,15 @@ export class OrbitStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  getProjectMetrics(userId: string, projectId: string): CycleMetrics {
+    const project = this.projects.get(projectId);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    const issues = [...this.issues.values()].filter(
+      (issue) => issue.userId === userId && issue.projectId === project.id && !issue.deletedAt,
+    );
+    return calculateCycleMetrics(issues, this.ownedWorkflowStates(userId));
+  }
+
   updateProject(userId: string, input: UpdateProjectInput): Project {
     this.assertUnlocked(userId);
     const existing = this.checkReceipt<Project>(
@@ -1009,9 +1030,20 @@ export class OrbitStore {
     if (!project || project.userId !== userId || project.deletedAt) throw notFound();
     if (
       input.patch.name !== undefined &&
-      (!input.patch.name.trim() || input.patch.name.length > 100)
+      (!input.patch.name.trim() || [...input.patch.name].length > 100)
     )
       throw validationError({ name: ["プロジェクト名は1〜100文字で入力してください。"] });
+    if (input.patch.description !== undefined && [...input.patch.description].length > 2_000)
+      throw validationError({ description: ["説明は2,000文字以内で入力してください。"] });
+    for (const field of ["startAt", "targetAt"] as const) {
+      const value = input.patch[field];
+      if (
+        value !== undefined &&
+        value !== null &&
+        (!Number.isInteger(value) || !Number.isFinite(value))
+      )
+        throw validationError({ [field]: ["日時は整数のtimestampまたはnullで指定してください。"] });
+    }
     if (input.patch.statusId) {
       const status = this.projectStatuses.get(input.patch.statusId);
       if (!status || status.userId !== userId) throw notFound();
@@ -1199,15 +1231,16 @@ export class OrbitStore {
       input,
     );
     if (existing) return existing;
-    if (!input.name.trim() || input.name.length > 80)
+    if (!input.name.trim() || [...input.name].length > 80)
       throw validationError({ name: ["View名は1〜80文字で入力してください。"] });
     const now = this.clock();
+    const layout = input.layout ?? input.query.layout;
     const view: SavedView = {
       id: createId("view"),
       userId,
       name: input.name.trim(),
-      query: input.query,
-      layout: input.layout ?? input.query.layout,
+      query: { ...input.query, layout },
+      layout,
       createdAt: now,
       updatedAt: now,
     };
@@ -1219,17 +1252,48 @@ export class OrbitStore {
   listViews(userId: string): SavedView[] {
     return [...this.views.values()]
       .filter((item) => item.userId === userId)
+      .map((item) => {
+        const layout = item.layout ?? item.query.layout;
+        if (layout !== undefined) {
+          item.layout = layout;
+          item.query = { ...item.query, layout };
+        }
+        return item;
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  updateView(userId: string, viewId: string, input: UpdateViewInput): SavedView {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<SavedView>(userId, "view.update", input.idempotencyKey, {
+      viewId,
+      ...input,
+    });
+    if (existing) return existing;
+    const view = this.views.get(viewId);
+    if (!view || view.userId !== userId) throw notFound();
+    if (input.name !== undefined && (!input.name.trim() || [...input.name].length > 80))
+      throw validationError({ name: ["View名は1〜80文字で入力してください。"] });
+    if (input.name !== undefined) view.name = input.name.trim();
+    if (input.query !== undefined) view.query = input.query;
+    const layout = input.layout ?? input.query?.layout;
+    if (layout !== undefined) {
+      view.layout = layout;
+      view.query = { ...view.query, layout };
+    }
+    view.updatedAt = this.clock();
+    this.recordReceipt(userId, "view.update", input.idempotencyKey, { viewId, ...input }, view);
+    return view;
   }
 
   deleteView(userId: string, id: string, idempotencyKey: string): void {
     this.assertUnlocked(userId);
+    const existing = this.checkReceipt<boolean>(userId, "view.delete", idempotencyKey, { id });
+    if (existing !== null) return;
     const view = this.views.get(id);
     if (!view || view.userId !== userId) throw notFound();
-    const existing = this.checkReceipt<null>(userId, "view.delete", idempotencyKey, { id });
-    if (existing) return;
     this.views.delete(id);
-    this.recordReceipt(userId, "view.delete", idempotencyKey, { id }, null);
+    this.recordReceipt(userId, "view.delete", idempotencyKey, { id }, true);
   }
 
   listNotifications(userId: string): Notification[] {

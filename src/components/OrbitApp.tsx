@@ -33,7 +33,7 @@ type Section =
   | "inbox"
   | "views"
   | "settings";
-type Props = { initialSection?: Section; issueId?: string };
+type Props = { initialSection?: Section; issueId?: string; projectId?: string };
 
 const priorityLabel: Record<Issue["priority"], string> = {
   no_priority: "No priority",
@@ -77,8 +77,24 @@ function formatDate(value: number | null): string {
   );
 }
 
+function formatDateOnly(value: number | null): string {
+  if (value === null) return "未設定";
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
 function formatRange(start: number, end: number): string {
   return `${formatDate(start)} — ${formatDate(end)}`;
+}
+
+function dateInputToUnix(value: string): number | null {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return Date.UTC(year, month - 1, day);
 }
 
 function shortId(value: string): string {
@@ -558,8 +574,11 @@ function OrbitAppInner(props: Props) {
             <ProjectsView
               projects={projects}
               issues={issues}
+              projectId={props.projectId}
               workflowStates={workflowStates}
+              projectStatuses={data.projectStatuses}
               onCreate={() => setProjectComposerOpen(true)}
+              onRefresh={refresh}
             />
           )}
           {section === "search" && (
@@ -576,7 +595,13 @@ function OrbitAppInner(props: Props) {
             />
           )}
           {section === "inbox" && <InboxView notifications={notifications} />}
-          {section === "views" && <ViewsView views={data.views} />}
+          {section === "views" && (
+            <ViewsView
+              views={data.views}
+              onRefresh={refresh}
+              onNavigateIssues={() => void navigate("issues")}
+            />
+          )}
           {section === "settings" && (
             <SettingsView
               preferences={data.preferences}
@@ -1527,14 +1552,136 @@ function CyclesView({
 function ProjectsView({
   projects,
   issues,
+  projectId,
   workflowStates,
+  projectStatuses,
   onCreate,
+  onRefresh,
 }: {
   projects: Project[];
   issues: Issue[];
+  projectId?: string;
   workflowStates: WorkflowState[];
+  projectStatuses: BootstrapPayload["projectStatuses"];
   onCreate: () => void;
+  onRefresh: () => void;
 }) {
+  const router = useRouter();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId ?? null);
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [statusDraft, setStatusDraft] = useState("");
+  const [targetDraft, setTargetDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mutationKeyRef = useRef<string | null>(null);
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+
+  useEffect(() => {
+    if (projectId) setSelectedProjectId(projectId);
+  }, [projectId]);
+
+  const projectIssues = selectedProject
+    ? issues.filter(
+        (issue) =>
+          issue.userId === selectedProject.userId &&
+          issue.projectId === selectedProject.id &&
+          !issue.deletedAt,
+      )
+    : [];
+  const projectMetrics = calculateCycleMetrics(projectIssues, workflowStates);
+
+  useEffect(() => {
+    if (!selectedProject) return;
+    setNameDraft(selectedProject.name);
+    setDescriptionDraft(selectedProject.description);
+    setStatusDraft(selectedProject.statusId);
+    setTargetDraft(
+      selectedProject.targetAt !== null
+        ? new Date(selectedProject.targetAt).toISOString().slice(0, 10)
+        : "",
+    );
+    setEditing(false);
+    setError(null);
+  }, [
+    selectedProject?.id,
+    selectedProject?.name,
+    selectedProject?.description,
+    selectedProject?.statusId,
+    selectedProject?.targetAt,
+  ]);
+
+  if (projectId && !selectedProject) {
+    return (
+      <div className="page error-screen">
+        <span className="eyebrow coral">PROJECT DETAIL</span>
+        <h1>Projectが見つかりません</h1>
+        <button
+          className="button secondary"
+          onClick={() => void router.navigate({ to: "/projects" })}
+        >
+          Projectsへ戻る
+        </button>
+      </div>
+    );
+  }
+
+  function cancelEdit() {
+    mutationKeyRef.current = null;
+    if (selectedProject) {
+      setNameDraft(selectedProject.name);
+      setDescriptionDraft(selectedProject.description);
+      setStatusDraft(selectedProject.statusId);
+      setTargetDraft(
+        selectedProject.targetAt !== null
+          ? new Date(selectedProject.targetAt).toISOString().slice(0, 10)
+          : "",
+      );
+    }
+    setEditing(false);
+    setError(null);
+  }
+
+  async function saveProject() {
+    if (!selectedProject || saving) return;
+    setSaving(true);
+    setError(null);
+    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    try {
+      await apiPatch(`/api/v1/projects/${selectedProject.id}`, {
+        idempotencyKey: mutationKey,
+        patch: {
+          name: nameDraft,
+          description: descriptionDraft,
+          statusId: statusDraft,
+          targetAt: dateInputToUnix(targetDraft),
+        },
+      });
+      mutationKeyRef.current = null;
+      setEditing(false);
+      await onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "IDEMPOTENCY_KEY_REUSED") {
+        mutationKeyRef.current = null;
+        setEditing(false);
+        await onRefresh();
+        setError("別の内容で保存されています。最新のProjectを読み込みました。");
+      } else {
+        if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+        setError(
+          caught instanceof ApiError && caught.fieldErrors
+            ? Object.values(caught.fieldErrors).flat().join(" ")
+            : caught instanceof ApiError
+              ? caught.message
+              : "Projectの保存に失敗しました。",
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-heading compact-heading">
@@ -1543,19 +1690,27 @@ function ProjectsView({
           <h1>Projects</h1>
           <p className="subheading">成果物単位で、進捗とIssueを束ねます。</p>
         </div>
-        <button className="button primary" onClick={onCreate}>
+        <button className="button primary" onClick={onCreate} disabled={saving}>
           ＋ 新しいProject
         </button>
       </div>
       <div className="project-grid">
         {projects.map((project) => {
-          const projectIssues = issues.filter((issue) => issue.projectId === project.id);
-          const done = projectIssues.filter(
+          const projectIssues = issues.filter(
             (issue) =>
-              workflowStates.find((state) => state.id === issue.statusId)?.category === "completed",
-          ).length;
+              issue.userId === project.userId && issue.projectId === project.id && !issue.deletedAt,
+          );
           return (
-            <article className="project-card" key={project.id}>
+            <button
+              className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
+              data-project-id={project.id}
+              key={project.id}
+              disabled={saving}
+              onClick={() => {
+                setSelectedProjectId(project.id);
+                void router.navigate({ to: `/projects/${project.id}` as never });
+              }}
+            >
               <div className="project-card-top">
                 <span className="project-icon" style={{ background: project.color }}>
                   {project.icon}
@@ -1568,15 +1723,15 @@ function ProjectsView({
                 <div className="progress-line">
                   <span
                     style={{
-                      width: `${projectIssues.length ? Math.round((done / projectIssues.length) * 100) : 0}%`,
+                      width: `${calculateCycleMetrics(projectIssues, workflowStates).progressPercent}%`,
                     }}
                   />
                 </div>
                 <span>
-                  {projectIssues.length} Issues · {formatDate(project.targetAt)}まで
+                  {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
                 </span>
               </div>
-            </article>
+            </button>
           );
         })}
         {projects.length === 0 && (
@@ -1587,6 +1742,141 @@ function ProjectsView({
           />
         )}
       </div>
+      {selectedProject && (
+        <section className="detail-card project-detail-workspace">
+          <div className="detail-card-head">
+            <div>
+              <span className="eyebrow coral">PROJECT DETAIL</span>
+              {editing ? (
+                <input
+                  className="text-input project-name-input"
+                  aria-label="Project名"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                  disabled={saving}
+                />
+              ) : (
+                <h2>{selectedProject.name}</h2>
+              )}
+              <p>{selectedProject.description || "説明はまだありません。"}</p>
+              <div className="project-detail-properties">
+                <span className="status-pill">
+                  {projectStatuses.find((status) => status.id === selectedProject.statusId)?.name ??
+                    "Status"}
+                </span>
+                <span>Target {formatDateOnly(selectedProject.targetAt)}</span>
+              </div>
+            </div>
+            <button
+              className="button ghost"
+              onClick={() => (editing ? cancelEdit() : setEditing(true))}
+              disabled={saving}
+            >
+              {editing ? "取消" : "編集"}
+            </button>
+          </div>
+          {editing && (
+            <div className="project-metadata-editor">
+              <label className="field-label" htmlFor="project-description-detail">
+                Description
+              </label>
+              <textarea
+                id="project-description-detail"
+                className="text-input project-description-input"
+                value={descriptionDraft}
+                onChange={(event) => setDescriptionDraft(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                disabled={saving}
+                rows={3}
+              />
+              <label className="field-label" htmlFor="project-status-detail">
+                Status
+              </label>
+              <select
+                id="project-status-detail"
+                className="text-input"
+                value={statusDraft}
+                onChange={(event) => setStatusDraft(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                disabled={saving}
+              >
+                {projectStatuses.map((status) => (
+                  <option key={status.id} value={status.id}>
+                    {status.name}
+                  </option>
+                ))}
+              </select>
+              <label className="field-label" htmlFor="project-target-detail">
+                Target date
+              </label>
+              <input
+                id="project-target-detail"
+                className="text-input"
+                type="date"
+                value={targetDraft}
+                onChange={(event) => setTargetDraft(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                disabled={saving}
+              />
+              <button
+                className="button primary"
+                onClick={() => void saveProject()}
+                disabled={saving}
+              >
+                {saving ? "保存中…" : "Projectを保存"}
+              </button>
+            </div>
+          )}
+          {error && (
+            <div className="detail-live-error" role="alert">
+              {error}
+              {editing && (
+                <button
+                  className="text-button"
+                  onClick={() => void saveProject()}
+                  disabled={saving}
+                >
+                  再試行
+                </button>
+              )}
+            </div>
+          )}
+          <div className="cycle-metrics project-metrics" aria-label="Project進捗">
+            <div>
+              <strong>{projectMetrics.total}</strong>
+              <span>Issues</span>
+            </div>
+            <div>
+              <strong>{projectMetrics.completed}</strong>
+              <span>Completed</span>
+            </div>
+            <div>
+              <strong>{projectMetrics.progressPercent}%</strong>
+              <span>Progress</span>
+            </div>
+            <div>
+              <strong>{projectMetrics.estimateTotal}</strong>
+              <span>Estimate</span>
+            </div>
+          </div>
+          <div className="cycle-list project-issue-list">
+            {projectIssues.map((issue) => (
+              <div className="mini-issue" key={issue.id}>
+                <span className={`priority-dot ${priorityTone[issue.priority]}`} />
+                <span className="issue-id">{issue.identifier}</span>
+                <strong>{issue.title}</strong>
+                <span className="cycle-issue-status">
+                  {workflowStates.find((state) => state.id === issue.statusId)?.name}
+                </span>
+              </div>
+            ))}
+            {projectIssues.length === 0 && (
+              <p className="detail-empty">このProjectにIssueはありません。</p>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -1688,7 +1978,168 @@ function InboxView({ notifications }: { notifications: BootstrapPayload["notific
   );
 }
 
-function ViewsView({ views }: { views: SavedView[] }) {
+function ViewsView({
+  views,
+  onRefresh,
+  onNavigateIssues,
+}: {
+  views: SavedView[];
+  onRefresh: () => void;
+  onNavigateIssues: () => void;
+}) {
+  const [editingView, setEditingView] = useState<SavedView | null>(null);
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [modeDraft, setModeDraft] = useState<"list" | "board">("list");
+  const [orderDraft, setOrderDraft] = useState("manual");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mutationKeyRef = useRef<string | null>(null);
+  const deleteRetryRef = useRef<SavedView | null>(null);
+  const [errorAction, setErrorAction] = useState<"save" | "delete" | null>(null);
+  const selectedView = views.find((view) => view.id === selectedViewId) ?? null;
+
+  function filterSummary(view: SavedView): string {
+    const entries = Object.entries(view.query.filter as Record<string, unknown>).filter(
+      ([, value]) => (Array.isArray(value) ? value.length > 0 : value !== undefined),
+    );
+    return entries.length
+      ? entries
+          .map(([key, value]) => {
+            const display = Array.isArray(value)
+              ? `${value.length}件`
+              : value && typeof value === "object"
+                ? "設定済み"
+                : String(value);
+            return `${key}: ${display}`;
+          })
+          .join(" · ")
+      : "Filter: all Issues";
+  }
+
+  function startCreate() {
+    mutationKeyRef.current = null;
+    setEditorOpen(true);
+    setEditingView(null);
+    setNameDraft("");
+    setModeDraft("list");
+    setOrderDraft("manual");
+    setError(null);
+    setErrorAction(null);
+  }
+
+  function startEdit(view: SavedView) {
+    mutationKeyRef.current = null;
+    setEditorOpen(true);
+    setSelectedViewId(view.id);
+    setEditingView(view);
+    setNameDraft(view.name);
+    setModeDraft(view.query.mode);
+    setOrderDraft(view.query.order);
+    setError(null);
+    setErrorAction(null);
+  }
+
+  function cancelEdit() {
+    mutationKeyRef.current = null;
+    setEditorOpen(false);
+    setEditingView(null);
+    setNameDraft("");
+    setError(null);
+    setErrorAction(null);
+  }
+
+  async function saveView() {
+    if (!nameDraft.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    setErrorAction("save");
+    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    const query = editingView
+      ? { ...editingView.query, mode: modeDraft, order: orderDraft }
+      : {
+          mode: modeDraft,
+          filter: {},
+          showEmptyGroups: false,
+          order: orderDraft,
+          layout: { priority: true },
+          limit: 100,
+        };
+    try {
+      if (editingView) {
+        await apiPatch(`/api/v1/views/${editingView.id}`, {
+          idempotencyKey: mutationKey,
+          name: nameDraft,
+          query,
+          layout: query.layout,
+        });
+      } else {
+        await apiPost("/api/v1/views", {
+          idempotencyKey: mutationKey,
+          name: nameDraft,
+          query,
+          layout: query.layout,
+        });
+      }
+      mutationKeyRef.current = null;
+      setErrorAction(null);
+      cancelEdit();
+      await onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "IDEMPOTENCY_KEY_REUSED") {
+        mutationKeyRef.current = null;
+        setEditorOpen(false);
+        setEditingView(null);
+        setNameDraft("");
+        setErrorAction(null);
+        await onRefresh();
+        setError("別の内容で保存されています。最新のSaved Viewを読み込みました。");
+      } else if (caught instanceof ApiError && caught.fieldErrors) {
+        if (caught.status !== 423) mutationKeyRef.current = null;
+        setError(Object.values(caught.fieldErrors).flat().join(" "));
+      } else {
+        if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+        setError(caught instanceof ApiError ? caught.message : "Saved Viewの保存に失敗しました。");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeView(view: SavedView) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    setErrorAction("delete");
+    deleteRetryRef.current = view;
+    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    try {
+      await apiDelete(`/api/v1/views/${view.id}`, mutationKey);
+      mutationKeyRef.current = null;
+      deleteRetryRef.current = null;
+      setErrorAction(null);
+      if (editingView?.id === view.id) cancelEdit();
+      if (selectedViewId === view.id) setSelectedViewId(null);
+      await onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+      setError(
+        caught instanceof ApiError && caught.fieldErrors
+          ? Object.values(caught.fieldErrors).flat().join(" ")
+          : caught instanceof ApiError
+            ? caught.message
+            : "Saved Viewの削除に失敗しました。",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function retryDelete() {
+    if (deleteRetryRef.current) void removeView(deleteRetryRef.current);
+  }
+
   return (
     <div className="page">
       <div className="page-heading compact-heading">
@@ -1697,26 +2148,155 @@ function ViewsView({ views }: { views: SavedView[] }) {
           <h1>Views</h1>
           <p className="subheading">よく使う見え方を保存しておきます。</p>
         </div>
-        <button className="button secondary">＋ Viewを保存</button>
+        <button className="button secondary" onClick={startCreate} disabled={saving}>
+          ＋ Viewを保存
+        </button>
       </div>
+      {editorOpen && (
+        <section className="detail-card view-editor">
+          <div className="modal-title">
+            <h2>{editingView ? "Saved Viewを編集" : "Saved Viewを作成"}</h2>
+            <button
+              className="icon-button"
+              aria-label="View編集を閉じる"
+              onClick={cancelEdit}
+              disabled={saving}
+            >
+              ×
+            </button>
+          </div>
+          <label className="field-label" htmlFor="saved-view-name">
+            Name
+          </label>
+          <input
+            id="saved-view-name"
+            className="text-input"
+            aria-label="Saved View名"
+            value={nameDraft}
+            onChange={(event) => setNameDraft(event.target.value)}
+            onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+            disabled={saving}
+          />
+          <div className="view-editor-grid">
+            <label className="field-label" htmlFor="saved-view-mode">
+              Mode
+            </label>
+            <label className="field-label" htmlFor="saved-view-order">
+              Order
+            </label>
+            <select
+              id="saved-view-mode"
+              value={modeDraft}
+              onChange={(event) => setModeDraft(event.target.value as "list" | "board")}
+              disabled={saving}
+            >
+              <option value="list">List</option>
+              <option value="board">Board</option>
+            </select>
+            <select
+              id="saved-view-order"
+              value={orderDraft}
+              onChange={(event) => setOrderDraft(event.target.value)}
+              disabled={saving}
+            >
+              {[
+                ["manual", "Manual"],
+                ["priority", "Priority"],
+                ["updated", "Updated"],
+                ["created", "Created"],
+                ["due_at", "Due date"],
+                ["estimate", "Estimate"],
+              ].map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {error && (
+            <div className="detail-live-error" role="alert">
+              {error}
+              <button
+                className="text-button"
+                onClick={() => (errorAction === "delete" ? retryDelete() : void saveView())}
+                disabled={saving}
+              >
+                再試行
+              </button>
+            </div>
+          )}
+          <div className="modal-actions">
+            <button className="button ghost" onClick={cancelEdit} disabled={saving}>
+              取消
+            </button>
+            <button
+              className="button primary"
+              onClick={() => void saveView()}
+              disabled={saving || !nameDraft.trim()}
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        </section>
+      )}
+      {error && !editorOpen && (
+        <div className="detail-live-error" role="alert">
+          {error}
+          {errorAction === "delete" && (
+            <button className="text-button" onClick={retryDelete} disabled={saving}>
+              再試行
+            </button>
+          )}
+        </div>
+      )}
+      {selectedView && (
+        <section className="detail-card view-inspector">
+          <div className="detail-section-heading">
+            <div>
+              <span className="eyebrow">SELECTED VIEW</span>
+              <h3>{selectedView.name}</h3>
+            </div>
+            <span className="status-pill">{selectedView.query.mode}</span>
+          </div>
+          <p>{filterSummary(selectedView)}</p>
+          <span className="view-inspector-meta">
+            Order: {selectedView.query.order} · Limit: {String(selectedView.query.limit ?? "—")}
+          </span>
+        </section>
+      )}
       <div className="view-list">
         {views.map((view) => (
           <div className="saved-view-row" key={view.id}>
-            <span className="view-icon">▤</span>
-            <div>
-              <strong>{view.name}</strong>
+            <button
+              className="saved-view-select"
+              onClick={() => setSelectedViewId(view.id)}
+              disabled={saving}
+            >
+              <span className="view-icon">▤</span>
               <span>
-                {view.query.mode} · {view.query.order}
+                <strong>{view.name}</strong>
+                <small>
+                  {view.query.mode} · {view.query.order}
+                </small>
               </span>
-            </div>
-            <span className="more">•••</span>
+            </button>
+            <button className="text-button" onClick={() => startEdit(view)} disabled={saving}>
+              編集
+            </button>
+            <button
+              className="text-button danger"
+              onClick={() => void removeView(view)}
+              disabled={saving}
+            >
+              削除
+            </button>
           </div>
         ))}
         {views.length === 0 && (
           <EmptyState
             title="Saved Viewはまだありません"
             action="Issuesで条件を作る"
-            onAction={() => undefined}
+            onAction={onNavigateIssues}
           />
         )}
       </div>

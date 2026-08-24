@@ -66,9 +66,9 @@ export function apiPost<T>(path: string, body: unknown): Promise<T> {
 export function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return apiRequest<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 }
-export function apiDelete<T>(path: string): Promise<T> {
+export function apiDelete<T>(path: string, mutationKey = idempotencyKey()): Promise<T> {
   return apiRequest<T>(path, {
     method: "DELETE",
-    headers: { "Idempotency-Key": idempotencyKey() },
+    headers: { "Idempotency-Key": mutationKey },
   });
 }

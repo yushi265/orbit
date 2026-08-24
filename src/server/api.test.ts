@@ -6,15 +6,21 @@ import {
   createIssue,
   createIssueNote,
   createIssueRelation,
+  createProject,
+  createView,
   deleteIssueNote,
   deleteIssueRelation,
+  deleteView,
   getIssue,
+  listViews,
   startBackgroundRun,
   updateCycleMetadata,
   updateIssueNote,
   updateIssue,
+  updateProject,
+  updateView,
 } from "./api";
-import { resetOrbitStores } from "./store";
+import { getOrbitStore, resetOrbitStores } from "./store";
 
 async function body<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
@@ -602,6 +608,429 @@ describe("HTTP service boundary", () => {
     );
     expect((await deleteIssueRelation(deleteRelationRequest(), firstId, relationId)).status).toBe(
       200,
+    );
+  });
+
+  it("[代表値] Project detail metadataとSaved View CRUD APIを通す", async () => {
+    const bootstrapResponse = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const projectStatusId = (
+      await body<{ projectStatuses: Array<{ id: string }> }>(bootstrapResponse)
+    ).projectStatuses[1].id;
+    const invalidProjectCreateKey = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        idempotencyKey: 123,
+        name: "型違反Project",
+      }),
+    );
+    expect(invalidProjectCreateKey.status).toBe(400);
+    const invalidProjectCreateUnknown = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        idempotencyKey: "project-api-create-unknown",
+        name: "未知キーProject",
+        secret: true,
+      }),
+    );
+    expect(invalidProjectCreateUnknown.status).toBe(400);
+    const missingProjectCreateKey = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        name: "キーなしProject",
+      }),
+    );
+    expect(missingProjectCreateKey.status).toBe(400);
+    const projectResponse = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        idempotencyKey: "project-api-1",
+        name: "API Project",
+      }),
+    );
+    const projectId = (await body<{ project: { id: string } }>(projectResponse)).project.id;
+    const updatedProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-update-1",
+        patch: { name: "API Project Updated", description: "説明" },
+      }),
+      projectId,
+    );
+    expect(updatedProject.status).toBe(200);
+    expect(
+      (await body<{ project: { description: string } }>(updatedProject)).project.description,
+    ).toBe("説明");
+    const flatProjectUpdateInput = {
+      idempotencyKey: "project-api-flat-update",
+      name: "API Project Flat",
+      description: "Flat payload",
+      statusId: projectStatusId,
+      targetAt: 1_700_100_000_000,
+    };
+    const flatProjectUpdate = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", flatProjectUpdateInput),
+      projectId,
+    );
+    expect(flatProjectUpdate.status).toBe(200);
+    expect(
+      (
+        await body<{
+          project: { name: string; description: string; statusId: string; targetAt: number };
+        }>(flatProjectUpdate)
+      ).project,
+    ).toMatchObject({
+      name: "API Project Flat",
+      description: "Flat payload",
+      statusId: projectStatusId,
+      targetAt: 1_700_100_000_000,
+    });
+    const replayedFlatProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", flatProjectUpdateInput),
+      projectId,
+    );
+    expect(
+      (await body<{ project: { name: string; statusId: string } }>(replayedFlatProject)).project,
+    ).toMatchObject({ name: "API Project Flat", statusId: projectStatusId });
+    const projectConflict = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-update-1",
+        patch: { name: "別Project" },
+      }),
+      projectId,
+    );
+    expect(projectConflict.status).toBe(409);
+    expect((await body<{ error: { code: string } }>(projectConflict)).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED",
+    );
+    const invalidProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-invalid",
+        patch: { name: "" },
+      }),
+      projectId,
+    );
+    expect(invalidProject.status).toBe(400);
+    expect(
+      (
+        await body<{ error: { code: string; fieldErrors: Record<string, string[]> } }>(
+          invalidProject,
+        )
+      ).error,
+    ).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: { name: expect.arrayContaining([expect.any(String)]) },
+    });
+    const retriedProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-retry-after-invalid",
+        patch: { name: "API Project Retry" },
+      }),
+      projectId,
+    );
+    expect((await body<{ project: { name: string } }>(retriedProject)).project.name).toBe(
+      "API Project Retry",
+    );
+    const invalidProjectEnvelope = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-envelope-unknown",
+        patch: { name: "Should reject" },
+        secret: true,
+      }),
+      projectId,
+    );
+    expect(invalidProjectEnvelope.status).toBe(400);
+    const invalidProjectKey = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: 123,
+        patch: { name: "型違反" },
+      }),
+      projectId,
+    );
+    expect(invalidProjectKey.status).toBe(400);
+    const invalidProjectNullKey = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: null,
+        patch: { name: "nullキー" },
+      }),
+      projectId,
+    );
+    expect(invalidProjectNullKey.status).toBe(400);
+    const invalidNestedProjectKey = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-nested-key",
+        patch: { idempotencyKey: "nested", name: "予約キー" },
+      }),
+      projectId,
+    );
+    expect(invalidNestedProjectKey.status).toBe(400);
+    const missingProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-api-missing",
+        patch: { name: "Missing" },
+      }),
+      "missing-project",
+    );
+    expect(missingProject.status).toBe(404);
+    expect((await body<{ error: { code: string } }>(missingProject)).error.code).toBe(
+      "RESOURCE_NOT_FOUND",
+    );
+
+    const query = {
+      mode: "list" as const,
+      filter: {},
+      showEmptyGroups: false,
+      order: "manual" as const,
+      layout: { priority: true },
+      limit: 100,
+    };
+    const viewResponse = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: "view-api-1",
+        name: "API View",
+        query,
+      }),
+    );
+    expect(viewResponse.status).toBe(201);
+    const viewId = (await body<{ view: { id: string } }>(viewResponse)).view.id;
+    const invalidView = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: "view-api-invalid",
+        name: "",
+        query,
+      }),
+    );
+    expect(invalidView.status).toBe(400);
+    expect(
+      (await body<{ error: { code: string; fieldErrors: Record<string, string[]> } }>(invalidView))
+        .error,
+    ).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: { name: expect.arrayContaining([expect.any(String)]) },
+    });
+    const invalidViewKey = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: 123,
+        name: "型違反View",
+        query,
+      }),
+    );
+    expect(invalidViewKey.status).toBe(400);
+    const invalidViewNullKey = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: null,
+        name: "nullキーView",
+        query,
+      }),
+    );
+    expect(invalidViewNullKey.status).toBe(400);
+    const missingViewCreateKey = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", { name: "キーなしView", query }),
+    );
+    expect(missingViewCreateKey.status).toBe(400);
+    const missingView = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        idempotencyKey: "view-api-missing",
+        name: "Missing",
+      }),
+      "missing-view",
+    );
+    expect(missingView.status).toBe(404);
+    expect((await body<{ error: { code: string } }>(missingView)).error.code).toBe(
+      "RESOURCE_NOT_FOUND",
+    );
+    const viewUpdateInput = {
+      idempotencyKey: "view-api-update-1",
+      name: "API View Updated",
+      query: { ...query, mode: "board" as const, order: "priority" as const },
+      layout: { status: true },
+    };
+    const updatedView = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        ...viewUpdateInput,
+      }),
+      viewId,
+    );
+    expect(updatedView.status).toBe(200);
+    expect(
+      (
+        await body<{
+          view: {
+            name: string;
+            query: { mode: string; order: string; layout: Record<string, boolean> };
+            layout: Record<string, boolean>;
+          };
+        }>(updatedView)
+      ).view,
+    ).toMatchObject({
+      name: "API View Updated",
+      query: { mode: "board", order: "priority", layout: { status: true } },
+      layout: { status: true },
+    });
+    const replayedView = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", viewUpdateInput),
+      viewId,
+    );
+    expect(replayedView.status).toBe(200);
+    expect(
+      (await body<{ view: { name: string; query: { mode: string; order: string } } }>(replayedView))
+        .view,
+    ).toMatchObject({ name: "API View Updated", query: { mode: "board", order: "priority" } });
+    const viewConflict = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        ...viewUpdateInput,
+        name: "別View",
+      }),
+      viewId,
+    );
+    expect(viewConflict.status).toBe(409);
+    expect((await body<{ error: { code: string } }>(viewConflict)).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED",
+    );
+    const invalidViewUpdateKey = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        idempotencyKey: 123,
+        name: "型違反更新",
+      }),
+      viewId,
+    );
+    expect(invalidViewUpdateKey.status).toBe(400);
+    const invalidViewUpdateNullKey = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        idempotencyKey: null,
+        name: "nullキー更新",
+      }),
+      viewId,
+    );
+    expect(invalidViewUpdateNullKey.status).toBe(400);
+    const deleteViewRequest = () =>
+      new Request("http://orbit.local/api/v1/views", {
+        method: "DELETE",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "view-api-delete-1",
+        },
+      });
+    const missingDeleteKey = await deleteView(
+      new Request("http://orbit.local/api/v1/views", {
+        method: "DELETE",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      }),
+      viewId,
+    );
+    expect(missingDeleteKey.status).toBe(400);
+    const deletedView = await deleteView(deleteViewRequest(), viewId);
+    expect(deletedView.status).toBe(200);
+    expect((await body<{ ok: boolean }>(deletedView)).ok).toBe(true);
+    expect((await deleteView(deleteViewRequest(), viewId)).status).toBe(200);
+    const viewsAfterDelete = await listViews(new Request("http://orbit.local/api/v1/views"));
+    expect(
+      (await body<{ items: Array<{ id: string }> }>(viewsAfterDelete)).items.some(
+        (item) => item.id === viewId,
+      ),
+    ).toBe(false);
+  });
+
+  it("[異常系] Project / Saved View mutationはRuntime lock中に423になる", async () => {
+    const projectResponse = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        idempotencyKey: "project-lock-api-1",
+        name: "Lock Project",
+      }),
+    );
+    const projectId = (await body<{ project: { id: string } }>(projectResponse)).project.id;
+    const viewResponse = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: "view-lock-api-1",
+        name: "Lock View",
+        query: {
+          mode: "list",
+          filter: {},
+          showEmptyGroups: false,
+          order: "manual",
+          layout: {},
+          limit: 100,
+        },
+      }),
+    );
+    const viewId = (await body<{ view: { id: string } }>(viewResponse)).view.id;
+    await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "project-view-lock-run",
+      }),
+    );
+    const lockedStore = getOrbitStore("dev-owner");
+    const beforeLockedMutations = {
+      projects: structuredClone([...lockedStore.projects.entries()]),
+      views: structuredClone([...lockedStore.views.entries()]),
+      activities: structuredClone(lockedStore.activities),
+      outbox: structuredClone(lockedStore.outbox),
+      receipts: structuredClone([...lockedStore.receipts.entries()]),
+    };
+    const lockedProject = await updateProject(
+      mutation("http://orbit.local/api/v1/projects", "PATCH", {
+        idempotencyKey: "project-lock-api-update",
+        patch: { name: "拒否" },
+      }),
+      projectId,
+    );
+    const lockedView = await updateView(
+      mutation("http://orbit.local/api/v1/views", "PATCH", {
+        idempotencyKey: "view-lock-api-update",
+        name: "拒否",
+      }),
+      viewId,
+    );
+    expect(lockedProject.status).toBe(423);
+    expect(lockedView.status).toBe(423);
+    expect((await body<{ error: { code: string } }>(lockedProject)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
+    expect((await body<{ error: { code: string } }>(lockedView)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
+    const lockedCreate = await createProject(
+      mutation("http://orbit.local/api/v1/projects", "POST", {
+        idempotencyKey: "project-lock-api-create",
+        name: "拒否",
+      }),
+    );
+    const lockedDelete = await deleteView(
+      new Request("http://orbit.local/api/v1/views", {
+        method: "DELETE",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "view-lock-api-delete",
+        },
+      }),
+      viewId,
+    );
+    expect(lockedCreate.status).toBe(423);
+    expect(lockedDelete.status).toBe(423);
+    expect((await body<{ error: { code: string } }>(lockedCreate)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
+    expect((await body<{ error: { code: string } }>(lockedDelete)).error.code).toBe(
+      "OPERATION_IN_PROGRESS",
+    );
+    const lockedCreateView = await createView(
+      mutation("http://orbit.local/api/v1/views", "POST", {
+        idempotencyKey: "view-lock-api-create",
+        name: "拒否View",
+        query: {
+          mode: "list",
+          filter: {},
+          showEmptyGroups: false,
+          order: "manual",
+          layout: {},
+          limit: 100,
+        },
+      }),
+    );
+    expect(lockedCreateView.status).toBe(423);
+    expect(structuredClone([...lockedStore.projects.entries()])).toEqual(
+      beforeLockedMutations.projects,
+    );
+    expect(structuredClone([...lockedStore.views.entries()])).toEqual(beforeLockedMutations.views);
+    expect(structuredClone(lockedStore.activities)).toEqual(beforeLockedMutations.activities);
+    expect(structuredClone(lockedStore.outbox)).toEqual(beforeLockedMutations.outbox);
+    expect(structuredClone([...lockedStore.receipts.entries()])).toEqual(
+      beforeLockedMutations.receipts,
     );
   });
 });

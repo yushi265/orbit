@@ -3,6 +3,8 @@ export * from "./cycles";
 export * from "./enums";
 export * from "./errors";
 export * from "./issues";
+export * from "./projects";
 export * from "./rich-text";
 export * from "./text";
 export * from "./issue-detail";
+export * from "./views";

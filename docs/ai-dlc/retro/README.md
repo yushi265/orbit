@@ -70,3 +70,4 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 > 新しい retro note を作ったらここに 1 行追記する。
 
 - [MVP-linear-project-management.md](./MVP-linear-project-management.md) — 要件定義から MVP 設計 spec を作成（2026-08-23）
+- [FEAT-issue-project-assignment.md](./FEAT-issue-project-assignment.md) — IssueへのProject割り当て（2026-08-25）

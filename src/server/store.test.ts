@@ -31,6 +31,122 @@ describe("OrbitStore issue mutations", () => {
     expect(store.listIssues("owner")).toHaveLength(2);
   });
 
+  it("[代表値/セキュリティ境界] Issue作成時のProjectを検証する", () => {
+    const { store } = setup();
+    const project = store.createProject("owner", {
+      idempotencyKey: "create-project-assignment",
+      name: "Assignment Project",
+    });
+    const unassigned = store.createIssue("owner", {
+      idempotencyKey: "create-unassigned-issue",
+      title: "ProjectなしIssue",
+      projectId: null,
+    });
+    const assigned = store.createIssue("owner", {
+      idempotencyKey: "create-assigned-issue",
+      title: "Project割当Issue",
+      projectId: project.id,
+    });
+
+    expect(unassigned.projectId).toBeNull();
+    expect(assigned.projectId).toBe(project.id);
+    const assignedToProject = store.updateIssue("owner", {
+      id: unassigned.id,
+      version: unassigned.version,
+      idempotencyKey: "update-project-assignment",
+      patch: { projectId: project.id },
+    });
+    expect(assignedToProject.projectId).toBe(project.id);
+    const cleared = store.updateIssue("owner", {
+      id: unassigned.id,
+      version: assignedToProject.version,
+      idempotencyKey: "clear-project-assignment",
+      patch: { projectId: null },
+    });
+    expect(cleared.projectId).toBeNull();
+
+    const beforeInvalidCreate = {
+      issueCount: store.listIssues("owner").length,
+      activityCount: store.activities.length,
+      outboxCount: store.outbox.length,
+      receiptCount: store.receipts.size,
+    };
+    expect(() =>
+      store.createIssue("owner", {
+        idempotencyKey: "create-missing-project-issue",
+        title: "不正Project Issue",
+        projectId: "missing-project",
+      }),
+    ).toThrowError(expect.objectContaining({ status: 404 }));
+    expect(store.listIssues("owner")).toHaveLength(beforeInvalidCreate.issueCount);
+    expect(store.activities).toHaveLength(beforeInvalidCreate.activityCount);
+    expect(store.outbox).toHaveLength(beforeInvalidCreate.outboxCount);
+    expect(store.receipts.size).toBe(beforeInvalidCreate.receiptCount);
+
+    const beforeRejectedReferences = {
+      issueCount: store.listIssues("owner").length,
+      activityCount: store.activities.filter((event) => event.userId === "owner").length,
+      outboxCount: store.outbox.filter((event) => event.userId === "owner").length,
+      receiptCount: [...store.receipts.keys()].filter((key) => key.startsWith("owner:")).length,
+    };
+    project.deletedAt = 1_700_000_000_001;
+    expect(() =>
+      store.createIssue("owner", {
+        idempotencyKey: "create-deleted-project-issue",
+        title: "削除済みProject Issue",
+        projectId: project.id,
+      }),
+    ).toThrowError(expect.objectContaining({ status: 404 }));
+    store.ensureOwner("other", "other@example.com", true);
+    const foreignProject = store.listProjects("other")[0];
+    expect(() =>
+      store.createIssue("owner", {
+        idempotencyKey: "create-foreign-project-issue",
+        title: "他Owner Project Issue",
+        projectId: foreignProject.id,
+      }),
+    ).toThrowError(expect.objectContaining({ status: 404 }));
+    expect(store.listIssues("owner")).toHaveLength(beforeRejectedReferences.issueCount);
+    expect(store.activities.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeRejectedReferences.activityCount,
+    );
+    expect(store.outbox.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeRejectedReferences.outboxCount,
+    );
+    expect([...store.receipts.keys()].filter((key) => key.startsWith("owner:"))).toHaveLength(
+      beforeRejectedReferences.receiptCount,
+    );
+
+    const conflictProject = store.createProject("owner", {
+      idempotencyKey: "create-project-conflict",
+      name: "Conflict Project",
+    });
+    const conflictTarget = store.createIssue("owner", {
+      idempotencyKey: "create-project-conflict-issue",
+      title: "Project競合Issue",
+    });
+    const staleVersion = conflictTarget.version;
+    store.updateIssue("owner", {
+      id: conflictTarget.id,
+      version: conflictTarget.version,
+      idempotencyKey: "update-project-conflict-winner",
+      patch: { projectId: conflictProject.id },
+    });
+    expect(() =>
+      store.updateIssue("owner", {
+        id: conflictTarget.id,
+        version: staleVersion,
+        idempotencyKey: "update-project-conflict-loser",
+        patch: { projectId: null },
+      }),
+    ).toThrowError(expect.objectContaining({ code: "ISSUE_VERSION_CONFLICT", status: 409 }));
+    expect(store.issues.get(conflictTarget.id)).toMatchObject({
+      projectId: conflictProject.id,
+      version: 2,
+    });
+    expect(store.listIssues("owner")).toHaveLength(3);
+  });
+
   it("[状態遷移] 同じMutationの再送はNo-op、異なるRequestは409になる", () => {
     const { store } = setup();
     const input = { idempotencyKey: "create-003", title: "再送対象" };

@@ -22,6 +22,7 @@ import type {
   LabelViewModel as Label,
 } from "../shared/view-models";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
+import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -35,6 +36,8 @@ type Section =
   | "views"
   | "settings";
 type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
+type ToastAction = { label: string; onClick: () => void };
+type IssueMutationRetry = { issue: Issue; patch: Partial<Issue> };
 
 const priorityLabel: Record<Issue["priority"], string> = {
   no_priority: "No priority",
@@ -131,6 +134,7 @@ function OrbitAppInner(props: Props) {
   const [section, setSection] = useState<Section>(initial);
   const [composerOpen, setComposerOpen] = useState(Boolean(props.issueId));
   const [newTitle, setNewTitle] = useState("");
+  const [newProjectId, setNewProjectId] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [filterText, setFilterText] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
@@ -138,7 +142,11 @@ function OrbitAppInner(props: Props) {
   const [labelFilter, setLabelFilter] = useState("all");
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [toast, setToast] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [toast, setToast] = useState<{
+    kind: "success" | "error";
+    text: string;
+    action?: ToastAction;
+  } | null>(null);
   const [pendingIssueId, setPendingIssueId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<Issue[]>([]);
@@ -270,8 +278,8 @@ function OrbitAppInner(props: Props) {
   }, [bulkBusy, composerOpen, props.issueId, router]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-  const showToast = (kind: "success" | "error", text: string) => {
-    setToast({ kind, text });
+  const showToast = (kind: "success" | "error", text: string, action?: ToastAction) => {
+    setToast({ kind, text, action });
     window.setTimeout(() => setToast(null), 3500);
   };
 
@@ -280,7 +288,7 @@ function OrbitAppInner(props: Props) {
       apiPost<{ issue: Issue }>("/api/v1/issues", {
         idempotencyKey: idempotencyKey(),
         title: newTitle.trim(),
-        projectId: activeCycle ? null : null,
+        projectId: projectIdFromSelection(newProjectId),
         cycleId: activeCycle?.id ?? null,
       }),
     onSuccess: ({ issue }) => {
@@ -288,6 +296,7 @@ function OrbitAppInner(props: Props) {
         current ? { ...current, issues: [issue, ...current.issues] } : current,
       );
       setNewTitle("");
+      setNewProjectId("");
       setComposerOpen(false);
       showToast("success", `${issue.identifier} を作成しました`);
     },
@@ -306,6 +315,10 @@ function OrbitAppInner(props: Props) {
       setPendingIssueId(issue.id);
       await queryClient.cancelQueries({ queryKey: ["bootstrap"] });
       const previous = queryClient.getQueryData<BootstrapPayload>(["bootstrap"]);
+      const previousDetail = queryClient.getQueryData<IssueDetailViewModel>([
+        "issue-detail",
+        issue.id,
+      ]);
       if (previous)
         queryClient.setQueryData<BootstrapPayload>(["bootstrap"], {
           ...previous,
@@ -313,7 +326,12 @@ function OrbitAppInner(props: Props) {
             item.id === issue.id ? { ...item, ...patch } : item,
           ),
         });
-      return { previous };
+      if (previousDetail)
+        queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issue.id], {
+          ...previousDetail,
+          issue: { ...previousDetail.issue, ...patch },
+        });
+      return { previous, previousDetail };
     },
     onSuccess: ({ issue }) => {
       queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
@@ -324,11 +342,25 @@ function OrbitAppInner(props: Props) {
             }
           : current,
       );
+      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issue.id], (current) =>
+        current ? { ...current, issue } : current,
+      );
       showToast("success", "変更を保存しました");
     },
     onError: async (error, variables, context) => {
+      let retryIssue = variables.issue;
       if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        const latestIssue = queryClient
+          .getQueryData<BootstrapPayload>(["bootstrap"])
+          ?.issues.find((item) => item.id === variables.issue.id);
+        if (latestIssue) {
+          retryIssue = latestIssue;
+          queryClient.setQueryData<IssueDetailViewModel>(
+            ["issue-detail", latestIssue.id],
+            (current) => (current ? { ...current, issue: latestIssue } : current),
+          );
+        }
       } else if (context?.previous) {
         const previousIssue = context.previous.issues.find(
           (item) => item.id === variables.issue.id,
@@ -344,6 +376,12 @@ function OrbitAppInner(props: Props) {
             : current,
         );
       }
+      if (
+        !(error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") &&
+        context?.previousDetail
+      )
+        queryClient.setQueryData(["issue-detail", variables.issue.id], context.previousDetail);
+      const retry = { issue: retryIssue, patch: variables.patch } satisfies IssueMutationRetry;
       showToast(
         "error",
         error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT"
@@ -351,6 +389,13 @@ function OrbitAppInner(props: Props) {
           : error instanceof ApiError
             ? error.message
             : "保存に失敗しました。",
+        {
+          label: "再試行",
+          onClick: () => {
+            setToast(null);
+            updateIssue.mutate(retry);
+          },
+        },
       );
     },
     onSettled: () => setPendingIssueId(null),
@@ -721,9 +766,11 @@ function OrbitAppInner(props: Props) {
       {composerOpen &&
         (props.issueId ? (
           <IssueDetailPanel
+            key={props.issueId}
             issueId={props.issueId}
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
+            projects={projects}
             workflowStates={workflowStates}
             onClose={closeIssueDetail}
           />
@@ -731,9 +778,13 @@ function OrbitAppInner(props: Props) {
           <IssueComposer
             title={newTitle}
             setTitle={setNewTitle}
+            projects={projects}
+            projectId={newProjectId}
+            setProjectId={setNewProjectId}
             onClose={() => {
               setComposerOpen(false);
               setNewTitle("");
+              setNewProjectId("");
             }}
             onSubmit={() => createIssue.mutate()}
             busy={createIssue.isPending}
@@ -805,6 +856,11 @@ function OrbitAppInner(props: Props) {
         <div className={`toast ${toast.kind}`} role="status">
           <span>{toast.kind === "success" ? "✓" : "!"}</span>
           {toast.text}
+          {toast.action && (
+            <button className="text-button" onClick={toast.action.onClick}>
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1209,7 +1265,7 @@ function IssuesView({
             )}
             {bulkField === "project" && (
               <>
-                <option value="__none__">Projectなし</option>
+                <option value={NO_PROJECT_OPTION}>Projectなし</option>
                 {projects.map((project) => (
                   <option value={project.id} key={project.id}>
                     {project.name}
@@ -1240,7 +1296,7 @@ function IssuesView({
                     : bulkField === "cycle"
                       ? { cycleId: bulkValue === "__none__" ? null : bulkValue }
                       : bulkField === "project"
-                        ? { projectId: bulkValue === "__none__" ? null : bulkValue }
+                        ? { projectId: projectIdFromSelection(bulkValue) }
                         : { labelIds: bulkValue === "__none__" ? [] : [bulkValue] };
               setBulkError(null);
               void onBulk(patch)
@@ -1282,7 +1338,7 @@ function IssuesView({
                         : bulkField === "cycle"
                           ? { cycleId: bulkValue === "__none__" ? null : bulkValue }
                           : bulkField === "project"
-                            ? { projectId: bulkValue === "__none__" ? null : bulkValue }
+                            ? { projectId: projectIdFromSelection(bulkValue) }
                             : { labelIds: bulkValue === "__none__" ? [] : [bulkValue] };
                   void onBulk(patch)
                     .then(() => setSelected([]))
@@ -1368,6 +1424,7 @@ function IssuesView({
               onClick={(trigger) => onOpenIssue(issue, trigger)}
               onUpdate={onUpdate}
               labels={labels}
+              projects={projects}
             />
           ))}
           {issues.length === 0 && (
@@ -1410,6 +1467,7 @@ function IssueRow({
   onSelect,
   onClick,
   onUpdate,
+  projects = [],
 }: {
   issue: Issue;
   state?: WorkflowState;
@@ -1421,6 +1479,7 @@ function IssueRow({
   onSelect?: (checked: boolean) => void;
   onClick?: (trigger: HTMLButtonElement) => void;
   onUpdate?: (issue: Issue, patch: Partial<Issue>) => void;
+  projects?: Project[];
 }) {
   return (
     <div className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""}`}>
@@ -1477,7 +1536,29 @@ function IssueRow({
       <span className={`priority-badge ${priorityTone[issue.priority]}`}>
         {priorityLabel[issue.priority]}
       </span>
-      <span className="project-cell">{issue.projectId ? "◈ Project" : "—"}</span>
+      <span className="project-cell">
+        {projects.length > 0 && onUpdate ? (
+          <select
+            aria-label={`${issue.identifier}のProject`}
+            value={issue.projectId ?? ""}
+            disabled={pending}
+            onChange={(event) =>
+              onUpdate(issue, { projectId: projectIdFromSelection(event.target.value) })
+            }
+          >
+            <option value="">Projectなし</option>
+            {projects.map((project) => (
+              <option value={project.id} key={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        ) : issue.projectId ? (
+          "◈ Project"
+        ) : (
+          "Projectなし"
+        )}
+      </span>
       <span className="due-cell">{formatDate(issue.dueAt)}</span>
     </div>
   );
@@ -3125,12 +3206,14 @@ function IssueDetailPanel({
   issueId,
   fallbackIssue,
   knownIssues,
+  projects,
   workflowStates,
   onClose,
 }: {
   issueId: string;
   fallbackIssue?: Issue;
   knownIssues: Issue[];
+  projects: Project[];
   workflowStates: WorkflowState[];
   onClose: () => void;
 }) {
@@ -3145,6 +3228,7 @@ function IssueDetailPanel({
   const issue = notFound ? undefined : (detail?.issue ?? fallbackIssue);
   const [description, setDescription] = useState(issue?.description ?? "");
   const [titleDraft, setTitleDraft] = useState(issue?.title ?? "");
+  const [projectIdDraft, setProjectIdDraft] = useState(issue?.projectId ?? "");
   const [noteBody, setNoteBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -3156,11 +3240,35 @@ function IssueDetailPanel({
     description: string;
     title: string;
   } | null>(null);
+  const [projectRetry, setProjectRetry] = useState<string | null>(null);
 
   useEffect(() => {
     if (issue) setDescription(issue.description);
     if (issue) setTitleDraft(issue.title);
-  }, [issue?.id, issue?.description, issue?.title]);
+    if (issue) setProjectIdDraft(issue.projectId ?? "");
+  }, [issue?.id, issue?.description, issue?.title, issue?.projectId]);
+
+  useEffect(() => {
+    setProjectRetry(null);
+    setDescriptionRetry(null);
+    setError(null);
+  }, [issue?.id]);
+
+  function applyUpdatedIssue(updatedIssue: Issue) {
+    queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
+      current ? { ...current, issue: updatedIssue } : current,
+    );
+    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+      current
+        ? {
+            ...current,
+            issues: current.issues.map((item) =>
+              item.id === updatedIssue.id ? updatedIssue : item,
+            ),
+          }
+        : current,
+    );
+  }
 
   async function saveDescription(nextDescription = description, nextTitle = titleDraft) {
     if (!issue || saving) return;
@@ -3172,19 +3280,7 @@ function IssueDetailPanel({
         version: issue.version,
         patch: { title: nextTitle, descriptionJson: textDocument(nextDescription) },
       });
-      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
-        current ? { ...current, issue: result.issue } : current,
-      );
-      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-        current
-          ? {
-              ...current,
-              issues: current.issues.map((item) =>
-                item.id === result.issue.id ? result.issue : item,
-              ),
-            }
-          : current,
-      );
+      applyUpdatedIssue(result.issue);
       await detailQuery.refetch();
       setDescriptionRetry(null);
     } catch (caught) {
@@ -3203,6 +3299,43 @@ function IssueDetailPanel({
         setTitleDraft(issue.title);
       }
       setError(caught instanceof ApiError ? caught.message : "説明の保存に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveProject(nextProjectId = projectIdDraft) {
+    if (!issue || saving) return;
+    if (nextProjectId === (issue.projectId ?? "")) {
+      setProjectRetry(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setProjectRetry(null);
+    try {
+      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
+        idempotencyKey: idempotencyKey(),
+        version: issue.version,
+        patch: { projectId: projectIdFromSelection(nextProjectId) },
+      });
+      applyUpdatedIssue(result.issue);
+      setProjectRetry(null);
+      await detailQuery.refetch();
+    } catch (caught) {
+      setProjectRetry(nextProjectId);
+      if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+        const latest = await detailQuery.refetch();
+        if (latest.data) {
+          applyUpdatedIssue(latest.data.issue);
+          setProjectIdDraft(latest.data.issue.projectId ?? "");
+        } else {
+          setProjectIdDraft(issue.projectId ?? "");
+        }
+      } else {
+        setProjectIdDraft(issue.projectId ?? "");
+      }
+      setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
     } finally {
       setSaving(false);
     }
@@ -3376,6 +3509,32 @@ function IssueDetailPanel({
                   {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "Status"}
                 </span>
                 <span className="detail-date">更新 {formatDate(issue.updatedAt)}</span>
+              </div>
+              <div className="detail-property-editor">
+                <label className="field-label" htmlFor="issue-project">
+                  Project
+                </label>
+                <select
+                  id="issue-project"
+                  aria-label="IssueのProject"
+                  value={projectIdDraft}
+                  disabled={saving}
+                  onChange={(event) => setProjectIdDraft(event.target.value)}
+                >
+                  <option value="">Projectなし</option>
+                  {projects.map((project) => (
+                    <option value={project.id} key={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="button secondary"
+                  disabled={saving || projectIdDraft === (issue.projectId ?? "")}
+                  onClick={() => void saveProject()}
+                >
+                  {saving ? "保存中…" : "Projectを保存"}
+                </button>
               </div>
               <label className="detail-label" htmlFor="issue-description">
                 Description
@@ -3597,6 +3756,19 @@ function IssueDetailPanel({
                 説明を再試行
               </button>
             )}
+            {projectRetry !== null && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  const retry = projectRetry;
+                  setProjectIdDraft(retry);
+                  setError(null);
+                  void saveProject(retry);
+                }}
+              >
+                Projectを再試行
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -3607,6 +3779,9 @@ function IssueDetailPanel({
 function IssueComposer({
   title,
   setTitle,
+  projects,
+  projectId,
+  setProjectId,
   existingIssue,
   onClose,
   onSubmit,
@@ -3614,6 +3789,9 @@ function IssueComposer({
 }: {
   title: string;
   setTitle: (value: string) => void;
+  projects: Project[];
+  projectId: string;
+  setProjectId: (value: string) => void;
   existingIssue?: Issue;
   onClose: () => void;
   onSubmit: () => void;
@@ -3661,6 +3839,23 @@ function IssueComposer({
               placeholder="何を進めますか？"
               rows={3}
             />
+            <label className="field-label" htmlFor="new-issue-project">
+              Project
+            </label>
+            <select
+              id="new-issue-project"
+              aria-label="新しいIssueのProject"
+              className="text-input"
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+            >
+              <option value="">Projectなし</option>
+              {projects.map((project) => (
+                <option value={project.id} key={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
             <div className="composer-hint">
               <span>Enterで作成</span>
               <span>Shift + Enterで改行</span>

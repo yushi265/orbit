@@ -905,7 +905,8 @@ export class OrbitStore {
       : this.ownedWorkflowStates(userId).find((item) => item.isDefault);
     if (!status || status.userId !== userId) throw notFound();
     const project = input.projectId ? this.projects.get(input.projectId) : null;
-    if (project && (project.userId !== userId || project.deletedAt)) throw notFound();
+    if (input.projectId && (!project || project.userId !== userId || project.deletedAt))
+      throw notFound();
     const cycle = input.cycleId ? this.cycles.get(input.cycleId) : null;
     if (cycle && cycle.userId !== userId) throw notFound();
     const parent = input.parentId ? this.issues.get(input.parentId) : null;

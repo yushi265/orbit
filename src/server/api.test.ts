@@ -71,6 +71,48 @@ describe("HTTP service boundary", () => {
     );
   });
 
+  it("[状態遷移/セキュリティ境界] Issue APIでProjectを割り当て・解除する", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const projectId = (await body<{ projects: Array<{ id: string }> }>(initial)).projects[0].id;
+    const created = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "http-project-assignment-create",
+        title: "API Project assignment",
+        projectId,
+      }),
+    );
+    expect(created.status).toBe(201);
+    const issue = (
+      await body<{ issue: { id: string; version: number; projectId: string } }>(created)
+    ).issue;
+    expect(issue.projectId).toBe(projectId);
+
+    const cleared = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "http-project-assignment-clear",
+        version: issue.version,
+        patch: { projectId: null },
+      }),
+      issue.id,
+    );
+    expect(cleared.status).toBe(200);
+    expect(
+      (await body<{ issue: { projectId: string | null } }>(cleared)).issue.projectId,
+    ).toBeNull();
+
+    const invalid = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "http-project-assignment-invalid",
+        title: "Invalid Project assignment",
+        projectId: "missing-project",
+      }),
+    );
+    expect(invalid.status).toBe(404);
+    expect((await body<{ error: { code: string } }>(invalid)).error.code).toBe(
+      "RESOURCE_NOT_FOUND",
+    );
+  });
+
   it("[契約] Issue version不一致は409 ErrorEnvelopeを返す", async () => {
     const created = await createIssue(
       mutation("http://orbit.local/api/v1/issues", "POST", {

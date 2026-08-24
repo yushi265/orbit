@@ -23,6 +23,7 @@
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`
 - Issue Bulk UI: `IssuesView`のselection / Bulk bar、Label管理は`SettingsView`のLabelsカードでBootstrapを共有する（参照: `src/components/OrbitApp.tsx`）。
+- Issue Project割当UI: 一覧のインライン選択・詳細保存・新規作成でBootstrapの`projects`と既存Issue PATCH / POSTの`projectId`契約を共有し、`src/components/issue-project.ts`でProjectなしを`null`へ正規化する（参照: `src/components/OrbitApp.tsx`）。
 
 ## 既知の罠
 
@@ -34,4 +35,4 @@
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / 2026-08-24
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / 2026-08-25

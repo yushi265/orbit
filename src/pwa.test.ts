@@ -14,7 +14,7 @@ describe("PWA manifest", () => {
       icons: Array<{ src: string; sizes: string; type: string }>;
     };
 
-    expect(manifest.name).toBeTruthy();
+    expect(manifest.name).toBe("Orbit");
     expect(manifest.short_name).toBeTruthy();
     expect(manifest.start_url).toBe("/");
     expect(manifest.display).toBe("standalone");

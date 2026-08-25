@@ -1042,6 +1042,11 @@ function MobileNav({
         onClick={() => onNavigate("inbox")}
         badge={unread}
       />
+      <NavItem
+        item="projects"
+        active={section === "projects"}
+        onClick={() => onNavigate("projects")}
+      />
       <button className="mobile-create" onClick={onCreate}>
         ＋
       </button>

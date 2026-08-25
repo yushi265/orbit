@@ -22,10 +22,10 @@ Issue詳細でStatusを変更できるようにし、Issue一覧で完了Issue�
 
 - [x] **AC-1**: Issue詳細のStatusセレクトでOwnerのworkflow stateを選択すると、既存の`PATCH /api/v1/issues/:issueId`へ現在の`version`と`patch.statusId`を送信し、成功時に詳細・一覧へ反映する。保存失敗時は既存のrollback / retry導線を維持する。
 - [x] **AC-2**: Issues画面で「完了Issueを表示」を切り替えられ、初期状態は表示、OFF時はworkflow stateの`category === "completed"`に該当するIssueをList・Boardの両方から除外する。Canceledは完了Issueとして除外しない。非表示にしたIssueは選択状態からも解除する。
-- [x] **AC-3**: Issues画面でソート順を「更新日（新しい順）」「作成日（新しい順）」「タイトル（昇順）」「優先度（Urgent順）」「期限（近い順）」から選択でき、List・BoardのIssue順へ即時反映する。初期値は更新日（新しい順）で、同値の場合は更新日・作成日・識別子を用いて安定させる。
+- [x] **AC-3**: Issues画面でソート順を「更新日（新しい順）」「作成日（新しい順）」「タイトル（昇順）」「ステータス順」「優先度（Urgent順）」「期限（近い順）」から選択でき、List・BoardのIssue順へ即時反映する。初期値は更新日（新しい順）で、同値の場合は更新日・作成日・識別子を用いて安定させる。
 - [x] **AC-4**: 「完了Issueを表示」の選択状態をブラウザへ保存し、Issues画面の再読み込み後も同じ状態を復元する。保存できない環境ではメモリ上の状態で動作を継続する。
 - [x] **AC-5**: IssueのStatus / Priority / Project等の保存成功Toastに「元に戻す」ボタンを表示し、押下時は保存直前の値を現在のversionから逆更新する。Undo成功時は「元に戻しました」を表示し、Undo後のToastからUndoを再実行しない。
-- [x] **AC-6**: ソート選択UIはIssues Listの`ISSUE`カラム見出し内に配置し、toolbarにはソート選択を表示しない。選択した順序はList・Boardの両方へ適用する。
+- [x] **AC-6**: ソート選択UIはIssues画面のtoolbarに配置し、Listのカラム見出しには配置しない。選択した順序はList・Boardの両方へ適用する。
 
 ## アーキテクチャ / レイヤー間フロー
 

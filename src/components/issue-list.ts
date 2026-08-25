@@ -4,12 +4,19 @@ import type {
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
 
-export type IssueSort = "updated_desc" | "created_desc" | "title_asc" | "priority_desc" | "due_asc";
+export type IssueSort =
+  | "updated_desc"
+  | "created_desc"
+  | "title_asc"
+  | "status_asc"
+  | "priority_desc"
+  | "due_asc";
 
 export const issueSortOptions: ReadonlyArray<{ value: IssueSort; label: string }> = [
   { value: "updated_desc", label: "更新日（新しい順）" },
   { value: "created_desc", label: "作成日（新しい順）" },
   { value: "title_asc", label: "タイトル（昇順）" },
+  { value: "status_asc", label: "ステータス順" },
   { value: "priority_desc", label: "優先度（Urgent順）" },
   { value: "due_asc", label: "期限（近い順）" },
 ];
@@ -50,11 +57,21 @@ function compareDue(left: Issue, right: Issue): number {
   return tieBreak(left, right);
 }
 
-export function sortIssues(issues: readonly Issue[], sort: IssueSort): Issue[] {
+export function sortIssues(
+  issues: readonly Issue[],
+  sort: IssueSort,
+  workflowStates: readonly Pick<WorkflowState, "id" | "position">[] = [],
+): Issue[] {
+  const statusRank = new Map(workflowStates.map((state) => [state.id, state.position]));
   return [...issues].sort((left, right) => {
     if (sort === "created_desc") return right.createdAt - left.createdAt || tieBreak(left, right);
     if (sort === "title_asc")
       return left.title.localeCompare(right.title, "ja") || tieBreak(left, right);
+    if (sort === "status_asc")
+      return (
+        (statusRank.get(left.statusId) ?? Number.MAX_SAFE_INTEGER) -
+          (statusRank.get(right.statusId) ?? Number.MAX_SAFE_INTEGER) || tieBreak(left, right)
+      );
     if (sort === "priority_desc")
       return priorityRank[left.priority] - priorityRank[right.priority] || tieBreak(left, right);
     if (sort === "due_asc") return compareDue(left, right);

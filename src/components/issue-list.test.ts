@@ -91,6 +91,7 @@ describe("Issue list controls", () => {
         id: "urgent",
         identifier: "TASK-1",
         title: "Alpha",
+        statusId: "done",
         priority: "urgent",
         dueAt: null,
         createdAt: 200,
@@ -100,6 +101,7 @@ describe("Issue list controls", () => {
         id: "low",
         identifier: "TASK-3",
         title: "Charlie",
+        statusId: "canceled",
         priority: "low",
         dueAt: 200,
         createdAt: 300,
@@ -111,6 +113,7 @@ describe("Issue list controls", () => {
       "updated_desc",
       "created_desc",
       "title_asc",
+      "status_asc",
       "priority_desc",
       "due_asc",
     ]);
@@ -127,6 +130,11 @@ describe("Issue list controls", () => {
     expect(sortIssues(issues, "title_asc").map((item) => item.id)).toEqual([
       "urgent",
       "medium",
+      "low",
+    ]);
+    expect(sortIssues(issues, "status_asc", workflowStates).map((item) => item.id)).toEqual([
+      "medium",
+      "urgent",
       "low",
     ]);
     expect(sortIssues(issues, "priority_desc").map((item) => item.id)).toEqual([

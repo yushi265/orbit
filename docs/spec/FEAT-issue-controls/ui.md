@@ -4,10 +4,10 @@
 
 - **AC-1**: Issue詳細のStatusセレクトでOwnerのworkflow stateを選択すると、既存の`PATCH /api/v1/issues/:issueId`へ現在の`version`と`patch.statusId`を送信し、成功時に詳細・一覧へ反映する。保存失敗時は既存のrollback / retry導線を維持する。
 - **AC-2**: Issues画面で「完了Issueを表示」を切り替えられ、初期状態は表示、OFF時はworkflow stateの`category === "completed"`に該当するIssueをList・Boardの両方から除外する。Canceledは完了Issueとして除外しない。非表示にしたIssueは選択状態からも解除する。
-- **AC-3**: Issues画面でソート順を「更新日（新しい順）」「作成日（新しい順）」「タイトル（昇順）」「優先度（Urgent順）」「期限（近い順）」から選択でき、List・BoardのIssue順へ即時反映する。初期値は更新日（新しい順）で、同値の場合は更新日・作成日・識別子を用いて安定させる。
+- **AC-3**: Issues画面でソート順を「更新日（新しい順）」「作成日（新しい順）」「タイトル（昇順）」「ステータス順」「優先度（Urgent順）」「期限（近い順）」から選択でき、List・BoardのIssue順へ即時反映する。初期値は更新日（新しい順）で、同値の場合は更新日・作成日・識別子を用いて安定させる。
 - **AC-4**: 「完了Issueを表示」の選択状態をブラウザへ保存し、Issues画面の再読み込み後も同じ状態を復元する。保存できない環境ではメモリ上の状態で動作を継続する。
 - **AC-5**: IssueのStatus / Priority / Project等の保存成功Toastに「元に戻す」ボタンを表示し、押下時は保存直前の値を現在のversionから逆更新する。Undo成功時は「元に戻しました」を表示し、Undo後のToastからUndoを再実行しない。
-- **AC-6**: ソート選択UIはIssues Listの`ISSUE`カラム見出し内に配置し、toolbarにはソート選択を表示しない。選択した順序はList・Boardの両方へ適用する。
+- **AC-6**: ソート選択UIはIssues画面のtoolbarに配置し、Listのカラム見出しには配置しない。選択した順序はList・Boardの両方へ適用する。
 
 ## このレイヤーが公開・利用する契約
 
@@ -28,14 +28,14 @@
 
 ## UI/UX 方針
 
-- **画面フロー / 導線**: Issue詳細の既存Priority / Version / Status列にStatus selectを置く。Issues toolbarには完了表示toggleを置き、Sort selectはListの`ISSUE`カラム見出し内に置く。List・Boardの両方へ同じ結果を適用する。
+- **画面フロー / 導線**: Issue詳細の既存Priority / Version / Status列にStatus selectを置く。Issues toolbarに完了表示toggleとSort selectを置き、List・Boardの両方へ同じ結果を適用する。
 - **主要操作とフィードバック**: Status変更は既存のoptimistic update、成功Toast、競合・失敗時rollback / retryを利用する。保存成功Toastの「元に戻す」は直前のIssue値を逆Patchし、完了時に「元に戻しました」を表示する。表示切替・ソートはクライアント即時反映し、通信を発生させない。
 - **状態設計（出し分け）**: 初期はcompletedを表示、completed OFF時の0件は既存EmptyState、Status更新中は該当Issueの操作をdisabled、Status更新失敗は既存Toastを表示する。
 - **既存デザインシステムとの整合**: 既存`filter-select`、`view-toggle`、`status-pill`、`IssueRow`、`IssueCard`、`toast`を再利用する。
 
 ### レスポンシブ / アクセシビリティ
 
-- 390pxでは完了表示toggleを折り返して全幅で操作できるようにし、Sort selectはListのIssueカラム内で幅を抑える。
+- 390pxではSort selectと完了表示toggleを折り返して全幅で操作できるようにする。
 - Status select、Sort select、完了表示toggleには目的が分かる`aria-label`または可視ラベルを付ける。
 - List・Boardのどちらでも同一の完了判定・ソート結果を使い、色だけに依存しない文言を表示する。
 

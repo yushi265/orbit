@@ -232,7 +232,11 @@ function OrbitAppInner(props: Props) {
       const matchesLabel = labelFilter === "all" || issue.labelIds.includes(labelFilter);
       return matchesText && matchesPriority && matchesLabel;
     });
-    return sortIssues(filterCompletedIssues(filtered, workflowStates, showCompleted), issueSort);
+    return sortIssues(
+      filterCompletedIssues(filtered, workflowStates, showCompleted),
+      issueSort,
+      workflowStates,
+    );
   }, [issues, filterText, priorityFilter, labelFilter, workflowStates, showCompleted, issueSort]);
 
   useEffect(() => {
@@ -1383,6 +1387,18 @@ function IssuesView({
             </option>
           ))}
         </select>
+        <select
+          className="filter-select"
+          aria-label="Issueのソート"
+          value={issueSort}
+          onChange={(event) => setIssueSort(event.target.value as IssueSort)}
+        >
+          {issueSortOptions.map((option) => (
+            <option value={option.value} key={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <label className="completed-toggle">
           <input
             type="checkbox"
@@ -1593,21 +1609,7 @@ function IssuesView({
                 }}
               />
             </span>
-            <span className="table-header-sort">
-              <span>ISSUE</span>
-              <select
-                className="table-sort-select"
-                aria-label="Issueのソート"
-                value={issueSort}
-                onChange={(event) => setIssueSort(event.target.value as IssueSort)}
-              >
-                {issueSortOptions.map((option) => (
-                  <option value={option.value} key={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </span>
+            <span>ISSUE</span>
             <span>STATUS</span>
             <span>PRIORITY</span>
             <span>PROJECT</span>

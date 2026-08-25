@@ -36,7 +36,21 @@ pnpm exec wrangler secret put ACCESS_AUD --env production
 
 Cloudflare AccessはOriginへ`Cf-Access-Jwt-Assertion`を渡します。Worker側でもJWTの署名・issuer・audienceを検証する必要があります。[Validate JWTs](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-## 3. Migration / dry-run
+## 3. PWA静的AssetのAccess設定
+
+PWAのインストール判定はManifestとアイコンをブラウザが直接取得するため、AccessでWorker全体を保護している場合は、次の静的Assetだけを対象に、対象HostnameのAccess application pathとして`Bypass / Everyone`を設定します。
+
+- `/manifest.webmanifest`
+- `/sw.js`
+- `/icon-192.png`
+- `/icon-512.png`
+- `/icon.svg`
+
+`/`、`/api/*`、アプリのHTMLや個人データは引き続きAllow policyで保護します。Access application pathはより具体的なパスが優先されるため、静的Assetだけを公開できます。Bypassは認証・ログを無効化するため、個人データを返すパスには設定しません。
+
+設定後は、未認証状態で静的Assetが`200`になり、ルートHTMLはAccessへ`302`になることを確認します。
+
+## 4. Migration / dry-run
 
 ```bash
 pnpm run deploy:preflight
@@ -46,14 +60,14 @@ pnpm run deploy:dry-run
 
 D1 Migrationは失敗時にロールバックされるため、先にMigration結果を確認してからWorkerをデプロイします。[Wrangler D1 migrations](https://developers.cloudflare.com/d1/operations/migrations/)
 
-## 4. 本番切替前の残タスク
+## 5. 本番切替前の残タスク
 
 1. `OWNER_USER_ID`に対応する`users`行をD1へ作成し、Bootstrap / Owner lookupを実D1で確認する。
 2. Accessで対象HostnameをSelf-hosted applicationとして保護し、許可メールを1件に限定する。
 3. `GET /api/v1/bootstrap`の認証済み200、未認証401、他Owner 404をPreviewで確認する。
 4. Issue / Cycle / Project / Label / Bulk / Inboxの主要操作とBackground Run中423を実D1でSmokeする。
 
-## 5. デプロイ
+## 6. デプロイ
 
 Snapshot Migration、Owner行、Access確認が終わった後に実行します。
 
@@ -63,6 +77,6 @@ pnpm deploy
 
 `pnpm deploy`はproduction build（`CLOUDFLARE_ENV=production`）→ preflight → production D1 migration → `wrangler deploy --keep-vars`の順で実行します。失敗した場合はWorkerを公開せず、エラー原因を解消して再実行してください。
 
-## 6. ロールバック・確認
+## 7. ロールバック・確認
 
 デプロイ後はAccess経由で主要Routeを確認し、異常時はWranglerのVersions画面／`wrangler versions list`で直前Versionを特定してからロールバック方針を決めます。D1の復元期限・Time Travelはアプリの30日Trash期限とは別管理です。

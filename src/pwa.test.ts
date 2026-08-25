@@ -48,4 +48,15 @@ describe("PWA manifest", () => {
     expect(rootRoute).toContain("manifest.webmanifest?v=4");
     expect(rootRoute).toContain("icon-192.png?v=4");
   });
+
+  it("declares cache and content-type headers for PWA assets", () => {
+    const headers = readFileSync(resolve(process.cwd(), "public/_headers"), "utf8");
+
+    expect(headers).toContain("/manifest.webmanifest");
+    expect(headers).toContain("Content-Type: application/manifest+json");
+    expect(headers).toContain("/sw.js");
+    expect(headers).toContain("Content-Type: application/javascript");
+    expect(headers).toContain("/icon-192.png");
+    expect(headers).toContain("/icon-512.png");
+  });
 });

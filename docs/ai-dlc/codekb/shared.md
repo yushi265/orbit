@@ -25,7 +25,7 @@
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`
 - Issue Bulk UI: `IssuesView`のselection / Bulk bar、Label管理は`SettingsView`のLabelsカードでBootstrapを共有する（参照: `src/components/OrbitApp.tsx`）。
 - Issue Project割当UI: 一覧のインライン選択・詳細保存・新規作成でBootstrapの`projects`と既存Issue PATCH / POSTの`projectId`契約を共有し、`src/components/issue-project.ts`でProjectなしを`null`へ正規化する（参照: `src/components/OrbitApp.tsx`）。
-- Issue Priority / Theme / PWA UI: Issue Priorityは既存Issue POST/PATCHへ共有enumを渡し、Themeは`document[data-theme]`へ解決し、PWAはManifest・versioned Service Worker・`beforeinstallprompt`をSettingsへ集約する（参照: `src/components/OrbitApp.tsx`、`src/components/issue-priority.ts`、`src/components/theme.ts`、`public/manifest.webmanifest`、`public/sw.js`）。
+- Issue Priority / Theme / PWA UI: Issue Priorityは既存Issue POST/PATCHへ共有enumを渡し、Themeは`document[data-theme]`へ解決し、PWAはversioned Manifest・Service Worker・`beforeinstallprompt`をSettingsへ集約する。Access保護下ではManifest / SW / アイコンのspecific path Bypassが必要（参照: `src/components/OrbitApp.tsx`、`src/components/issue-priority.ts`、`src/components/theme.ts`、`public/manifest.webmanifest`、`public/sw.js`、`public/_headers`）。
 - Issue controls UI: Issue詳細のStatusは既存Issue PATCHへ`version`と`patch.statusId`を渡し、一覧の完了表示切替・5種のソートは`src/components/issue-list.ts`の純粋関数でList / Boardへ共通適用する（参照: `src/components/OrbitApp.tsx`）。
 - Issue controls follow-up UI: 完了表示は`orbit.issues.showCompleted`へlocalStorage保存し、Issue PATCH成功Toastは`src/components/issue-undo.ts`の逆Patchで「元に戻す」を提供する。ソート選択はIssues toolbarに置き、Status / Priority / Due等の並び替えを`src/components/issue-list.ts`で統一する（参照: `src/components/OrbitApp.tsx`）。
 

@@ -40,6 +40,7 @@
 - `/manifest.webmanifest`は`start_url: /`、`display: standalone`、192px / 512px PNG iconを含める。
 - `/sw.js`は静的AssetのみCacheし、manifest / HTML / API / Access redirectはCacheしない。
 - `beforeinstallprompt`が利用可能な場合のみInstallボタンを表示し、利用できない場合は通常のブラウザ導線を壊さない。
+- AccessでWorker全体を保護する本番では、`/manifest.webmanifest`、`/sw.js`、PWAアイコンだけをAccess application pathのBypass対象にし、HTML / API / 個人データは保護したままにする。
 
 ## テストケース
 

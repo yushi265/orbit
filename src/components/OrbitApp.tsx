@@ -3393,6 +3393,7 @@ function IssueDetailPanel({
   const issue = notFound ? undefined : (detail?.issue ?? fallbackIssue);
   const [description, setDescription] = useState(issue?.description ?? "");
   const [titleDraft, setTitleDraft] = useState(issue?.title ?? "");
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
   const [projectIdDraft, setProjectIdDraft] = useState(issue?.projectId ?? "");
   const [noteBody, setNoteBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -3412,6 +3413,20 @@ function IssueDetailPanel({
     if (issue) setTitleDraft(issue.title);
     if (issue) setProjectIdDraft(issue.projectId ?? "");
   }, [issue?.id, issue?.description, issue?.title, issue?.projectId]);
+
+  useEffect(() => {
+    const input = titleInputRef.current;
+    if (!input) return;
+
+    const resizeTitle = () => {
+      input.style.height = "0px";
+      input.style.height = `${input.scrollHeight}px`;
+    };
+
+    resizeTitle();
+    window.addEventListener("resize", resizeTitle);
+    return () => window.removeEventListener("resize", resizeTitle);
+  }, [titleDraft]);
 
   useEffect(() => {
     setProjectRetry(null);
@@ -3631,11 +3646,13 @@ function IssueDetailPanel({
         <div className="detail-header">
           <div>
             <span className="eyebrow coral">{issue?.identifier ?? "ISSUE DETAIL"}</span>
-            <input
+            <textarea
               id="issue-detail-title"
               className="detail-title-input"
               aria-label="Issueタイトル"
+              ref={titleInputRef}
               value={titleDraft}
+              rows={1}
               onChange={(event) => setTitleDraft(event.target.value)}
             />
           </div>

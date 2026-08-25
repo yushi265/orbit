@@ -56,9 +56,9 @@ kbd { padding: 2px 5px; border: 1px solid #e1e5eb; border-bottom-width: 2px; bor
 @media (max-width: 767px) { .view-editor { padding: 18px; }.view-editor-grid { grid-template-columns: 1fr 1fr; }.saved-view-row { gap: 8px; padding: 12px; }.saved-view-row .text-button { font-size: 10px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
 .detail-panel { width: min(100%, 920px); max-height: min(900px, calc(100vh - 28px)); overflow: auto; padding: 24px; }
-.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid #edf0f3; }
+.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid #edf0f3; }.detail-header > div { min-width: 0; flex: 1; }
 .detail-header h2 { margin-top: 8px; font-size: 25px; }
-.detail-title-input { width: 100%; margin-top: 8px; padding: 0; border: 0; outline: 0; color: #263245; background: transparent; font-family: 'Space Grotesk', sans-serif; font-size: 25px; font-weight: 700; letter-spacing: -.045em; }
+.detail-title-input { display: block; width: 100%; min-height: 1.15em; margin-top: 8px; padding: 0; overflow: hidden; overflow-wrap: anywhere; resize: none; white-space: pre-wrap; border: 0; outline: 0; color: #263245; background: transparent; font-family: 'Space Grotesk', sans-serif; font-size: 25px; font-weight: 700; letter-spacing: -.045em; }
 .detail-close { width: 44px; height: 44px; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(210px, .55fr); gap: 24px; padding-top: 20px; }
 .detail-main { min-width: 0; }

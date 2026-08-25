@@ -25,6 +25,7 @@
 - **主要操作とフィードバック**: Priorityは一覧で即時保存、詳細では既存属性の保存導線を再利用。Cycle開始中は既存Cycle blocking overlay、Theme保存は既存Toastを利用する。
 - **状態設計**: Project / IssueのNot Found、Priority保存中、Cycle開始中、Theme保存失敗、PWA install prompt未発火をそれぞれ既存のError / Empty / Busyパターンで表示する。
 - **タイトル表示**: Issue titleはDesktop / Tablet / Mobileとも最低2行を許容し、ID・Status・Priority・Project列がタイトル領域を過剰に奪わないようにする。
+- Issue詳細のタイトル編集欄は内容に合わせて高さを伸ばし、長いタイトルを横方向に隠さない。
 - **既存デザインとの整合**: 既存`button`、`select`、`detail-card`、`toast`、`cycle-blocking-overlay`を再利用する。
 
 ### レスポンシブ / アクセシビリティ

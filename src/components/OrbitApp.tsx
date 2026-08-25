@@ -1129,6 +1129,7 @@ function MobileNav({
       <button className="mobile-create" onClick={onCreate}>
         ＋
       </button>
+      <NavItem item="cycles" active={section === "cycles"} onClick={() => onNavigate("cycles")} />
       <NavItem item="search" active={section === "search"} onClick={() => onNavigate("search")} />
       <NavItem
         item="settings"

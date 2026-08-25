@@ -23,4 +23,12 @@ describe("mobile issue detail layout", () => {
     expect(app).toContain('id="issue-detail-title"');
     expect(app).toContain("rows={1}");
   });
+
+  it("exposes Cycles in the mobile navigation", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const app = readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
+
+    expect(app).toContain('item="cycles"');
+    expect(styles).toContain("grid-template-columns: repeat(7, 1fr);");
+  });
 });

@@ -24,6 +24,8 @@ import type {
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import { filterCompletedIssues, issueSortOptions, type IssueSort, sortIssues } from "./issue-list";
+import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
+import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection } from "./issue-priority";
 import { issueDetailPath, projectDetailPath } from "./navigation";
 import { resolveTheme } from "./theme";
@@ -41,7 +43,8 @@ type Section =
   | "settings";
 type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
 type ToastAction = { label: string; onClick: () => void };
-type IssueMutationRetry = { issue: Issue; patch: Partial<Issue> };
+type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
+type IssueMutationRetry = IssueMutationVariables;
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
 };
@@ -150,6 +153,7 @@ function OrbitAppInner(props: Props) {
   const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
   const [labelFilter, setLabelFilter] = useState("all");
   const [showCompleted, setShowCompleted] = useState(true);
+  const [showCompletedReady, setShowCompletedReady] = useState(false);
   const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -171,6 +175,7 @@ function OrbitAppInner(props: Props) {
   const bulkMutationKeyRef = useRef<string | null>(null);
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
+  const toastTimerRef = useRef<number | undefined>(undefined);
 
   function rememberIssueFocus(issueId: string) {
     issueTriggerIdRef.current = issueId;
@@ -242,6 +247,29 @@ function OrbitAppInner(props: Props) {
     if (labelFilter !== "all" && !labels.some((label) => label.id === labelFilter))
       setLabelFilter("all");
   }, [labels, labelFilter]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = parseShowCompletedPreference(
+          window.localStorage.getItem(SHOW_COMPLETED_STORAGE_KEY),
+        );
+        if (stored !== undefined) setShowCompleted(stored);
+      } catch {
+        // Ignore storage access failures and keep the default visibility.
+      }
+    }
+    setShowCompletedReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!showCompletedReady || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SHOW_COMPLETED_STORAGE_KEY, String(showCompleted));
+    } catch {
+      // Ignore storage access failures after the preference is applied in memory.
+    }
+  }, [showCompleted, showCompletedReady]);
 
   useEffect(() => {
     if (!data || typeof window === "undefined") return;
@@ -327,9 +355,20 @@ function OrbitAppInner(props: Props) {
   }, [bulkBusy, composerOpen, props.issueId, router]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+  const dismissToast = () => {
+    if (toastTimerRef.current !== undefined) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = undefined;
+    }
+    setToast(null);
+  };
   const showToast = (kind: "success" | "error", text: string, action?: ToastAction) => {
+    if (toastTimerRef.current !== undefined) window.clearTimeout(toastTimerRef.current);
     setToast({ kind, text, action });
-    window.setTimeout(() => setToast(null), 3500);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = undefined;
+      setToast(null);
+    }, 3500);
   };
 
   async function installPwa() {
@@ -368,7 +407,7 @@ function OrbitAppInner(props: Props) {
   });
 
   const updateIssue = useMutation({
-    mutationFn: ({ issue, patch }: { issue: Issue; patch: Partial<Issue> }) =>
+    mutationFn: ({ issue, patch }: IssueMutationVariables) =>
       apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
         idempotencyKey: idempotencyKey(),
         version: issue.version,
@@ -396,19 +435,37 @@ function OrbitAppInner(props: Props) {
         });
       return { previous, previousDetail };
     },
-    onSuccess: ({ issue }) => {
+    onSuccess: ({ issue: updatedIssue }, variables) => {
       queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
         current
           ? {
               ...current,
-              issues: current.issues.map((item) => (item.id === issue.id ? issue : item)),
+              issues: current.issues.map((item) =>
+                item.id === updatedIssue.id ? updatedIssue : item,
+              ),
             }
           : current,
       );
-      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issue.id], (current) =>
-        current ? { ...current, issue } : current,
+      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", updatedIssue.id], (current) =>
+        current ? { ...current, issue: updatedIssue } : current,
       );
-      showToast("success", "変更を保存しました");
+      showToast(
+        "success",
+        variables.undo ? "元に戻しました" : "変更を保存しました",
+        variables.undo
+          ? undefined
+          : {
+              label: "元に戻す",
+              onClick: () => {
+                dismissToast();
+                updateIssue.mutate({
+                  issue: updatedIssue,
+                  patch: inverseIssuePatch(variables.issue, variables.patch),
+                  undo: true,
+                });
+              },
+            },
+      );
     },
     onError: async (error, variables, context) => {
       let retryIssue = variables.issue;
@@ -444,7 +501,11 @@ function OrbitAppInner(props: Props) {
         context?.previousDetail
       )
         queryClient.setQueryData(["issue-detail", variables.issue.id], context.previousDetail);
-      const retry = { issue: retryIssue, patch: variables.patch } satisfies IssueMutationRetry;
+      const retry = {
+        issue: retryIssue,
+        patch: variables.patch,
+        undo: variables.undo,
+      } satisfies IssueMutationRetry;
       showToast(
         "error",
         error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT"
@@ -455,7 +516,7 @@ function OrbitAppInner(props: Props) {
         {
           label: "再試行",
           onClick: () => {
-            setToast(null);
+            dismissToast();
             updateIssue.mutate(retry);
           },
         },
@@ -1322,18 +1383,6 @@ function IssuesView({
             </option>
           ))}
         </select>
-        <select
-          className="filter-select"
-          aria-label="Issueのソート"
-          value={issueSort}
-          onChange={(event) => setIssueSort(event.target.value as IssueSort)}
-        >
-          {issueSortOptions.map((option) => (
-            <option value={option.value} key={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
         <label className="completed-toggle">
           <input
             type="checkbox"
@@ -1544,7 +1593,21 @@ function IssuesView({
                 }}
               />
             </span>
-            <span>ISSUE</span>
+            <span className="table-header-sort">
+              <span>ISSUE</span>
+              <select
+                className="table-sort-select"
+                aria-label="Issueのソート"
+                value={issueSort}
+                onChange={(event) => setIssueSort(event.target.value as IssueSort)}
+              >
+                {issueSortOptions.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </span>
             <span>STATUS</span>
             <span>PRIORITY</span>
             <span>PROJECT</span>

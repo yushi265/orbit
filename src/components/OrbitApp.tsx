@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -23,6 +23,9 @@ import type {
 } from "../shared/view-models";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
+import { priorityFromSelection } from "./issue-priority";
+import { issueDetailPath, projectDetailPath } from "./navigation";
+import { resolveTheme } from "./theme";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -38,6 +41,9 @@ type Section =
 type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
 type ToastAction = { label: string; onClick: () => void };
 type IssueMutationRetry = { issue: Issue; patch: Partial<Issue> };
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 
 const priorityLabel: Record<Issue["priority"], string> = {
   no_priority: "No priority",
@@ -135,6 +141,8 @@ function OrbitAppInner(props: Props) {
   const [composerOpen, setComposerOpen] = useState(Boolean(props.issueId));
   const [newTitle, setNewTitle] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
+  const [newPriority, setNewPriority] = useState<Issue["priority"]>("no_priority");
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [filterText, setFilterText] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
@@ -155,6 +163,7 @@ function OrbitAppInner(props: Props) {
   const [run, setRun] = useState<PublicRunSummary | null>(null);
   const [runBusy, setRunBusy] = useState(false);
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
+  const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkMutationKeyRef = useRef<string | null>(null);
   const issueTriggerIdRef = useRef<string | null>(null);
@@ -225,9 +234,39 @@ function OrbitAppInner(props: Props) {
   }, [labels, labelFilter]);
 
   useEffect(() => {
+    if (!data || typeof window === "undefined") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const resolved = resolveTheme(data.preferences.theme, media.matches);
+      document.documentElement.dataset.theme = resolved;
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute("content", resolved === "dark" ? "#11151d" : "#ff725e");
+    };
+    applyTheme();
+    if (data.preferences.theme !== "system") return;
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [data?.preferences.theme]);
+
+  useEffect(() => {
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const onAppInstalled = () => setInstallPrompt(null);
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
     if ("serviceWorker" in navigator)
       void navigator.serviceWorker
-        .register("/sw.js?v=3", { updateViaCache: "none" })
+        .register("/sw.js?v=4", { updateViaCache: "none" })
         .catch(() => undefined);
   }, []);
 
@@ -283,11 +322,24 @@ function OrbitAppInner(props: Props) {
     window.setTimeout(() => setToast(null), 3500);
   };
 
+  async function installPwa() {
+    if (!installPrompt) return;
+    try {
+      const result = await installPrompt.prompt();
+      if (result.outcome === "accepted") showToast("success", "Orbitをインストールしました");
+    } catch {
+      showToast("error", "PWAのインストールを開始できませんでした");
+    } finally {
+      setInstallPrompt(null);
+    }
+  }
+
   const createIssue = useMutation({
     mutationFn: () =>
       apiPost<{ issue: Issue }>("/api/v1/issues", {
         idempotencyKey: idempotencyKey(),
         title: newTitle.trim(),
+        priority: newPriority,
         projectId: projectIdFromSelection(newProjectId),
         cycleId: activeCycle?.id ?? null,
       }),
@@ -297,6 +349,7 @@ function OrbitAppInner(props: Props) {
       );
       setNewTitle("");
       setNewProjectId("");
+      setNewPriority("no_priority");
       setComposerOpen(false);
       showToast("success", `${issue.identifier} を作成しました`);
     },
@@ -573,6 +626,22 @@ function OrbitAppInner(props: Props) {
     }
   }
 
+  async function startCycle(cycle: Cycle): Promise<boolean> {
+    if (cycleStartBusy) return false;
+    setCycleStartBusy(true);
+    try {
+      await apiPost(`/api/v1/cycles/${cycle.id}/start`, { idempotencyKey: idempotencyKey() });
+      showToast("success", "Cycleを開始しました");
+      await refresh();
+      return true;
+    } catch (error) {
+      showToast("error", error instanceof ApiError ? error.message : "Cycleの開始に失敗しました");
+      return false;
+    } finally {
+      setCycleStartBusy(false);
+    }
+  }
+
   if (bootstrap.isLoading)
     return (
       <div className="loading-screen">
@@ -696,7 +765,9 @@ function OrbitAppInner(props: Props) {
               onNavigateIssues={() => void navigate("issues")}
               onNavigateCycles={() => void navigate("cycles")}
               closeBusy={cycleCloseBusy}
+              startBusy={cycleStartBusy}
               onClose={(cycle) => void closeCycle(cycle)}
+              onStart={startCycle}
             />
           )}
           {section === "projects" && (
@@ -708,6 +779,12 @@ function OrbitAppInner(props: Props) {
               projectStatuses={data.projectStatuses}
               onCreate={() => setProjectComposerOpen(true)}
               onRefresh={refresh}
+              onOpenIssue={(issue) => {
+                rememberIssueFocus(issue.id);
+                setSection("issues");
+                setComposerOpen(true);
+                void router.navigate({ to: issueDetailPath(issue.id) as never });
+              }}
             />
           )}
           {section === "search" && (
@@ -752,6 +829,8 @@ function OrbitAppInner(props: Props) {
                   .then(refresh)
                   .catch(() => showToast("error", "テーマの変更に失敗しました"))
               }
+              canInstallPwa={installPrompt !== null}
+              onInstallPwa={() => void installPwa()}
             />
           )}
         </main>
@@ -771,6 +850,8 @@ function OrbitAppInner(props: Props) {
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
             projects={projects}
+            onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
+            pending={pendingIssueId === props.issueId}
             workflowStates={workflowStates}
             onClose={closeIssueDetail}
           />
@@ -781,10 +862,13 @@ function OrbitAppInner(props: Props) {
             projects={projects}
             projectId={newProjectId}
             setProjectId={setNewProjectId}
+            priority={newPriority}
+            setPriority={setNewPriority}
             onClose={() => {
               setComposerOpen(false);
               setNewTitle("");
               setNewProjectId("");
+              setNewPriority("no_priority");
             }}
             onSubmit={() => createIssue.mutate()}
             busy={createIssue.isPending}
@@ -1533,8 +1617,27 @@ function IssueRow({
           ))}
         </select>
       </span>
-      <span className={`priority-badge ${priorityTone[issue.priority]}`}>
-        {priorityLabel[issue.priority]}
+      <span className="priority-cell">
+        {onUpdate && !compact ? (
+          <select
+            aria-label={`${issue.identifier}のPriority`}
+            value={issue.priority}
+            disabled={pending}
+            onChange={(event) =>
+              onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
+            }
+          >
+            {Object.entries(priorityLabel).map(([value, label]) => (
+              <option value={value} key={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={`priority-badge ${priorityTone[issue.priority]}`}>
+            {priorityLabel[issue.priority]}
+          </span>
+        )}
       </span>
       <span className="project-cell">
         {projects.length > 0 && onUpdate ? (
@@ -1615,7 +1718,9 @@ function CyclesView({
   onNavigateIssues,
   onNavigateCycles,
   closeBusy,
+  startBusy,
   onClose,
+  onStart,
 }: {
   cycles: Cycle[];
   cycleId?: string;
@@ -1627,7 +1732,9 @@ function CyclesView({
   onNavigateIssues: () => void;
   onNavigateCycles: () => void;
   closeBusy: boolean;
+  startBusy: boolean;
   onClose: (cycle: Cycle) => void;
+  onStart: (cycle: Cycle) => Promise<boolean>;
 }) {
   const [tab, setTab] = useState<CycleTab>("current");
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(cycleId ?? null);
@@ -1737,7 +1844,7 @@ function CyclesView({
 
   return (
     <div className="page">
-      {closeBusy && (
+      {(closeBusy || startBusy) && (
         <div
           className="cycle-blocking-overlay"
           role="status"
@@ -1750,8 +1857,8 @@ function CyclesView({
         >
           <div className="cycle-blocking-card">
             <span className="run-spinner">◌</span>
-            <strong>Cycleを完了しています</strong>
-            <span>繰越処理が終わるまで操作できません。</span>
+            <strong>{startBusy ? "Cycleを開始しています" : "Cycleを完了しています"}</strong>
+            <span>処理が終わるまで操作できません。</span>
           </div>
         </div>
       )}
@@ -1763,10 +1870,25 @@ function CyclesView({
         </div>
         <button
           className="button secondary"
-          onClick={() => selectedCycle?.status === "active" && onClose(selectedCycle)}
-          disabled={closeBusy || selectedCycle?.status !== "active"}
+          onClick={() => {
+            if (!selectedCycle) return;
+            if (selectedCycle.status === "active") onClose(selectedCycle);
+            if (selectedCycle.status === "upcoming")
+              void onStart(selectedCycle).then((started) => {
+                if (started) setTab("current");
+              });
+          }}
+          disabled={
+            closeBusy || startBusy || !selectedCycle || selectedCycle.status === "completed"
+          }
         >
-          {closeBusy ? "完了処理中…" : "Cycleを完了"}
+          {closeBusy
+            ? "完了処理中…"
+            : startBusy
+              ? "開始中…"
+              : selectedCycle?.status === "upcoming"
+                ? "Cycleを開始"
+                : "Cycleを完了"}
         </button>
       </div>
       <div className="cycle-tabs">
@@ -1774,7 +1896,7 @@ function CyclesView({
           <button
             className={tab === value ? "selected" : ""}
             aria-selected={tab === value}
-            disabled={closeBusy}
+            disabled={closeBusy || startBusy}
             key={value}
             onClick={() => setTab(value)}
           >
@@ -1975,6 +2097,7 @@ function ProjectsView({
   projectStatuses,
   onCreate,
   onRefresh,
+  onOpenIssue,
 }: {
   projects: Project[];
   issues: Issue[];
@@ -1983,6 +2106,7 @@ function ProjectsView({
   projectStatuses: BootstrapPayload["projectStatuses"];
   onCreate: () => void;
   onRefresh: () => void;
+  onOpenIssue: (issue: Issue) => void;
 }) {
   const router = useRouter();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId ?? null);
@@ -2119,14 +2243,17 @@ function ProjectsView({
               issue.userId === project.userId && issue.projectId === project.id && !issue.deletedAt,
           );
           return (
-            <button
+            <Link
               className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
               data-project-id={project.id}
               key={project.id}
-              disabled={saving}
-              onClick={() => {
+              to={projectDetailPath(project.id) as never}
+              onClick={(event) => {
+                if (saving) {
+                  event.preventDefault();
+                  return;
+                }
                 setSelectedProjectId(project.id);
-                void router.navigate({ to: `/projects/${project.id}` as never });
               }}
             >
               <div className="project-card-top">
@@ -2149,7 +2276,7 @@ function ProjectsView({
                   {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
                 </span>
               </div>
-            </button>
+            </Link>
           );
         })}
         {projects.length === 0 && (
@@ -2280,14 +2407,19 @@ function ProjectsView({
           </div>
           <div className="cycle-list project-issue-list">
             {projectIssues.map((issue) => (
-              <div className="mini-issue" key={issue.id}>
+              <button
+                className="mini-issue project-issue-link"
+                key={issue.id}
+                aria-label={`${issue.identifier} ${issue.title}を開く`}
+                onClick={() => onOpenIssue(issue)}
+              >
                 <span className={`priority-dot ${priorityTone[issue.priority]}`} />
                 <span className="issue-id">{issue.identifier}</span>
                 <strong>{issue.title}</strong>
                 <span className="cycle-issue-status">
                   {workflowStates.find((state) => state.id === issue.statusId)?.name}
                 </span>
-              </div>
+              </button>
             ))}
             {projectIssues.length === 0 && (
               <p className="detail-empty">このProjectにIssueはありません。</p>
@@ -2830,6 +2962,8 @@ function SettingsView({
   onRun,
   onResume,
   onTheme,
+  canInstallPwa,
+  onInstallPwa,
 }: {
   preferences: BootstrapPayload["preferences"];
   labels: BootstrapPayload["labels"];
@@ -2839,7 +2973,10 @@ function SettingsView({
   onRun: () => void;
   onResume: () => void;
   onTheme: (theme: "light" | "dark" | "system") => void;
+  canInstallPwa: boolean;
+  onInstallPwa: () => void;
 }) {
+  const [themeDraft, setThemeDraft] = useState(preferences.theme);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -2848,6 +2985,8 @@ function SettingsView({
   const labelMutationKeyRef = useRef<string | null>(null);
   const labelDeleteRetryRef = useRef<BootstrapPayload["labels"][number] | null>(null);
   const [labelErrorAction, setLabelErrorAction] = useState<"save" | "delete" | null>(null);
+
+  useEffect(() => setThemeDraft(preferences.theme), [preferences.theme]);
 
   function startLabelEdit(label: BootstrapPayload["labels"][number]) {
     labelMutationKeyRef.current = null;
@@ -2956,8 +3095,12 @@ function SettingsView({
               <span>ライト・ダーク・システム</span>
             </div>
             <select
-              value={preferences.theme}
-              onChange={(event) => onTheme(event.target.value as "light" | "dark" | "system")}
+              value={themeDraft}
+              onChange={(event) => {
+                const nextTheme = event.target.value as "light" | "dark" | "system";
+                setThemeDraft(nextTheme);
+                onTheme(nextTheme);
+              }}
             >
               <option value="system">System</option>
               <option value="light">Light</option>
@@ -2972,6 +3115,19 @@ function SettingsView({
             <span className="setting-value">
               {preferences.locale === "ja" ? "日本語" : "English"}
             </span>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>PWA</strong>
+              <span>ホーム画面にOrbitを追加</span>
+            </div>
+            {canInstallPwa ? (
+              <button className="button secondary" onClick={onInstallPwa}>
+                Install Orbit
+              </button>
+            ) : (
+              <span className="setting-value">ブラウザメニューから追加</span>
+            )}
           </div>
         </section>
         <section className="settings-card">
@@ -3207,6 +3363,8 @@ function IssueDetailPanel({
   fallbackIssue,
   knownIssues,
   projects,
+  onUpdate,
+  pending,
   workflowStates,
   onClose,
 }: {
@@ -3214,6 +3372,8 @@ function IssueDetailPanel({
   fallbackIssue?: Issue;
   knownIssues: Issue[];
   projects: Project[];
+  onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
+  pending: boolean;
   workflowStates: WorkflowState[];
   onClose: () => void;
 }) {
@@ -3501,9 +3661,21 @@ function IssueDetailPanel({
           <div className="detail-grid">
             <section className="detail-main">
               <div className="detail-properties">
-                <span className={`priority-badge ${priorityTone[issue.priority]}`}>
-                  {priorityLabel[issue.priority]}
-                </span>
+                <select
+                  className="detail-priority-select"
+                  aria-label="IssueのPriority"
+                  value={issue.priority}
+                  disabled={pending || saving}
+                  onChange={(event) =>
+                    onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
+                  }
+                >
+                  {Object.entries(priorityLabel).map(([value, label]) => (
+                    <option value={value} key={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
                 <span className="status-pill active">Version {issue.version}</span>
                 <span className="status-pill">
                   {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "Status"}
@@ -3782,6 +3954,8 @@ function IssueComposer({
   projects,
   projectId,
   setProjectId,
+  priority,
+  setPriority,
   existingIssue,
   onClose,
   onSubmit,
@@ -3792,6 +3966,8 @@ function IssueComposer({
   projects: Project[];
   projectId: string;
   setProjectId: (value: string) => void;
+  priority: Issue["priority"];
+  setPriority: (value: Issue["priority"]) => void;
   existingIssue?: Issue;
   onClose: () => void;
   onSubmit: () => void;
@@ -3853,6 +4029,22 @@ function IssueComposer({
               {projects.map((project) => (
                 <option value={project.id} key={project.id}>
                   {project.name}
+                </option>
+              ))}
+            </select>
+            <label className="field-label" htmlFor="new-issue-priority">
+              Priority
+            </label>
+            <select
+              id="new-issue-priority"
+              aria-label="新しいIssueのPriority"
+              className="text-input"
+              value={priority}
+              onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
+            >
+              {Object.entries(priorityLabel).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
                 </option>
               ))}
             </select>

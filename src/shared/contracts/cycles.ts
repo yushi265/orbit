@@ -18,6 +18,12 @@ export const cycleMetadataMutationSchema = z.strictObject({
   description: cycleDescriptionSchema.optional(),
 });
 
+export const cycleStartMutationSchema = z.strictObject({
+  idempotencyKey: mutationMetaSchema.shape.idempotencyKey,
+});
+
 export type CycleMetadataMutation = z.infer<typeof cycleMetadataMutationSchema>;
+export type CycleStartMutation = z.infer<typeof cycleStartMutationSchema>;
 
 export const CycleMetadataMutationSchema = cycleMetadataMutationSchema;
+export const CycleStartMutationSchema = cycleStartMutationSchema;

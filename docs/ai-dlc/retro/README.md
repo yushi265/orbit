@@ -71,3 +71,4 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 
 - [MVP-linear-project-management.md](./MVP-linear-project-management.md) — 要件定義から MVP 設計 spec を作成（2026-08-23）
 - [FEAT-issue-project-assignment.md](./FEAT-issue-project-assignment.md) — IssueへのProject割り当て（2026-08-25）
+- [FEAT-feedback-polish.md](./FEAT-feedback-polish.md) — 動作確認フィードバック対応（2026-08-25）

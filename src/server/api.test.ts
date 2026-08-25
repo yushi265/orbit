@@ -14,9 +14,11 @@ import {
   getIssue,
   listViews,
   startBackgroundRun,
+  startCycle,
   updateCycleMetadata,
   updateIssueNote,
   updateIssue,
+  updatePreferences,
   updateProject,
   updateView,
 } from "./api";
@@ -111,6 +113,57 @@ describe("HTTP service boundary", () => {
     expect((await body<{ error: { code: string } }>(invalid)).error.code).toBe(
       "RESOURCE_NOT_FOUND",
     );
+  });
+
+  it("[状態遷移] Issue APIでPriorityを作成・更新できる", async () => {
+    const created = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "http-priority-create",
+        title: "Priority API対象",
+        priority: "high",
+      }),
+    );
+    const issue = (
+      await body<{ issue: { id: string; version: number; priority: string } }>(created)
+    ).issue;
+    expect(created.status).toBe(201);
+    expect(issue).toMatchObject({ version: 1, priority: "high" });
+    const updated = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "http-priority-update",
+        version: issue.version,
+        patch: { priority: "urgent" },
+      }),
+      issue.id,
+    );
+    expect(updated.status).toBe(200);
+    expect(
+      (await body<{ issue: { version: number; priority: string } }>(updated)).issue,
+    ).toMatchObject({ version: 2, priority: "urgent" });
+  });
+
+  it("[状態遷移/境界値] Preferences APIでThemeを保存し、再取得できる", async () => {
+    const updated = await updatePreferences(
+      mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+        idempotencyKey: "preferences-theme-dark",
+        theme: "dark",
+      }),
+    );
+    expect(updated.status).toBe(200);
+    expect((await body<{ preferences: { theme: string } }>(updated)).preferences.theme).toBe(
+      "dark",
+    );
+    const reloaded = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect((await body<{ preferences: { theme: string } }>(reloaded)).preferences.theme).toBe(
+      "dark",
+    );
+    const invalid = await updatePreferences(
+      mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+        idempotencyKey: "preferences-theme-invalid",
+        theme: "sepia",
+      }),
+    );
+    expect(invalid.status).toBe(400);
   });
 
   it("[契約] Issue version不一致は409 ErrorEnvelopeを返す", async () => {
@@ -382,6 +435,45 @@ describe("HTTP service boundary", () => {
     expect(
       afterBody.issues.find((issue) => issue.title === "Mobileの一覧を磨く")?.cycleId,
     ).not.toBe(cycleId);
+  });
+
+  it("[状態遷移] Upcoming Cycleをstart APIで開始し、再送をNo-opにする", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycleId = (await body<{ cycles: Array<{ id: string }> }>(initial)).cycles[0].id;
+    await closeCycle(
+      new Request("http://orbit.local/api/v1/cycles", {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "cycle-start-prepare-close",
+        },
+      }),
+      cycleId,
+    );
+    const afterClose = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const upcomingId = (
+      await body<{ cycles: Array<{ id: string; status: string }> }>(afterClose)
+    ).cycles.find((cycle) => cycle.status === "upcoming")!.id;
+    const request = () =>
+      mutation("http://orbit.local/api/v1/cycles/start", "POST", {
+        idempotencyKey: "cycle-start-api-1",
+      });
+    const first = await startCycle(request(), upcomingId);
+    const replay = await startCycle(request(), upcomingId);
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect((await body<{ cycle: { status: string } }>(replay)).cycle.status).toBe("active");
+    const missingKey = await startCycle(
+      new Request("http://orbit.local/api/v1/cycles/start", {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "header-only-cycle-start",
+        },
+      }),
+      upcomingId,
+    );
+    expect(missingKey.status).toBe(400);
   });
 
   it("[状態遷移] IssueのCycle追加・解除は既存version CASとlockを通る", async () => {

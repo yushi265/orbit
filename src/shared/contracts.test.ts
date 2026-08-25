@@ -12,6 +12,7 @@ import {
   themeSchema,
   workflowCategorySchema,
 } from "./contracts/enums";
+import { cycleStartMutationSchema } from "./contracts/cycles";
 import { ERROR_STATUS_BY_CODE, errorEnvelopeSchema, errorStatusForCode } from "./contracts/errors";
 import {
   createIssueInputSchema,
@@ -55,6 +56,13 @@ describe("共有 enum 契約", () => {
     for (const value of [0, 4, 13, "3"]) {
       expect(estimateSchema.safeParse(value).success).toBe(false);
     }
+  });
+
+  it("[契約] Cycle startはJSONのidempotencyKeyを必須にする", () => {
+    expect(cycleStartMutationSchema.safeParse({ idempotencyKey: "cycle-start" }).success).toBe(
+      true,
+    );
+    expect(cycleStartMutationSchema.safeParse({}).success).toBe(false);
   });
 });
 

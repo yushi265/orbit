@@ -22,6 +22,7 @@ import {
   continueRunInputSchema,
   createIssueInputSchema,
   cycleMetadataMutationSchema,
+  cycleStartMutationSchema,
   issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
   noteMutationSchema,
@@ -388,6 +389,17 @@ export async function closeCycle(request: Request, cycleId: string): Promise<Res
       requestId,
     ),
   );
+}
+
+export async function startCycle(request: Request, cycleId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(cycleStartMutationSchema, await parseBody(request));
+    return json(
+      { cycle: owner.store.startCycle(owner.userId, cycleId, input.idempotencyKey) },
+      200,
+      requestId,
+    );
+  });
 }
 
 export async function updateCycleMetadata(request: Request, cycleId: string): Promise<Response> {

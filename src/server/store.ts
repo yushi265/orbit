@@ -1728,6 +1728,61 @@ export class OrbitStore {
     return cycle;
   }
 
+  startCycle(userId: string, cycleId: string, idempotencyKey: string): Cycle {
+    this.assertUnlocked(userId);
+    validateKey(idempotencyKey);
+    const request = { cycleId };
+    const existing = this.checkReceipt<Cycle>(userId, "cycle.start", idempotencyKey, request);
+    if (existing) return existing;
+    const target = this.cycles.get(cycleId);
+    if (!target || target.userId !== userId) throw notFound();
+    if (target.status !== "upcoming")
+      throw validationError({ cycleId: ["開始できるのはUpcoming Cycleだけです。"] });
+    const active = this.listCycles(userId).find((cycle) => cycle.status === "active");
+    if (active && target.number !== active.number + 1)
+      throw validationError({ cycleId: ["現在Cycleの次Cycleだけ開始できます。"] });
+    const now = this.clock();
+    const settings = this.cycleSettings.get(userId)!;
+    const duration = settings.durationWeeks * 7 * DAY;
+    const nextStartsAt = now;
+    const nextEndsAt = now + duration;
+    const futureUpdates: Array<{ cycle: Cycle; startsAt: number; endsAt: number }> = [];
+    let cursor = nextEndsAt;
+    for (const future of this.listCycles(userId)
+      .filter((cycle) => cycle.number > target.number && cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number)) {
+      if (future.scheduleOverridden) {
+        if (future.startsAt < cursor)
+          throw validationError({
+            cycleId: ["個別調整済みCycleの日付が重複するため開始できません。"],
+          });
+        cursor = future.endsAt;
+        continue;
+      }
+      futureUpdates.push({ cycle: future, startsAt: cursor, endsAt: cursor + duration });
+      cursor += duration;
+    }
+    if (active) this.closeCycle(userId, active.id, createId("cycle-start-close"));
+
+    target.status = "active";
+    target.startsAt = nextStartsAt;
+    target.endsAt = nextEndsAt;
+    target.completedAt = null;
+    for (const update of futureUpdates) {
+      update.cycle.startsAt = update.startsAt;
+      update.cycle.endsAt = update.endsAt;
+    }
+    this.recordActivity(userId, "cycle", target.id, "started", idempotencyKey, null, {
+      startsAt: target.startsAt,
+      endsAt: target.endsAt,
+    });
+    this.recordOutbox(userId, "cycle.started", `cycle.started:${target.id}`, {
+      cycleId: target.id,
+    });
+    this.recordReceipt(userId, "cycle.start", idempotencyKey, request, target);
+    return target;
+  }
+
   private createNextCycle(userId: string, previous: Cycle): Cycle {
     const settings = this.cycleSettings.get(userId)!;
     const id = createId("cycle");

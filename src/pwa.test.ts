@@ -24,5 +24,28 @@ describe("PWA manifest", () => {
         expect.objectContaining({ sizes: "512x512", type: "image/png" }),
       ]),
     );
+    expect(manifest.icons.some((icon) => icon.src.startsWith("/icon-192.png"))).toBe(true);
+    expect(manifest.icons.some((icon) => icon.src.startsWith("/icon-512.png"))).toBe(true);
+    expect(readFileSync(resolve(process.cwd(), "public/icon-192.png")).byteLength).toBeGreaterThan(
+      0,
+    );
+    expect(readFileSync(resolve(process.cwd(), "public/icon-512.png")).byteLength).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("keeps the service worker cache limited to static assets", () => {
+    const serviceWorker = readFileSync(resolve(process.cwd(), "public/sw.js"), "utf8");
+    expect(serviceWorker).toContain("orbit-static-v4");
+    expect(serviceWorker).not.toContain("manifest.webmanifest");
+    expect(serviceWorker).toContain('url.pathname.startsWith("/api/")');
+    expect(serviceWorker).toContain("!response.redirected");
+    expect(serviceWorker).toContain("STATIC_CONTENT_TYPE");
+  });
+
+  it("links the raster touch icon and versioned manifest from the root document", () => {
+    const rootRoute = readFileSync(resolve(process.cwd(), "src/routes/__root.tsx"), "utf8");
+    expect(rootRoute).toContain("manifest.webmanifest?v=4");
+    expect(rootRoute).toContain("icon-192.png?v=4");
   });
 });

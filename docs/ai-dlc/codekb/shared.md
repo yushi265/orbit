@@ -5,6 +5,7 @@
 - `/api/v1/bootstrap`、`/api/v1/issues`、`/api/v1/projects`、`/api/v1/cycles`、`/api/v1/search`、`/api/v1/views`、`/api/v1/notifications`、`/api/v1/preferences`、`/api/v1/background-runs/*` をTanStack Start Server Routeで公開する（参照: `src/server/api.ts`、`src/routes/api/v1/`）。
 - Issue detailは `GET /api/v1/issues/:issueId` で `issue / notes / relations / activity` を返し、Notes / RelationsのMutationはIssue配下のnested Routeを使う（参照: `src/server/api.ts`、`src/routes/api/v1/issues/$issueId/`）。
 - Cycle workspaceは既存BootstrapのCycle / Issueを使い、`PATCH /api/v1/cycles/:cycleId` でmetadataを更新する。Cycle closeのPOSTとIssue PATCHのCycle割当は既存Routeを再利用する（参照: `src/server/api.ts`、`src/routes/api/v1/cycles/`）。
+- Upcoming Cycleの即時開始は`POST /api/v1/cycles/:cycleId/start`へJSONの`idempotencyKey`を渡し、Storeが現在Cycleのclose・次Cycleのactive化・後続日付再計算を行う（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/cycles/$cycleId/start.ts`）。
 - Project workspaceはBootstrapのProject / Issueを使い、既存`PATCH /api/v1/projects/:projectId`をmetadata更新に再利用する。Saved Viewは`POST/PATCH/DELETE /api/v1/views*`でOwner scopedに管理する（参照: `src/server/api.ts`、`src/routes/api/v1/projects/`、`src/routes/api/v1/views/`）。
 - Label / Bulk workspaceはBootstrapの`labels`とIssueの`labelIds`を使い、Label CRUDを`/api/v1/labels*`、複数Issue更新を`POST /api/v1/issues/bulk`で公開する。現段階はMemory StoreのOwner / Lock / Receipt / Activity / Outbox境界を正本とする（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/labels/`、`src/routes/api/v1/issues/bulk.ts`）。
 - 本番APIは`withOwner`でOwner単位のD1 Snapshot Sessionを開き、成功Response後だけVersion CAS保存する。ローカルはMemory Storeを維持し、本番でD1 Bindingが無い場合はフォールバックしない（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
@@ -24,6 +25,7 @@
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`
 - Issue Bulk UI: `IssuesView`のselection / Bulk bar、Label管理は`SettingsView`のLabelsカードでBootstrapを共有する（参照: `src/components/OrbitApp.tsx`）。
 - Issue Project割当UI: 一覧のインライン選択・詳細保存・新規作成でBootstrapの`projects`と既存Issue PATCH / POSTの`projectId`契約を共有し、`src/components/issue-project.ts`でProjectなしを`null`へ正規化する（参照: `src/components/OrbitApp.tsx`）。
+- Issue Priority / Theme / PWA UI: Issue Priorityは既存Issue POST/PATCHへ共有enumを渡し、Themeは`document[data-theme]`へ解決し、PWAはManifest・versioned Service Worker・`beforeinstallprompt`をSettingsへ集約する（参照: `src/components/OrbitApp.tsx`、`src/components/issue-priority.ts`、`src/components/theme.ts`、`public/manifest.webmanifest`、`public/sw.js`）。
 
 ## 既知の罠
 
@@ -35,4 +37,4 @@
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / 2026-08-25
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / 2026-08-25

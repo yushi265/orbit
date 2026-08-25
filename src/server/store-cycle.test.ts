@@ -134,6 +134,160 @@ describe("Cycle workspace service", () => {
     expect(removed).toMatchObject({ cycleId: null, version: 3 });
   });
 
+  it("[状態遷移] Upcomingの次Cycleを開始し、同じKeyは再送できる", () => {
+    const { store, cycle } = setup();
+    const upcoming = {
+      ...cycle,
+      id: "cycle-upcoming",
+      number: cycle.number + 1,
+      name: "Cycle 2",
+      startsAt: cycle.endsAt,
+      endsAt: cycle.endsAt + 7 * 24 * 60 * 60 * 1000,
+      status: "upcoming" as const,
+    };
+    store.cycles.set(upcoming.id, upcoming);
+    const future = {
+      ...upcoming,
+      id: "cycle-future",
+      number: upcoming.number + 1,
+      name: "Cycle 3",
+      startsAt: upcoming.endsAt,
+      endsAt: upcoming.endsAt + 7 * 24 * 60 * 60 * 1000,
+    };
+    store.cycles.set(future.id, future);
+
+    const startKey = "k".repeat(200);
+    const started = store.startCycle("owner", upcoming.id, startKey);
+    expect(store.cycles.get(cycle.id)).toMatchObject({ status: "completed" });
+    expect(started).toMatchObject({
+      id: upcoming.id,
+      status: "active",
+      startsAt: 1_700_000_000_000,
+    });
+    expect(started.endsAt).toBe(
+      started.startsAt + store.cycleSettings.get("owner")!.durationWeeks * 7 * 24 * 60 * 60 * 1000,
+    );
+    expect(store.cycles.get(future.id)).toMatchObject({
+      startsAt: started.endsAt,
+      endsAt:
+        started.endsAt + store.cycleSettings.get("owner")!.durationWeeks * 7 * 24 * 60 * 60 * 1000,
+    });
+    const activityCount = store.activities.length;
+    const outboxCount = store.outbox.length;
+    const receiptCount = store.receipts.size;
+
+    expect(store.startCycle("owner", upcoming.id, startKey)).toEqual(started);
+    expect(store.activities).toHaveLength(activityCount);
+    expect(store.outbox).toHaveLength(outboxCount);
+    expect(store.receipts.size).toBe(receiptCount);
+  });
+
+  it("[デシジョンテーブル] Cycle startの状態・Owner・lock境界を拒否する", () => {
+    const { store, cycle } = setup();
+    const upcoming = {
+      ...cycle,
+      id: "cycle-next-boundary",
+      number: 2,
+      status: "upcoming" as const,
+    };
+    const nonSequential = { ...upcoming, id: "cycle-non-sequential", number: 4 };
+    const completed = { ...upcoming, id: "cycle-completed", status: "completed" as const };
+    store.cycles.set(upcoming.id, upcoming);
+    store.cycles.set(nonSequential.id, nonSequential);
+    store.cycles.set(completed.id, completed);
+    const beforeRejected = {
+      cycles: structuredClone([...store.cycles.values()]),
+      issues: structuredClone([...store.issues.values()]),
+      activities: store.activities.filter((event) => event.userId === "owner").length,
+      outbox: store.outbox.filter((event) => event.userId === "owner").length,
+      receipts: [...store.receipts.keys()].filter((key) => key.startsWith("owner:")).length,
+    };
+
+    expect(() => store.startCycle("owner", cycle.id, "cycle-start-active")).toThrowError(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect(() => store.startCycle("owner", nonSequential.id, "cycle-start-gap")).toThrowError(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect(() => store.startCycle("owner", completed.id, "cycle-start-completed")).toThrowError(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect(() => store.startCycle("owner", upcoming.id, "k".repeat(201))).toThrowError(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect([...store.cycles.values()]).toEqual(beforeRejected.cycles);
+    expect([...store.issues.values()]).toEqual(beforeRejected.issues);
+    expect(store.activities.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeRejected.activities,
+    );
+    expect(store.outbox.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeRejected.outbox,
+    );
+    expect([...store.receipts.keys()].filter((key) => key.startsWith("owner:"))).toHaveLength(
+      beforeRejected.receipts,
+    );
+    expect(() => store.startCycle("owner", "missing-cycle", "cycle-start-missing")).toThrowError(
+      expect.objectContaining({ status: 404 }),
+    );
+    const adjusted = {
+      ...upcoming,
+      id: "cycle-adjusted-overlap",
+      number: 3,
+      scheduleOverridden: true,
+      startsAt: upcoming.endsAt - 1,
+      endsAt: upcoming.endsAt + 7 * 24 * 60 * 60 * 1000,
+    };
+    store.cycles.set(adjusted.id, adjusted);
+    expect(() => store.startCycle("owner", upcoming.id, "cycle-start-overlap")).toThrowError(
+      expect.objectContaining({ status: 400 }),
+    );
+    store.ensureOwner("other", "other@example.com", true);
+    expect(() => store.startCycle("other", upcoming.id, "cycle-start-owner")).toThrowError(
+      expect.objectContaining({ status: 404 }),
+    );
+    const run = store.startRun("owner", {
+      kind: "maintenance",
+      idempotencyKey: "cycle-start-lock",
+    });
+    const beforeLocked = {
+      cycles: structuredClone([...store.cycles.values()]),
+      issues: structuredClone([...store.issues.values()]),
+      activities: store.activities.filter((event) => event.userId === "owner").length,
+      outbox: store.outbox.filter((event) => event.userId === "owner").length,
+      receipts: [...store.receipts.keys()].filter((key) => key.startsWith("owner:")).length,
+    };
+    expect(() => store.startCycle("owner", upcoming.id, "cycle-start-locked")).toThrowError(
+      expect.objectContaining({ code: "OPERATION_IN_PROGRESS", status: 423 }),
+    );
+    expect(store.getRun("owner", run.run_id).status).toBe("running");
+    expect([...store.cycles.values()]).toEqual(beforeLocked.cycles);
+    expect([...store.issues.values()]).toEqual(beforeLocked.issues);
+    expect(store.activities.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeLocked.activities,
+    );
+    expect(store.outbox.filter((event) => event.userId === "owner")).toHaveLength(
+      beforeLocked.outbox,
+    );
+    expect([...store.receipts.keys()].filter((key) => key.startsWith("owner:"))).toHaveLength(
+      beforeLocked.receipts,
+    );
+
+    const withoutActive = setup();
+    withoutActive.store.cycles.get(withoutActive.cycle.id)!.status = "completed";
+    const firstCycle = {
+      ...withoutActive.cycle,
+      id: "cycle-first-upcoming",
+      status: "upcoming" as const,
+    };
+    withoutActive.store.cycles.set(firstCycle.id, firstCycle);
+    expect(
+      withoutActive.store.startCycle("owner", firstCycle.id, "cycle-start-no-active"),
+    ).toMatchObject({
+      status: "active",
+      startsAt: 1_700_000_000_000,
+    });
+  });
+
   it("[セキュリティ境界] 他OwnerのCycle metadataは404で副作用がない", () => {
     const { store, cycle } = setup();
     store.ensureOwner("other", "other@example.com");

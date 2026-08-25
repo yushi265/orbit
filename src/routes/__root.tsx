@@ -1,7 +1,7 @@
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 
-const APP_ASSET_VERSION = "4";
+const APP_ASSET_VERSION = "5";
 
 export const Route = createRootRoute({
   head: () => ({

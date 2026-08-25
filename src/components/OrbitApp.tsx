@@ -3616,7 +3616,7 @@ function IssueDetailPanel({
 
   return (
     <div
-      className="modal-backdrop"
+      className="modal-backdrop issue-detail-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="issue-detail-title"

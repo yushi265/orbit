@@ -30,6 +30,7 @@
 ### レスポンシブ / アクセシビリティ
 
 - 390pxではProject cardとIssue rowのタップ領域を全幅で確保し、タイトルは折り返し表示する。
+- 390pxのIssue詳細Modalはsafe-area内の上端から表示し、表示領域を超える本文だけをパネル内でスクロールする。
 - Project card / Issue row / Priority select / Cycle startには、目的が分かる可視文言または`aria-label`を付ける。
 - Dark themeでもfocus-visible outline、選択状態、Errorを色だけに依存させない。
 

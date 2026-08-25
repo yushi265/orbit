@@ -23,6 +23,7 @@ import type {
 } from "../shared/view-models";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
+import { filterCompletedIssues, issueSortOptions, type IssueSort, sortIssues } from "./issue-list";
 import { priorityFromSelection } from "./issue-priority";
 import { issueDetailPath, projectDetailPath } from "./navigation";
 import { resolveTheme } from "./theme";
@@ -148,6 +149,8 @@ function OrbitAppInner(props: Props) {
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
   const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
   const [labelFilter, setLabelFilter] = useState("all");
+  const [showCompleted, setShowCompleted] = useState(true);
+  const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -213,20 +216,27 @@ function OrbitAppInner(props: Props) {
   const workflowStates = data?.workflowStates ?? [];
   const activeCycle = cycles.find((cycle) => cycle.status === "active");
   const unread = notifications.filter((notification) => !notification.readAt).length;
-  const visibleIssues = useMemo(
-    () =>
-      issues.filter((issue) => {
-        const matchesText =
-          !filterText.trim() ||
-          `${issue.identifier} ${issue.title} ${issue.description}`
-            .toLocaleLowerCase()
-            .includes(filterText.toLocaleLowerCase());
-        const matchesPriority = priorityFilter === "all" || issue.priority === priorityFilter;
-        const matchesLabel = labelFilter === "all" || issue.labelIds.includes(labelFilter);
-        return matchesText && matchesPriority && matchesLabel;
-      }),
-    [issues, filterText, priorityFilter, labelFilter],
-  );
+  const visibleIssues = useMemo(() => {
+    const filtered = issues.filter((issue) => {
+      const matchesText =
+        !filterText.trim() ||
+        `${issue.identifier} ${issue.title} ${issue.description}`
+          .toLocaleLowerCase()
+          .includes(filterText.toLocaleLowerCase());
+      const matchesPriority = priorityFilter === "all" || issue.priority === priorityFilter;
+      const matchesLabel = labelFilter === "all" || issue.labelIds.includes(labelFilter);
+      return matchesText && matchesPriority && matchesLabel;
+    });
+    return sortIssues(filterCompletedIssues(filtered, workflowStates, showCompleted), issueSort);
+  }, [issues, filterText, priorityFilter, labelFilter, workflowStates, showCompleted, issueSort]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleIssues.map((issue) => issue.id));
+    setSelected((current) => {
+      const next = current.filter((issueId) => visibleIds.has(issueId));
+      return next.length === current.length ? current : next;
+    });
+  }, [visibleIssues]);
 
   useEffect(() => {
     if (labelFilter !== "all" && !labels.some((label) => label.id === labelFilter))
@@ -730,6 +740,10 @@ function OrbitAppInner(props: Props) {
               setPriorityFilter={setPriorityFilter}
               labelFilter={labelFilter}
               setLabelFilter={setLabelFilter}
+              showCompleted={showCompleted}
+              setShowCompleted={setShowCompleted}
+              issueSort={issueSort}
+              setIssueSort={setIssueSort}
               projects={projects}
               cycles={cycles}
               labels={labels}
@@ -1194,6 +1208,10 @@ function IssuesView({
   setPriorityFilter,
   labelFilter,
   setLabelFilter,
+  showCompleted,
+  setShowCompleted,
+  issueSort,
+  setIssueSort,
   projects,
   cycles,
   labels,
@@ -1217,6 +1235,10 @@ function IssuesView({
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
   labelFilter: string;
   setLabelFilter: (value: string) => void;
+  showCompleted: boolean;
+  setShowCompleted: (value: boolean) => void;
+  issueSort: IssueSort;
+  setIssueSort: (value: IssueSort) => void;
   projects: Project[];
   cycles: Cycle[];
   labels: Label[];
@@ -1240,6 +1262,19 @@ function IssuesView({
   const grouped = workflowStates
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
     .filter((group) => group.issues.length > 0);
+  const hasIssueFilter =
+    Boolean(filterText.trim()) ||
+    priorityFilter !== "all" ||
+    labelFilter !== "all" ||
+    !showCompleted;
+
+  function clearIssueFilters() {
+    setFilterText("");
+    setPriorityFilter("all");
+    setLabelFilter("all");
+    setShowCompleted(true);
+  }
+
   return (
     <div className="page">
       <div className="page-heading compact-heading">
@@ -1287,6 +1322,26 @@ function IssuesView({
             </option>
           ))}
         </select>
+        <select
+          className="filter-select"
+          aria-label="Issueのソート"
+          value={issueSort}
+          onChange={(event) => setIssueSort(event.target.value as IssueSort)}
+        >
+          {issueSortOptions.map((option) => (
+            <option value={option.value} key={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <label className="completed-toggle">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(event) => setShowCompleted(event.target.checked)}
+          />
+          完了Issueを表示
+        </label>
         <div className="toolbar-spacer" />
         <button
           className={`view-toggle ${viewMode === "list" ? "selected" : ""}`}
@@ -1467,9 +1522,9 @@ function IssuesView({
           ))}
           {grouped.length === 0 && (
             <EmptyState
-              title="Issueはまだありません"
-              action="最初のIssueを作成"
-              onAction={onCreate}
+              title={hasIssueFilter ? "条件に一致するIssueはありません" : "Issueはまだありません"}
+              action={hasIssueFilter ? "フィルターを解除" : "最初のIssueを作成"}
+              onAction={hasIssueFilter ? clearIssueFilters : onCreate}
             />
           )}
         </div>
@@ -1518,21 +1573,11 @@ function IssuesView({
           ))}
           {issues.length === 0 && (
             <EmptyState
-              title={
-                filterText || priorityFilter !== "all" || labelFilter !== "all"
-                  ? "条件に一致するIssueはありません"
-                  : "Issueはまだありません"
-              }
-              action={
-                filterText || priorityFilter !== "all" || labelFilter !== "all"
-                  ? "フィルターを解除"
-                  : "最初のIssueを作成"
-              }
+              title={hasIssueFilter ? "条件に一致するIssueはありません" : "Issueはまだありません"}
+              action={hasIssueFilter ? "フィルターを解除" : "最初のIssueを作成"}
               onAction={() => {
-                if (filterText || priorityFilter !== "all" || labelFilter !== "all") {
-                  setFilterText("");
-                  setPriorityFilter("all");
-                  setLabelFilter("all");
+                if (hasIssueFilter) {
+                  clearIssueFilters();
                 } else {
                   onCreate();
                 }
@@ -3699,9 +3744,19 @@ function IssueDetailPanel({
                   ))}
                 </select>
                 <span className="status-pill active">Version {issue.version}</span>
-                <span className="status-pill">
-                  {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "Status"}
-                </span>
+                <select
+                  className="detail-status-select"
+                  aria-label="IssueのStatus"
+                  value={issue.statusId}
+                  disabled={pending || saving}
+                  onChange={(event) => onUpdate(issue, { statusId: event.target.value })}
+                >
+                  {workflowStates.map((state) => (
+                    <option value={state.id} key={state.id}>
+                      {state.name}
+                    </option>
+                  ))}
+                </select>
                 <span className="detail-date">更新 {formatDate(issue.updatedAt)}</span>
               </div>
               <div className="detail-property-editor">

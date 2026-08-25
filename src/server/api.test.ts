@@ -142,6 +142,43 @@ describe("HTTP service boundary", () => {
     ).toMatchObject({ version: 2, priority: "urgent" });
   });
 
+  it("[状態遷移/セキュリティ境界] Issue APIでOwnerのStatusを更新できる", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const completedState = (
+      await body<{ workflowStates: Array<{ id: string; category: string }> }>(initial)
+    ).workflowStates.find((state) => state.category === "completed");
+    expect(completedState).toBeDefined();
+    const created = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "http-status-create",
+        title: "Status API対象",
+      }),
+    );
+    const issue = (await body<{ issue: { id: string; version: number } }>(created)).issue;
+    const updated = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "http-status-update",
+        version: issue.version,
+        patch: { statusId: completedState!.id },
+      }),
+      issue.id,
+    );
+    expect(updated.status).toBe(200);
+    expect(
+      (await body<{ issue: { statusId: string; version: number } }>(updated)).issue,
+    ).toMatchObject({ statusId: completedState!.id, version: 2 });
+
+    const invalid = await updateIssue(
+      mutation("http://orbit.local/api/v1/issues", "PATCH", {
+        idempotencyKey: "http-status-invalid",
+        version: 2,
+        patch: { statusId: "missing-status" },
+      }),
+      issue.id,
+    );
+    expect(invalid.status).toBe(404);
+  });
+
   it("[状態遷移/境界値] Preferences APIでThemeを保存し、再取得できる", async () => {
     const updated = await updatePreferences(
       mutation("http://orbit.local/api/v1/preferences", "PATCH", {

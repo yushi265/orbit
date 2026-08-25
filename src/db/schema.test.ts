@@ -134,6 +134,9 @@ describe("Drizzle schema", () => {
   });
 
   it("[代表値] Issue / Background Run の JSON・CAS・owner 列を保持する", () => {
+    expect(columnNames(userPreferences)).toEqual(
+      expect.arrayContaining(["theme", "color_theme", "issue_counter", "estimate_enabled"]),
+    );
     expect(columnNames(issues)).toEqual(
       expect.arrayContaining([
         "id",

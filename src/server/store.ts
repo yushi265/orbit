@@ -30,12 +30,14 @@ import {
 import { conflict, locked, notFound, validationError } from "./errors";
 import { canonicalMutationJson } from "../shared/canonical-json";
 import {
+  colorThemeValues,
   labelColorSchema,
   labelNameSchema,
   type BulkIssueMutation,
   type CycleMetadataMutation,
   type LabelMutation,
   type LabelUpdate,
+  type ReorderIssueInput,
   type SavedViewUpdate,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
@@ -114,6 +116,8 @@ export interface UpdateIssueInput {
   version: number;
   patch: IssuePatch;
 }
+
+export type { ReorderIssueInput };
 
 export interface NoteMutationInput {
   idempotencyKey: string;
@@ -295,9 +299,25 @@ export class OrbitStore {
     clock: () => number = nowMs,
     ownerUserId?: string,
   ): OrbitStore {
-    if (!OrbitStore.isSnapshot(snapshot, ownerUserId))
+    const normalizedValue = structuredClone(snapshot);
+    if (!normalizedValue || typeof normalizedValue !== "object" || Array.isArray(normalizedValue))
       throw new Error("Invalid OrbitStore snapshot");
-    const source = structuredClone(snapshot);
+    const normalized = normalizedValue as Record<string, unknown>;
+    if (Array.isArray(normalized.preferences)) {
+      normalized.preferences = normalized.preferences.map((preference) => {
+        if (
+          preference &&
+          typeof preference === "object" &&
+          !Array.isArray(preference) &&
+          !("colorTheme" in preference)
+        )
+          return { ...preference, colorTheme: "coral" };
+        return preference;
+      });
+    }
+    if (!OrbitStore.isSnapshot(normalized, ownerUserId))
+      throw new Error("Invalid OrbitStore snapshot");
+    const source = structuredClone(normalized);
     const store = new OrbitStore(clock);
     const setById = <T extends { id: string }>(target: Map<string, T>, values: T[]) => {
       values.forEach((value) => target.set(value.id, value));
@@ -407,7 +427,7 @@ export class OrbitStore {
     const valid =
       hasTypes("users", { strings: ["id", "name", "email"], numbers: ["createdAt"] }) &&
       hasTypes("preferences", {
-        strings: ["userId", "timezone", "locale", "theme"],
+        strings: ["userId", "timezone", "locale", "theme", "colorTheme"],
         numbers: ["issueCounter"],
         booleans: ["estimateEnabled"],
       }) &&
@@ -481,6 +501,14 @@ export class OrbitStore {
       hasIdOwner &&
       items("seededUsers").every((entry) => typeof entry === "string");
     if (!valid) return false;
+    if (
+      !items("preferences").every(
+        (entry) =>
+          isRecord(entry) &&
+          colorThemeValues.includes(entry.colorTheme as (typeof colorThemeValues)[number]),
+      )
+    )
+      return false;
     if (!ownerUserId) return true;
 
     const ownerScoped = [
@@ -527,6 +555,7 @@ export class OrbitStore {
       timezone: "Asia/Tokyo",
       locale: "ja",
       theme: "system",
+      colorTheme: "coral",
       estimateEnabled: true,
       issueCounter: 0,
     });
@@ -1336,6 +1365,84 @@ export class OrbitStore {
     return issue;
   }
 
+  reorderIssue(userId: string, input: ReorderIssueInput): Issue {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Issue>(userId, "issue.reorder", input.idempotencyKey, input);
+    if (existing) return existing;
+
+    const target = this.issues.get(input.issueId);
+    if (
+      !target ||
+      target.userId !== userId ||
+      target.deletedAt !== null ||
+      target.archivedAt !== null
+    )
+      throw notFound();
+    if (target.version !== input.version)
+      throw conflict("ISSUE_VERSION_CONFLICT", "Issueが別の場所で更新されています。");
+    if (input.beforeIssueId === target.id)
+      throw validationError({ beforeIssueId: ["移動先には対象Issue自身を指定できません。"] });
+
+    const before = input.beforeIssueId ? this.issues.get(input.beforeIssueId) : null;
+    if (
+      input.beforeIssueId &&
+      (!before ||
+        before.userId !== userId ||
+        before.deletedAt !== null ||
+        before.archivedAt !== null)
+    )
+      throw notFound();
+
+    const activeIssues = [...this.issues.values()]
+      .filter(
+        (issue) => issue.userId === userId && issue.deletedAt === null && issue.archivedAt === null,
+      )
+      .sort(
+        (left, right) =>
+          left.position - right.position ||
+          left.createdAt - right.createdAt ||
+          left.identifier.localeCompare(right.identifier, "ja"),
+      );
+    const remaining = activeIssues.filter((issue) => issue.id !== target.id);
+    const insertionIndex = input.beforeIssueId
+      ? remaining.findIndex((issue) => issue.id === input.beforeIssueId)
+      : remaining.length;
+    if (insertionIndex < 0) throw notFound();
+    remaining.splice(insertionIndex, 0, target);
+
+    const changed = remaining.filter((issue, index) => issue.position !== index);
+    if (changed.length === 0) {
+      this.recordReceipt(userId, "issue.reorder", input.idempotencyKey, input, target);
+      return target;
+    }
+
+    const now = this.clock();
+    remaining.forEach((issue, index) => {
+      if (issue.position === index) return;
+      const beforeState = { version: issue.version, position: issue.position };
+      issue.position = index;
+      issue.version += 1;
+      issue.updatedAt = now;
+      this.recordActivity(
+        userId,
+        "issue",
+        issue.id,
+        "reordered",
+        `${input.idempotencyKey}:${issue.id}`,
+        beforeState,
+        { version: issue.version, position: issue.position },
+      );
+      this.recordOutbox(userId, "issue.reordered", `issue.reordered:${issue.id}:${issue.version}`, {
+        issueId: issue.id,
+        position: issue.position,
+        version: issue.version,
+      });
+    });
+    this.recordReceipt(userId, "issue.reorder", input.idempotencyKey, input, target);
+    return target;
+  }
+
   bulkUpdateIssues(userId: string, input: BulkIssueInput): Issue[] {
     this.assertOwner(userId);
     this.assertUnlocked(userId);
@@ -1948,7 +2055,9 @@ export class OrbitStore {
 
   updatePreferences(
     userId: string,
-    patch: Partial<Pick<Preferences, "timezone" | "locale" | "theme" | "estimateEnabled">>,
+    patch: Partial<
+      Pick<Preferences, "timezone" | "locale" | "theme" | "colorTheme" | "estimateEnabled">
+    >,
     idempotencyKey: string,
   ): Preferences {
     this.assertUnlocked(userId);
@@ -1965,9 +2074,16 @@ export class OrbitStore {
       throw validationError({ locale: ["ja / en から選択してください。"] });
     if (patch.theme && !["light", "dark", "system"].includes(patch.theme))
       throw validationError({ theme: ["light / dark / systemから選択してください。"] });
+    if (
+      patch.colorTheme !== undefined &&
+      !colorThemeValues.includes(patch.colorTheme as (typeof colorThemeValues)[number])
+    )
+      throw validationError({
+        colorTheme: ["coral / ocean / violet / forest / amberから選択してください。"],
+      });
     const safePatch = Object.fromEntries(
       Object.entries(patch).filter(([key]) =>
-        ["timezone", "locale", "theme", "estimateEnabled"].includes(key),
+        ["timezone", "locale", "theme", "colorTheme", "estimateEnabled"].includes(key),
       ),
     );
     Object.assign(preferences, safePatch);

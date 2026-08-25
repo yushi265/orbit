@@ -27,6 +27,7 @@ export async function bootstrapOwner(
       timezone: "Asia/Tokyo",
       locale: "ja",
       theme: "system",
+      colorTheme: "coral",
       issueCounter: 0,
       estimateEnabled: true,
       defaultIssueDisplayJson: "{}",

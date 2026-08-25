@@ -5,6 +5,7 @@ import type {
 } from "../shared/view-models";
 
 export type IssueSort =
+  | "manual"
   | "updated_desc"
   | "created_desc"
   | "title_asc"
@@ -13,6 +14,7 @@ export type IssueSort =
   | "due_asc";
 
 export const issueSortOptions: ReadonlyArray<{ value: IssueSort; label: string }> = [
+  { value: "manual", label: "手動" },
   { value: "updated_desc", label: "更新日（新しい順）" },
   { value: "created_desc", label: "作成日（新しい順）" },
   { value: "title_asc", label: "タイトル（昇順）" },
@@ -64,6 +66,7 @@ export function sortIssues(
 ): Issue[] {
   const statusRank = new Map(workflowStates.map((state) => [state.id, state.position]));
   return [...issues].sort((left, right) => {
+    if (sort === "manual") return left.position - right.position || tieBreak(left, right);
     if (sort === "created_desc") return right.createdAt - left.createdAt || tieBreak(left, right);
     if (sort === "title_asc")
       return left.title.localeCompare(right.title, "ja") || tieBreak(left, right);
@@ -77,4 +80,31 @@ export function sortIssues(
     if (sort === "due_asc") return compareDue(left, right);
     return tieBreak(left, right);
   });
+}
+
+export function beforeIssueIdForDrop(
+  orderedIssues: readonly Issue[],
+  draggedIssueId: string,
+  dropTargetIssueId: string,
+): string | null {
+  if (draggedIssueId === dropTargetIssueId) return null;
+  const draggedIndex = orderedIssues.findIndex((issue) => issue.id === draggedIssueId);
+  const targetIndex = orderedIssues.findIndex((issue) => issue.id === dropTargetIssueId);
+  if (draggedIndex < 0 || targetIndex < 0) return null;
+  const remaining = orderedIssues.filter((issue) => issue.id !== draggedIssueId);
+  const remainingTargetIndex = remaining.findIndex((issue) => issue.id === dropTargetIssueId);
+  if (remainingTargetIndex < 0) return null;
+  if (draggedIndex > targetIndex) return dropTargetIssueId;
+  return remaining[remainingTargetIndex + 1]?.id ?? null;
+}
+
+export function beforeIssueIdForMove(
+  orderedIssues: readonly Issue[],
+  issueId: string,
+  direction: "up" | "down",
+): string | null {
+  const index = orderedIssues.findIndex((issue) => issue.id === issueId);
+  const targetIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || targetIndex < 0 || targetIndex >= orderedIssues.length) return null;
+  return beforeIssueIdForDrop(orderedIssues, issueId, orderedIssues[targetIndex].id);
 }

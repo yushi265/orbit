@@ -62,4 +62,17 @@ describe("初期 Drizzle migration", () => {
     expect(migration).toContain("`user_id` text PRIMARY KEY NOT NULL");
     expect(migration).toContain("orbit_store_snapshots_version_check");
   });
+
+  it("ColorTheme migrationは既存PreferencesへCoralを補完する", () => {
+    const migrationDirectory = resolve(process.cwd(), "drizzle");
+    const migrationFile = readdirSync(migrationDirectory)
+      .filter((name) => /^0002_.*\.sql$/.test(name))
+      .sort()[0];
+
+    expect(migrationFile).toBeDefined();
+    const migration = readFileSync(resolve(migrationDirectory, migrationFile), "utf8");
+    expect(migration).toContain("`color_theme` text DEFAULT 'coral' NOT NULL");
+    expect(migration).toContain("'coral', \"issue_counter\"");
+    expect(migration).toContain("user_preferences_color_theme_check");
+  });
 });

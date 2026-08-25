@@ -17,7 +17,7 @@ Cloudflare Accessの認証画面はアプリ内Routeではない。ログアウ�
 
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
-| PREF-01 | タイムゾーン、UI言語、テーマを設定できる | タイムゾーンはCycle境界と日時表示、UI言語は画面文言と日時・数値形式、テーマは配色へ反映される。MVPのUI言語は日本語・英語、初期値は日本語とする |
+| PREF-01 | タイムゾーン、UI言語、表示モード、カラーテーマを設定できる | タイムゾーンはCycle境界と日時表示、UI言語は画面文言と日時・数値形式、表示モードとカラーテーマは配色へ反映される。表示モードはLight / Dark / System、カラーテーマはCoral / Ocean / Violet / Forest / Amberから選択し、初期値はCoralとする。MVPのUI言語は日本語・英語、初期値は日本語とする |
 | PREF-02 | Issue番号を`TASK-123`形式で一意かつ単調増加に採番する | 同時作成でも重複しない |
 | PREF-03 | Estimateを有効・無効にできる | MVPはpoint単位の`1 / 2 / 3 / 5 / 8`だけを許可する。無効化しても既存値は保持するが、入力・Filter・Order・集計では使用しない |
 | WF-01 | Workflow状態を設定できる | Backlog / Unstarted / Started / Completed / Canceledのカテゴリを持つ |

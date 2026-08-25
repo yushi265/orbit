@@ -47,6 +47,15 @@ export const updateIssueInputSchema = z
   })
   .strict();
 
+export const reorderIssueInputSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    issueId: opaqueIdSchema,
+    version: z.number().int().nonnegative(),
+    beforeIssueId: opaqueIdSchema.nullable(),
+  })
+  .strict();
+
 const issueDueSchema = z.enum(["none", "overdue", "today", "upcoming"]);
 const issueGroupSchema = z.enum(["status", "priority", "project", "cycle", "label"]);
 const issueOrderSchema = z.enum(["manual", "priority", "updated", "created", "due_at", "estimate"]);
@@ -91,6 +100,7 @@ export type IssueFilter = z.infer<typeof issueFilterSchema>;
 export type IssueQuery = z.infer<typeof issueQueryBaseSchema>;
 export type CreateIssueInput = z.infer<typeof createIssueInputSchema>;
 export type UpdateIssueInput = z.infer<typeof updateIssueInputSchema>;
+export type ReorderIssueInput = z.infer<typeof reorderIssueInputSchema>;
 
 const sortableFilterKeys = [
   "statusIds",
@@ -142,5 +152,6 @@ export const issueQuerySchema = issueQueryBaseSchema.transform(normalizeIssueQue
 export const MutationMetaSchema = mutationMetaSchema;
 export const CreateIssueInputSchema = createIssueInputSchema;
 export const UpdateIssueInputSchema = updateIssueInputSchema;
+export const ReorderIssueInputSchema = reorderIssueInputSchema;
 export const IssueFilterSchema = issueFilterSchema;
 export const IssueQuerySchema = issueQuerySchema;

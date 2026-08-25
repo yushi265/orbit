@@ -12,6 +12,7 @@ import {
   BulkIssueInput,
   NoteMutationInput,
   RelationMutationInput,
+  ReorderIssueInput,
   CreateLabelInput,
   UpdateLabelInput,
   UpdateCycleMetadataInput,
@@ -33,6 +34,7 @@ import {
   projectCreateMutationSchema,
   projectMetadataMutationSchema,
   relationMutationSchema,
+  reorderIssueInputSchema,
   resumeRunInputSchema,
   savedViewMutationSchema,
   savedViewUpdateSchema,
@@ -239,6 +241,16 @@ export async function updateIssue(request: Request, issueId: string): Promise<Re
     } as unknown as UpdateIssueInput;
     const issue = owner.store.updateIssue(owner.userId, input);
     return json({ issue }, 200, requestId);
+  });
+}
+
+export async function reorderIssue(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      reorderIssueInputSchema,
+      await parseBody(request),
+    ) as ReorderIssueInput;
+    return json({ issue: owner.store.reorderIssue(owner.userId, input) }, 200, requestId);
   });
 }
 
@@ -494,7 +506,7 @@ export async function updatePreferences(request: Request): Promise<Response> {
       {
         preferences: owner.store.updatePreferences(
           owner.userId,
-          pickFields(body, ["timezone", "locale", "theme", "estimateEnabled"]),
+          pickFields(body, ["timezone", "locale", "theme", "colorTheme", "estimateEnabled"]),
           String(body.idempotencyKey ?? keyFromRequest(request)),
         ),
       },

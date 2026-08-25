@@ -23,6 +23,7 @@
 ```ts
 type Locale = 'ja' | 'en'
 type Theme = 'light' | 'dark' | 'system'
+type ColorTheme = 'coral' | 'ocean' | 'violet' | 'forest' | 'amber'
 type Priority = 'no_priority' | 'low' | 'medium' | 'high' | 'urgent'
 type Estimate = null | 1 | 2 | 3 | 5 | 8
 type WorkflowCategory = 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled'

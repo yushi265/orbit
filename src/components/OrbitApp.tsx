@@ -21,14 +21,23 @@ import type {
   IssueRelationTypeViewModel,
   LabelViewModel as Label,
 } from "../shared/view-models";
+import type { ColorTheme } from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
-import { filterCompletedIssues, issueSortOptions, type IssueSort, sortIssues } from "./issue-list";
+import {
+  beforeIssueIdForDrop,
+  beforeIssueIdForMove,
+  filterCompletedIssues,
+  issueSortOptions,
+  type IssueSort,
+  sortIssues,
+} from "./issue-list";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
-import { priorityFromSelection } from "./issue-priority";
+import { priorityFromSelection, priorityIconFor } from "./issue-priority";
+import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { issueDetailPath, projectDetailPath } from "./navigation";
-import { resolveTheme } from "./theme";
+import { colorThemeOptions, resolveTheme } from "./theme";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -45,6 +54,11 @@ type Props = { initialSection?: Section; issueId?: string; projectId?: string; c
 type ToastAction = { label: string; onClick: () => void };
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
+type IssueReorderVariables = {
+  issue: Issue;
+  beforeIssueId: string | null;
+  idempotencyKey: string;
+};
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
 };
@@ -280,16 +294,20 @@ function OrbitAppInner(props: Props) {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const applyTheme = () => {
       const resolved = resolveTheme(data.preferences.theme, media.matches);
+      const colorTheme =
+        colorThemeOptions.find((option) => option.value === data.preferences.colorTheme) ??
+        colorThemeOptions[0];
       document.documentElement.dataset.theme = resolved;
+      document.documentElement.dataset.colorTheme = colorTheme.value;
       document
         .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", resolved === "dark" ? "#11151d" : "#ff725e");
+        ?.setAttribute("content", resolved === "dark" ? "#11151d" : colorTheme.accent);
     };
     applyTheme();
     if (data.preferences.theme !== "system") return;
     media.addEventListener("change", applyTheme);
     return () => media.removeEventListener("change", applyTheme);
-  }, [data?.preferences.theme]);
+  }, [data?.preferences.theme, data?.preferences.colorTheme]);
 
   useEffect(() => {
     const onBeforeInstallPrompt = (event: Event) => {
@@ -528,6 +546,66 @@ function OrbitAppInner(props: Props) {
     },
     onSettled: () => setPendingIssueId(null),
   });
+
+  const reorderIssueMutation = useMutation({
+    mutationFn: ({ issue, beforeIssueId, idempotencyKey: mutationKey }: IssueReorderVariables) =>
+      apiPost<{ issue: Issue }>("/api/v1/issues/reorder", {
+        idempotencyKey: mutationKey,
+        issueId: issue.id,
+        version: issue.version,
+        beforeIssueId,
+      }),
+    onSuccess: async ({ issue }) => {
+      await refresh();
+      showToast("success", `${issue.identifier} の順序を保存しました`);
+    },
+    onError: async (error, variables) => {
+      let retryVariables = variables;
+      if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        const latestIssue = queryClient
+          .getQueryData<BootstrapPayload>(["bootstrap"])
+          ?.issues.find((issue) => issue.id === variables.issue.id);
+        if (latestIssue)
+          retryVariables = {
+            ...variables,
+            issue: latestIssue,
+            idempotencyKey: idempotencyKey(),
+          };
+      }
+      showToast(
+        "error",
+        error instanceof ApiError ? error.message : "Issueの並び替えに失敗しました。",
+        {
+          label: "再試行",
+          onClick: () => reorderIssueMutation.mutate(retryVariables),
+        },
+      );
+    },
+  });
+
+  async function saveColorTheme(
+    colorTheme: ColorTheme,
+    mutationKey = idempotencyKey(),
+  ): Promise<void> {
+    try {
+      const result = await apiPatch<{ preferences: BootstrapPayload["preferences"] }>(
+        "/api/v1/preferences",
+        { idempotencyKey: mutationKey, colorTheme },
+      );
+      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+        current ? { ...current, preferences: result.preferences } : current,
+      );
+      showToast("success", "カラーテーマを変更しました");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof ApiError ? error.message : "カラーテーマの変更に失敗しました。",
+        { label: "再試行", onClick: () => void saveColorTheme(colorTheme, mutationKey) },
+      );
+      throw error;
+    }
+  }
 
   async function navigate(next: Section) {
     setSection(next);
@@ -810,6 +888,7 @@ function OrbitAppInner(props: Props) {
               issueSort={issueSort}
               setIssueSort={setIssueSort}
               projects={projects}
+              allIssues={issues}
               cycles={cycles}
               labels={labels}
               viewMode={viewMode}
@@ -817,7 +896,15 @@ function OrbitAppInner(props: Props) {
               selected={selected}
               setSelected={setSelected}
               pendingIssueId={pendingIssueId}
+              reorderBusy={reorderIssueMutation.isPending}
               onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onReorder={(issue, beforeIssueId) =>
+                reorderIssueMutation.mutate({
+                  issue,
+                  beforeIssueId,
+                  idempotencyKey: idempotencyKey(),
+                })
+              }
               onBulk={bulkUpdateIssues}
               bulkBusy={bulkBusy}
               resetBulkMutation={() => {
@@ -908,6 +995,7 @@ function OrbitAppInner(props: Props) {
                   .then(refresh)
                   .catch(() => showToast("error", "テーマの変更に失敗しました"))
               }
+              onColorTheme={saveColorTheme}
               canInstallPwa={installPrompt !== null}
               onInstallPwa={() => void installPwa()}
             />
@@ -1279,6 +1367,7 @@ function IssuesView({
   issueSort,
   setIssueSort,
   projects,
+  allIssues,
   cycles,
   labels,
   viewMode,
@@ -1286,7 +1375,9 @@ function IssuesView({
   selected,
   setSelected,
   pendingIssueId,
+  reorderBusy,
   onUpdate,
+  onReorder,
   onBulk,
   bulkBusy,
   resetBulkMutation,
@@ -1306,6 +1397,7 @@ function IssuesView({
   issueSort: IssueSort;
   setIssueSort: (value: IssueSort) => void;
   projects: Project[];
+  allIssues: Issue[];
   cycles: Cycle[];
   labels: Label[];
   viewMode: "list" | "board";
@@ -1313,7 +1405,9 @@ function IssuesView({
   selected: string[];
   setSelected: (value: string[]) => void;
   pendingIssueId: string | null;
+  reorderBusy: boolean;
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
+  onReorder: (issue: Issue, beforeIssueId: string | null) => void;
   onBulk: (patch: Record<string, unknown>) => Promise<void>;
   bulkBusy: boolean;
   resetBulkMutation: () => void;
@@ -1325,6 +1419,10 @@ function IssuesView({
   );
   const [bulkValue, setBulkValue] = useState("");
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [draggedIssueId, setDraggedIssueId] = useState<string | null>(null);
+  const [dropTargetIssueId, setDropTargetIssueId] = useState<string | null>(null);
+  const manualOrder = issueSort === "manual";
+  const orderedIssues = sortIssues(allIssues, "manual", workflowStates);
   const grouped = workflowStates
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
     .filter((group) => group.issues.length > 0);
@@ -1333,12 +1431,33 @@ function IssuesView({
     priorityFilter !== "all" ||
     labelFilter !== "all" ||
     !showCompleted;
-
   function clearIssueFilters() {
     setFilterText("");
     setPriorityFilter("all");
     setLabelFilter("all");
     setShowCompleted(true);
+  }
+
+  function dropIssue(dropTargetId: string) {
+    const draggedId = draggedIssueId;
+    setDraggedIssueId(null);
+    setDropTargetIssueId(null);
+    if (!manualOrder || !draggedId || draggedId === dropTargetId || reorderBusy) return;
+    const draggedIssue = issues.find((issue) => issue.id === draggedId);
+    if (!draggedIssue) return;
+    onReorder(draggedIssue, beforeIssueIdForDrop(orderedIssues, draggedId, dropTargetId));
+  }
+
+  function moveIssue(issue: Issue, direction: "up" | "down") {
+    if (!manualOrder || reorderBusy) return;
+    const index = issues.findIndex((item) => item.id === issue.id);
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return;
+    const beforeIssueId =
+      allIssues.length === issues.length
+        ? beforeIssueIdForMove(orderedIssues, issue.id, direction)
+        : beforeIssueIdForDrop(orderedIssues, issue.id, issues[targetIndex].id);
+    onReorder(issue, beforeIssueId);
   }
 
   return (
@@ -1422,6 +1541,9 @@ function IssuesView({
           ▦ Board
         </button>
       </div>
+      {manualOrder && viewMode === "list" && (
+        <p className="manual-order-hint">Issueをドラッグするか、↑↓ボタンで並び替えます。</p>
+      )}
       {selected.length > 0 && (
         <div className="bulk-bar" role="region" aria-label="Issue一括操作">
           <strong>{selected.length}件選択中</strong>
@@ -1595,8 +1717,9 @@ function IssuesView({
           )}
         </div>
       ) : (
-        <div className="issue-table">
+        <div className={`issue-table ${manualOrder ? "manual-order" : ""}`}>
           <div className="table-header">
+            {manualOrder && <span className="reorder-cell">MOVE</span>}
             <span className="check-cell">
               <input
                 type="checkbox"
@@ -1635,6 +1758,18 @@ function IssuesView({
               onUpdate={onUpdate}
               labels={labels}
               projects={projects}
+              manualOrder={manualOrder}
+              dragging={draggedIssueId === issue.id}
+              dropTarget={dropTargetIssueId === issue.id}
+              onDragStart={() => setDraggedIssueId(issue.id)}
+              onDragEnd={() => {
+                setDraggedIssueId(null);
+                setDropTargetIssueId(null);
+              }}
+              onDragOver={() => setDropTargetIssueId(issue.id)}
+              onDrop={() => dropIssue(issue.id)}
+              onMove={(direction) => moveIssue(issue, direction)}
+              reorderBusy={reorderBusy}
             />
           ))}
           {issues.length === 0 && (
@@ -1656,6 +1791,33 @@ function IssuesView({
   );
 }
 
+function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
+  const icon = priorityIconFor(priority);
+  const barCount = icon.name === "low" ? 1 : icon.name === "medium" ? 2 : 3;
+  return (
+    <span
+      className={`priority-icon ${icon.name}`}
+      role="img"
+      aria-label={icon.label}
+      title={icon.label}
+    >
+      {icon.name === "none" ? (
+        <span aria-hidden="true" className="priority-none-mark" />
+      ) : icon.name === "urgent" ? (
+        <span aria-hidden="true" className="priority-urgent-mark">
+          ✦
+        </span>
+      ) : (
+        <span aria-hidden="true" className="priority-bars">
+          {Array.from({ length: barCount }, (_, index) => (
+            <span key={index} />
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function IssueRow({
   issue,
   state,
@@ -1668,6 +1830,15 @@ function IssueRow({
   onClick,
   onUpdate,
   projects = [],
+  manualOrder = false,
+  dragging = false,
+  dropTarget = false,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onMove,
+  reorderBusy = false,
 }: {
   issue: Issue;
   state?: WorkflowState;
@@ -1680,9 +1851,72 @@ function IssueRow({
   onClick?: (trigger: HTMLButtonElement) => void;
   onUpdate?: (issue: Issue, patch: Partial<Issue>) => void;
   projects?: Project[];
+  manualOrder?: boolean;
+  dragging?: boolean;
+  dropTarget?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onDragOver?: () => void;
+  onDrop?: () => void;
+  onMove?: (direction: "up" | "down") => void;
+  reorderBusy?: boolean;
 }) {
   return (
-    <div className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""}`}>
+    <div
+      className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
+      draggable={manualOrder && !pending && !reorderBusy}
+      onDragStart={
+        manualOrder
+          ? (event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", issue.id);
+              onDragStart?.();
+            }
+          : undefined
+      }
+      onDragEnd={manualOrder ? onDragEnd : undefined}
+      onDragOver={
+        manualOrder
+          ? (event) => {
+              event.preventDefault();
+              onDragOver?.();
+            }
+          : undefined
+      }
+      onDrop={
+        manualOrder
+          ? (event) => {
+              event.preventDefault();
+              onDrop?.();
+            }
+          : undefined
+      }
+    >
+      {manualOrder && (
+        <span className="reorder-cell">
+          <span className="drag-handle" aria-hidden="true">
+            ⠿
+          </span>
+          <button
+            type="button"
+            className="reorder-button"
+            aria-label={`${issue.identifier}を上へ移動`}
+            disabled={pending || reorderBusy}
+            onClick={() => onMove?.("up")}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="reorder-button"
+            aria-label={`${issue.identifier}を下へ移動`}
+            disabled={pending || reorderBusy}
+            onClick={() => onMove?.("down")}
+          >
+            ↓
+          </button>
+        </span>
+      )}
       <span className="check-cell">
         {onSelect && (
           <input
@@ -1735,24 +1969,26 @@ function IssueRow({
       </span>
       <span className="priority-cell">
         {onUpdate && !compact ? (
-          <select
-            aria-label={`${issue.identifier}のPriority`}
-            value={issue.priority}
-            disabled={pending}
-            onChange={(event) =>
-              onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
-            }
-          >
-            {Object.entries(priorityLabel).map(([value, label]) => (
-              <option value={value} key={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className={`priority-badge ${priorityTone[issue.priority]}`}>
-            {priorityLabel[issue.priority]}
+          <span className="priority-control">
+            <PriorityIcon priority={issue.priority} />
+            <select
+              className="priority-icon-select"
+              aria-label={`${issue.identifier}のPriority`}
+              value={issue.priority}
+              disabled={pending}
+              onChange={(event) =>
+                onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
+              }
+            >
+              {Object.entries(priorityLabel).map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </span>
+        ) : (
+          <PriorityIcon priority={issue.priority} />
         )}
       </span>
       <span className="project-cell">
@@ -3099,6 +3335,7 @@ function SettingsView({
   onRun,
   onResume,
   onTheme,
+  onColorTheme,
   canInstallPwa,
   onInstallPwa,
 }: {
@@ -3110,10 +3347,13 @@ function SettingsView({
   onRun: () => void;
   onResume: () => void;
   onTheme: (theme: "light" | "dark" | "system") => void;
+  onColorTheme: (colorTheme: ColorTheme, mutationKey: string) => Promise<void>;
   canInstallPwa: boolean;
   onInstallPwa: () => void;
 }) {
   const [themeDraft, setThemeDraft] = useState(preferences.theme);
+  const [colorThemeDraft, setColorThemeDraft] = useState(preferences.colorTheme);
+  const [colorThemeSaving, setColorThemeSaving] = useState(false);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -3124,6 +3364,7 @@ function SettingsView({
   const [labelErrorAction, setLabelErrorAction] = useState<"save" | "delete" | null>(null);
 
   useEffect(() => setThemeDraft(preferences.theme), [preferences.theme]);
+  useEffect(() => setColorThemeDraft(preferences.colorTheme), [preferences.colorTheme]);
 
   function startLabelEdit(label: BootstrapPayload["labels"][number]) {
     labelMutationKeyRef.current = null;
@@ -3243,6 +3484,42 @@ function SettingsView({
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>Color theme</strong>
+              <span>アクセントカラー</span>
+            </div>
+            <span className="color-theme-control">
+              <span
+                className="color-theme-swatch"
+                aria-hidden="true"
+                style={{
+                  background: colorThemeOptions.find((option) => option.value === colorThemeDraft)
+                    ?.accent,
+                }}
+              />
+              <select
+                aria-label="カラーテーマ"
+                value={colorThemeDraft}
+                disabled={colorThemeSaving}
+                onChange={(event) => {
+                  const nextColorTheme = event.target.value as ColorTheme;
+                  const previousColorTheme = colorThemeDraft;
+                  setColorThemeDraft(nextColorTheme);
+                  setColorThemeSaving(true);
+                  void onColorTheme(nextColorTheme, idempotencyKey())
+                    .catch(() => setColorThemeDraft(previousColorTheme))
+                    .finally(() => setColorThemeSaving(false));
+                }}
+              >
+                {colorThemeOptions.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </span>
           </div>
           <div className="setting-row">
             <div>
@@ -4171,9 +4448,17 @@ function IssueComposer({
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (
+                  shouldSubmitIssueOnEnter({
+                    key: event.key,
+                    shiftKey: event.shiftKey,
+                    isComposing: event.nativeEvent.isComposing,
+                    keyCode: event.keyCode,
+                    busy,
+                  })
+                ) {
                   event.preventDefault();
-                  if (title.trim()) onSubmit();
+                  if (hasIssueTitle(title)) onSubmit();
                 }
               }}
               placeholder="何を進めますか？"

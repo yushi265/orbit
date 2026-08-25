@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const localeValues = ["ja", "en"] as const;
 export const themeValues = ["light", "dark", "system"] as const;
+export const colorThemeValues = ["coral", "ocean", "violet", "forest", "amber"] as const;
 export const priorityValues = ["no_priority", "low", "medium", "high", "urgent"] as const;
 export const workflowCategoryValues = [
   "backlog",
@@ -31,6 +32,7 @@ export const stepStatusValues = ["pending", "running", "succeeded", "failed", "s
 
 export const localeSchema = z.enum(localeValues);
 export const themeSchema = z.enum(themeValues);
+export const colorThemeSchema = z.enum(colorThemeValues);
 export const prioritySchema = z.enum(priorityValues);
 export const workflowCategorySchema = z.enum(workflowCategoryValues);
 export const projectStatusCategorySchema = z.enum(projectStatusCategoryValues);
@@ -50,6 +52,7 @@ export const estimateSchema = z.union([
 export const estimateValues = [null, 1, 2, 3, 5, 8] as const;
 export const LOCALE_VALUES = localeValues;
 export const THEME_VALUES = themeValues;
+export const COLOR_THEME_VALUES = colorThemeValues;
 export const PRIORITY_VALUES = priorityValues;
 export const ESTIMATE_VALUES = estimateValues;
 export const WORKFLOW_CATEGORY_VALUES = workflowCategoryValues;
@@ -63,6 +66,7 @@ export const RUN_STEP_COUNT = MAINTENANCE_RUN_STEPS.length;
 
 export type Locale = z.infer<typeof localeSchema>;
 export type Theme = z.infer<typeof themeSchema>;
+export type ColorTheme = z.infer<typeof colorThemeSchema>;
 export type Priority = z.infer<typeof prioritySchema>;
 export type WorkflowCategory = z.infer<typeof workflowCategorySchema>;
 export type ProjectStatusCategory = z.infer<typeof projectStatusCategorySchema>;
@@ -75,6 +79,7 @@ export type Estimate = z.infer<typeof estimateSchema>;
 // 短い既存コードからも wire value を参照できるよう、値配列の別名を公開する。
 export const locales = localeValues;
 export const themes = themeValues;
+export const colorThemes = colorThemeValues;
 export const priorities = priorityValues;
 export const workflowCategories = workflowCategoryValues;
 export const projectStatusCategories = projectStatusCategoryValues;
@@ -85,6 +90,7 @@ export const stepStatuses = stepStatusValues;
 
 export const LocaleSchema = localeSchema;
 export const ThemeSchema = themeSchema;
+export const ColorThemeSchema = colorThemeSchema;
 export const PrioritySchema = prioritySchema;
 export const WorkflowCategorySchema = workflowCategorySchema;
 export const ProjectStatusCategorySchema = projectStatusCategorySchema;

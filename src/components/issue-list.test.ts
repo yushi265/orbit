@@ -3,7 +3,13 @@ import type {
   IssueViewModel as Issue,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
-import { filterCompletedIssues, issueSortOptions, sortIssues } from "./issue-list";
+import {
+  beforeIssueIdForDrop,
+  beforeIssueIdForMove,
+  filterCompletedIssues,
+  issueSortOptions,
+  sortIssues,
+} from "./issue-list";
 
 const workflowStates: WorkflowState[] = [
   {
@@ -110,6 +116,7 @@ describe("Issue list controls", () => {
     ];
 
     expect(issueSortOptions.map((option) => option.value)).toEqual([
+      "manual",
       "updated_desc",
       "created_desc",
       "title_asc",
@@ -147,6 +154,54 @@ describe("Issue list controls", () => {
       "medium",
       "urgent",
     ]);
+  });
+
+  it("[代表値] manual orderのdrop先からbeforeIssueIdを導出する", () => {
+    const ordered = [issue({ id: "one" }), issue({ id: "two" }), issue({ id: "three" })];
+
+    expect(beforeIssueIdForDrop(ordered, "three", "one")).toBe("one");
+    expect(beforeIssueIdForDrop(ordered, "one", "three")).toBeNull();
+    expect(beforeIssueIdForDrop(ordered, "two", "two")).toBeNull();
+  });
+
+  it("[境界値] manual orderの上下移動は先頭・末尾でNo-opになる", () => {
+    const ordered = [issue({ id: "one" }), issue({ id: "two" }), issue({ id: "three" })];
+
+    expect(beforeIssueIdForDrop(ordered, "one", "one")).toBeNull();
+    expect(beforeIssueIdForDrop(ordered, "three", "three")).toBeNull();
+    expect(beforeIssueIdForMove(ordered, "one", "up")).toBeNull();
+    expect(beforeIssueIdForMove(ordered, "three", "down")).toBeNull();
+  });
+
+  it("[代表値] manual orderのKeyboard移動は隣接Issueの前後へ挿入する", () => {
+    const ordered = [issue({ id: "one" }), issue({ id: "two" }), issue({ id: "three" })];
+
+    expect(beforeIssueIdForMove(ordered, "two", "up")).toBe("one");
+    expect(beforeIssueIdForMove(ordered, "one", "down")).toBe("three");
+  });
+
+  it("[代表値] ListとBoardで共有するmanual Orderはposition順になる", () => {
+    const ordered = [
+      issue({ id: "later", position: 2 }),
+      issue({ id: "first", position: 0 }),
+      issue({ id: "middle", position: 1 }),
+    ];
+
+    expect(sortIssues(ordered, "manual").map((item) => item.id)).toEqual([
+      "first",
+      "middle",
+      "later",
+    ]);
+  });
+
+  it("[代表値] filtered Listのdrop先はhidden Issueを含む全active順から導出する", () => {
+    const allIssues = [
+      issue({ id: "dragged", position: 0 }),
+      issue({ id: "target", position: 1 }),
+      issue({ id: "hidden", position: 2 }),
+    ];
+
+    expect(beforeIssueIdForDrop(allIssues, "dragged", "target")).toBe("hidden");
   });
 
   it("uses identifier as a stable tie breaker", () => {

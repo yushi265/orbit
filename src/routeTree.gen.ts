@@ -32,6 +32,7 @@ import { Route as ApiV1CyclesCycleIdRouteImport } from './routes/api/v1/cycles/$
 import { Route as ApiV1IssuesIndexRouteImport } from './routes/api/v1/issues/index'
 import { Route as ApiV1IssuesIssueIdRouteImport } from './routes/api/v1/issues/$issueId'
 import { Route as ApiV1IssuesBulkRouteImport } from './routes/api/v1/issues/bulk'
+import { Route as ApiV1IssuesReorderRouteImport } from './routes/api/v1/issues/reorder'
 import { Route as ApiV1LabelsIndexRouteImport } from './routes/api/v1/labels/index'
 import { Route as ApiV1LabelsLabelIdRouteImport } from './routes/api/v1/labels/$labelId'
 import { Route as ApiV1NotificationsIndexRouteImport } from './routes/api/v1/notifications/index'
@@ -166,6 +167,11 @@ const ApiV1IssuesBulkRoute = ApiV1IssuesBulkRouteImport.update({
   path: '/api/v1/issues/bulk',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1IssuesReorderRoute = ApiV1IssuesReorderRouteImport.update({
+  id: '/api/v1/issues/reorder',
+  path: '/api/v1/issues/reorder',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1LabelsIndexRoute = ApiV1LabelsIndexRouteImport.update({
   id: '/api/v1/labels/',
   path: '/api/v1/labels/',
@@ -269,6 +275,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRouteWithChildren
   '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/issues/bulk': typeof ApiV1IssuesBulkRoute
+  '/api/v1/issues/reorder': typeof ApiV1IssuesReorderRoute
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
@@ -309,6 +316,7 @@ export interface FileRoutesByTo {
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRouteWithChildren
   '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/issues/bulk': typeof ApiV1IssuesBulkRoute
+  '/api/v1/issues/reorder': typeof ApiV1IssuesReorderRoute
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
@@ -350,6 +358,7 @@ export interface FileRoutesById {
   '/api/v1/cycles/$cycleId': typeof ApiV1CyclesCycleIdRouteWithChildren
   '/api/v1/issues/$issueId': typeof ApiV1IssuesIssueIdRouteWithChildren
   '/api/v1/issues/bulk': typeof ApiV1IssuesBulkRoute
+  '/api/v1/issues/reorder': typeof ApiV1IssuesReorderRoute
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
@@ -392,6 +401,7 @@ export interface FileRouteTypes {
     | '/api/v1/cycles/$cycleId'
     | '/api/v1/issues/$issueId'
     | '/api/v1/issues/bulk'
+    | '/api/v1/issues/reorder'
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
@@ -432,6 +442,7 @@ export interface FileRouteTypes {
     | '/api/v1/cycles/$cycleId'
     | '/api/v1/issues/$issueId'
     | '/api/v1/issues/bulk'
+    | '/api/v1/issues/reorder'
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
@@ -472,6 +483,7 @@ export interface FileRouteTypes {
     | '/api/v1/cycles/$cycleId'
     | '/api/v1/issues/$issueId'
     | '/api/v1/issues/bulk'
+    | '/api/v1/issues/reorder'
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
@@ -513,6 +525,7 @@ export interface RootRouteChildren {
   ApiV1CyclesCycleIdRoute: typeof ApiV1CyclesCycleIdRouteWithChildren
   ApiV1IssuesIssueIdRoute: typeof ApiV1IssuesIssueIdRouteWithChildren
   ApiV1IssuesBulkRoute: typeof ApiV1IssuesBulkRoute
+  ApiV1IssuesReorderRoute: typeof ApiV1IssuesReorderRoute
   ApiV1LabelsLabelIdRoute: typeof ApiV1LabelsLabelIdRoute
   ApiV1NotificationsNotificationIdRoute: typeof ApiV1NotificationsNotificationIdRoute
   ApiV1ProjectsProjectIdRoute: typeof ApiV1ProjectsProjectIdRoute
@@ -687,6 +700,13 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/issues/bulk'
       fullPath: '/api/v1/issues/bulk'
       preLoaderRoute: typeof ApiV1IssuesBulkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/issues/reorder': {
+      id: '/api/v1/issues/reorder'
+      path: '/api/v1/issues/reorder'
+      fullPath: '/api/v1/issues/reorder'
+      preLoaderRoute: typeof ApiV1IssuesReorderRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/labels/': {
@@ -889,6 +909,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1CyclesCycleIdRoute: ApiV1CyclesCycleIdRouteWithChildren,
   ApiV1IssuesIssueIdRoute: ApiV1IssuesIssueIdRouteWithChildren,
   ApiV1IssuesBulkRoute: ApiV1IssuesBulkRoute,
+  ApiV1IssuesReorderRoute: ApiV1IssuesReorderRoute,
   ApiV1LabelsLabelIdRoute: ApiV1LabelsLabelIdRoute,
   ApiV1NotificationsNotificationIdRoute: ApiV1NotificationsNotificationIdRoute,
   ApiV1ProjectsProjectIdRoute: ApiV1ProjectsProjectIdRoute,

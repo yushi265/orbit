@@ -12,6 +12,8 @@
 - 本番APIは`withOwner`でOwner単位のD1 Snapshot Sessionを開き、成功Response後だけVersion CAS保存する。ローカルはMemory Storeを維持し、本番でD1 Bindingが無い場合はフォールバックしない（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 - Inbox / NotificationはBootstrapの`notifications`と既存`PATCH /api/v1/notifications/:notificationId`を再利用し、strict `NotificationReadMutation`で個別既読・全件既読・Issue / Project / Cycle遷移を行う。通知生成は別スコープとする（参照: `src/components/OrbitApp.tsx`、`src/server/api.ts`、`src/shared/contracts/notifications.ts`）。
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
+- Issue Listの手動順は `POST /api/v1/issues/reorder` の `{ idempotencyKey, issueId, version, beforeIssueId }` で保存し、Boardは共通Orderを表示するがDnDはListに限定する（参照: `src/server/api.ts`、`src/routes/api/v1/issues/reorder.ts`、`src/shared/contracts/issues.ts`）。
+- Preferencesの表示モード`theme`とは別に`colorTheme`（`coral / ocean / violet / forest / amber`）を`PATCH /api/v1/preferences`で保存する（参照: `src/shared/contracts/enums.ts`、`src/db/schema.ts`、`src/components/theme.ts`）。
 
 ## 主要データ構造
 
@@ -29,6 +31,7 @@
 - Issue Priority / Theme / PWA UI: Issue Priorityは既存Issue POST/PATCHへ共有enumを渡し、Themeは`document[data-theme]`へ解決し、PWAはversioned Manifest・Service Worker・`beforeinstallprompt`をSettingsへ集約する。Access保護下ではManifest / SW / アイコンのspecific path Bypassが必要（参照: `src/components/OrbitApp.tsx`、`src/components/issue-priority.ts`、`src/components/theme.ts`、`public/manifest.webmanifest`、`public/sw.js`、`public/_headers`）。
 - Issue controls UI: Issue詳細のStatusは既存Issue PATCHへ`version`と`patch.statusId`を渡し、一覧の完了表示切替・5種のソートは`src/components/issue-list.ts`の純粋関数でList / Boardへ共通適用する（参照: `src/components/OrbitApp.tsx`）。
 - Issue controls follow-up UI: 完了表示は`orbit.issues.showCompleted`へlocalStorage保存し、Issue PATCH成功Toastは`src/components/issue-undo.ts`の逆Patchで「元に戻す」を提供する。ソート選択はIssues toolbarに置き、Status / Priority / Due等の並び替えを`src/components/issue-list.ts`で統一する（参照: `src/components/OrbitApp.tsx`）。
+- Issue experience polish: PriorityはListで`PriorityIcon`へ変換し、IME変換中のEnterは`isComposing` / `keyCode 229`でsubmitを抑止する。ColorThemeは`data-color-theme`とCSS変数へ反映し、旧Snapshotの欠落値はCoralへ補完する（参照: `src/components/issue-priority.ts`、`src/components/issue-composer.ts`、`src/components/OrbitApp.tsx`、`src/server/store.ts`）。
 
 ## 既知の罠
 
@@ -37,7 +40,8 @@
 - `pnpm` はnode_modulesの再構成を非TTYで確認すると停止するため、CI / 自動実行では `.npmrc` の `confirmModulesPurge=false` を使う（参照: `.npmrc`）。
 - Bulkはpatchを1属性に限定し、参照先を全件検証してから適用する。Activity mutation keyはIssueごとにsuffixを付け、全体Receiptとは分離する（参照: `src/shared/contracts/bulk.ts`、`src/server/store.ts`）。
 - SnapshotのVersion CASは既存Snapshotの読み取りではVersionを進めず、成功したMutationまたはSnapshot未作成時の初回成功GETだけがD1行を初期化・更新する。既存Versionとの不一致は`D1_WRITE_CONFLICT`になる（参照: `src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
+- Drizzleの既存`user_preferences`へ列を追加する再作成migrationでは、旧テーブルに存在しない新列をSELECTせず、固定default（今回の`color_theme`は`'coral'`）をSELECTする（参照: `drizzle/0002_known_scarlet_spider.sql`）。
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / 2026-08-25
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / 2026-08-25

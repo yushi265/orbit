@@ -88,7 +88,7 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 | Entity | 主な属性 |
 | --- | --- |
 | users | id, name, email, avatar_url, created_at |
-| user_preferences | user_id, timezone, locale, theme, issue_counter, estimate_enabled, default_issue_display_json |
+| user_preferences | user_id, timezone, locale, theme, color_theme, issue_counter, estimate_enabled, default_issue_display_json |
 | workflow_states | id, user_id, name, category, color, position, is_default |
 | cycles | id, user_id, number, name_override, description_json, starts_at, ends_at, schedule_overridden, status, completed_at, completion_token |
 | cycle_settings | user_id, enabled, duration_weeks, cooldown_weeks, start_weekday, future_count, auto_add_to_current_cycle |

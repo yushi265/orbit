@@ -29,6 +29,12 @@ describe("OrbitStore snapshot persistence", () => {
       title: "Related issue",
       statusId: workflowState.id,
     });
+    store.reorderIssue("owner-1", {
+      idempotencyKey: "reorder-persist-1",
+      issueId: relatedIssue.id,
+      version: relatedIssue.version,
+      beforeIssueId: issue.id,
+    });
     store.createIssueNote("owner-1", issue.id, {
       idempotencyKey: "note-1",
       body: "Persisted note",
@@ -99,6 +105,46 @@ describe("OrbitStore snapshot persistence", () => {
 
     expect(restored.toSnapshot()).toEqual(snapshot);
     expect(restored.users.size).toBe(0);
+  });
+
+  it("[状態遷移] 旧SnapshotでcolorThemeが欠落していてもCoralを補完する", () => {
+    const store = new OrbitStore(() => 1_700_000_000_000);
+    store.ensureOwner("owner-legacy", "legacy@example.com");
+    const legacy = JSON.parse(JSON.stringify(store.toSnapshot())) as {
+      preferences: Array<Record<string, unknown>>;
+    };
+    delete legacy.preferences[0].colorTheme;
+
+    const restored = OrbitStore.fromSnapshot(legacy, () => 1_700_000_000_001, "owner-legacy");
+
+    expect(restored.bootstrap("owner-legacy").preferences.colorTheme).toBe("coral");
+  });
+
+  it("[境界値] 不正なcolorThemeを含むSnapshotは復元を拒否する", () => {
+    const store = new OrbitStore(() => 1_700_000_000_000);
+    store.ensureOwner("owner-invalid-theme", "invalid-theme@example.com");
+    const invalid = JSON.parse(JSON.stringify(store.toSnapshot())) as {
+      preferences: Array<Record<string, unknown>>;
+    };
+    invalid.preferences[0].colorTheme = "sepia";
+
+    expect(() => OrbitStore.fromSnapshot(invalid, undefined, "owner-invalid-theme")).toThrow(
+      "Invalid OrbitStore snapshot",
+    );
+  });
+
+  it("[代表値] Coral以外のcolorThemeもSnapshotへ保存・復元できる", () => {
+    const store = new OrbitStore(() => 1_700_000_000_000);
+    store.ensureOwner("owner-ocean", "ocean@example.com");
+    store.updatePreferences("owner-ocean", { colorTheme: "ocean" }, "theme-ocean");
+
+    const restored = OrbitStore.fromSnapshot(
+      JSON.parse(JSON.stringify(store.toSnapshot())),
+      undefined,
+      "owner-ocean",
+    );
+
+    expect(restored.bootstrap("owner-ocean").preferences.colorTheme).toBe("ocean");
   });
 
   it("rejects a malformed snapshot without creating partial state", () => {

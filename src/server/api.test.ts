@@ -19,6 +19,7 @@ import {
   updateIssueNote,
   updateIssue,
   updatePreferences,
+  reorderIssue,
   updateProject,
   updateView,
 } from "./api";
@@ -201,6 +202,243 @@ describe("HTTP service boundary", () => {
       }),
     );
     expect(invalid.status).toBe(400);
+  });
+
+  it("[代表値] Reorder APIでListのmanual orderを保存し、PreferencesのcolorThemeを再取得できる", async () => {
+    const first = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "api-reorder-create-1",
+        title: "一番目",
+      }),
+    );
+    const second = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "api-reorder-create-2",
+        title: "二番目",
+      }),
+    );
+    const firstIssue = (await body<{ issue: { id: string } }>(first)).issue;
+    const secondIssue = (await body<{ issue: { id: string; version: number } }>(second)).issue;
+    const reordered = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+        idempotencyKey: "api-reorder-1",
+        issueId: secondIssue.id,
+        version: secondIssue.version,
+        beforeIssueId: firstIssue.id,
+      }),
+    );
+    expect(reordered.status).toBe(200);
+    const reorderedIssue = (await body<{ issue: { id: string; version: number } }>(reordered))
+      .issue;
+    expect(reorderedIssue.version).toBeGreaterThan(secondIssue.version);
+    const reloaded = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const reloadedIssues = (await body<{ issues: Array<{ id: string }> }>(reloaded)).issues;
+    expect(reloadedIssues.findIndex((item) => item.id === secondIssue.id)).toBeLessThan(
+      reloadedIssues.findIndex((item) => item.id === firstIssue.id),
+    );
+
+    const moveToEndPayload = {
+      idempotencyKey: "api-reorder-end",
+      issueId: reorderedIssue.id,
+      version: reorderedIssue.version,
+      beforeIssueId: null,
+    };
+    const movedToEnd = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", moveToEndPayload),
+    );
+    expect(movedToEnd.status).toBe(200);
+    const replayedToEnd = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", moveToEndPayload),
+    );
+    expect(replayedToEnd.status).toBe(200);
+    expect(await body(replayedToEnd)).toEqual(await body(movedToEnd));
+    const reusedKey = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+        ...moveToEndPayload,
+        beforeIssueId: firstIssue.id,
+      }),
+    );
+    expect(reusedKey.status).toBe(409);
+    const endReload = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const endIssues = (await body<{ issues: Array<{ id: string }> }>(endReload)).issues;
+    expect(endIssues.findIndex((item) => item.id === firstIssue.id)).toBeLessThan(
+      endIssues.findIndex((item) => item.id === secondIssue.id),
+    );
+
+    for (const [index, colorTheme] of ["coral", "ocean", "violet", "forest", "amber"].entries()) {
+      const theme = await updatePreferences(
+        mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+          idempotencyKey: `preferences-color-theme-${index}`,
+          colorTheme,
+        }),
+      );
+      expect(theme.status).toBe(200);
+      expect(
+        (await body<{ preferences: { colorTheme: string } }>(theme)).preferences.colorTheme,
+      ).toBe(colorTheme);
+    }
+    const reloadedPreferences = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(
+      (await body<{ preferences: { colorTheme: string } }>(reloadedPreferences)).preferences
+        .colorTheme,
+    ).toBe("amber");
+    const invalidTheme = await updatePreferences(
+      mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+        idempotencyKey: "preferences-color-theme-invalid",
+        colorTheme: "sepia",
+      }),
+    );
+    expect(invalidTheme.status).toBe(400);
+  });
+
+  it("[デシジョンテーブル] Reorder APIのversion / target / lock境界をErrorEnvelopeへ変換する", async () => {
+    const first = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "reorder-boundary-create-a",
+        title: "一番目",
+      }),
+    );
+    const second = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "reorder-boundary-create-b",
+        title: "二番目",
+      }),
+    );
+    const firstIssue = (await body<{ issue: { id: string } }>(first)).issue;
+    const secondIssue = (await body<{ issue: { id: string; version: number } }>(second)).issue;
+    const stale = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+        idempotencyKey: "api-reorder-stale",
+        issueId: secondIssue.id,
+        version: 0,
+        beforeIssueId: firstIssue.id,
+      }),
+    );
+    expect(stale.status).toBe(409);
+
+    const missing = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+        idempotencyKey: "api-reorder-missing",
+        issueId: secondIssue.id,
+        version: secondIssue.version,
+        beforeIssueId: "missing-issue",
+      }),
+    );
+    expect(missing.status).toBe(404);
+
+    const emptyTheme = await updatePreferences(
+      mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+        idempotencyKey: "preferences-color-theme-empty",
+        colorTheme: "",
+      }),
+    );
+    expect(emptyTheme.status).toBe(400);
+
+    const ownerStore = getOrbitStore("dev-owner");
+    ownerStore.ensureOwner("foreign-owner", "foreign-owner@example.com");
+    const foreignIssue = ownerStore.createIssue("foreign-owner", {
+      idempotencyKey: "foreign-reorder-issue",
+      title: "外部Issue",
+    });
+    const archived = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "archived-reorder-issue",
+        title: "アーカイブIssue",
+      }),
+    );
+    const archivedIssue = (await body<{ issue: { id: string } }>(archived)).issue;
+    ownerStore.archiveIssue("dev-owner", archivedIssue.id, "archive-reorder-issue");
+    const beforeDestination = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const beforeDestinationOrder = (
+      await body<{ issues: Array<{ id: string }> }>(beforeDestination)
+    ).issues.map((issue) => issue.id);
+    const beforeInvalidReorder = structuredClone(ownerStore.toSnapshot());
+    for (const [index, beforeIssueId] of [foreignIssue.id, archivedIssue.id].entries()) {
+      const invalidDestination = await reorderIssue(
+        mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+          idempotencyKey: `reorder-before-boundary-${index}`,
+          issueId: secondIssue.id,
+          version: secondIssue.version,
+          beforeIssueId,
+        }),
+      );
+      expect(invalidDestination.status).toBe(404);
+      expect((await body<{ error: { code: string } }>(invalidDestination)).error.code).toBe(
+        "RESOURCE_NOT_FOUND",
+      );
+    }
+    const afterDestination = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(
+      (await body<{ issues: Array<{ id: string }> }>(afterDestination)).issues.map(
+        (issue) => issue.id,
+      ),
+    ).toEqual(beforeDestinationOrder);
+    for (const [index, issueId] of [
+      "missing-target",
+      foreignIssue.id,
+      archivedIssue.id,
+    ].entries()) {
+      const missingTarget = await reorderIssue(
+        mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+          idempotencyKey: `reorder-target-boundary-${index}`,
+          issueId,
+          version: 1,
+          beforeIssueId: firstIssue.id,
+        }),
+      );
+      expect(missingTarget.status).toBe(404);
+      expect((await body<{ error: { code: string } }>(missingTarget)).error.code).toBe(
+        "RESOURCE_NOT_FOUND",
+      );
+    }
+    expect(ownerStore.toSnapshot()).toEqual(beforeInvalidReorder);
+
+    const beforeLock = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const beforeLockOrder = (await body<{ issues: Array<{ id: string }> }>(beforeLock)).issues.map(
+      (issue) => issue.id,
+    );
+
+    await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "api-reorder-lock-run",
+      }),
+    );
+    const locked = await reorderIssue(
+      mutation("http://orbit.local/api/v1/issues/reorder", "POST", {
+        idempotencyKey: "api-reorder-locked",
+        issueId: secondIssue.id,
+        version: secondIssue.version,
+        beforeIssueId: firstIssue.id,
+      }),
+    );
+    expect(locked.status).toBe(423);
+    const afterLock = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(
+      (await body<{ issues: Array<{ id: string }> }>(afterLock)).issues.map((issue) => issue.id),
+    ).toEqual(beforeLockOrder);
+  });
+
+  it("[異常系] Preferences Store障害は500 ErrorEnvelopeへ変換し、保存を確定しない", async () => {
+    const store = getOrbitStore("dev-owner");
+    const original = store.updatePreferences;
+    store.updatePreferences = (() => {
+      throw new Error("forced preferences failure");
+    }) as typeof store.updatePreferences;
+
+    try {
+      const response = await updatePreferences(
+        mutation("http://orbit.local/api/v1/preferences", "PATCH", {
+          idempotencyKey: "preferences-forced-failure",
+          colorTheme: "ocean",
+        }),
+      );
+      expect(response.status).toBe(500);
+      expect((await body<{ error: { code: string } }>(response)).error.code).toBe("INTERNAL_ERROR");
+    } finally {
+      store.updatePreferences = original;
+    }
+    expect(store.preferences.get("dev-owner")?.colorTheme).toBe("coral");
   });
 
   it("[契約] Issue version不一致は409 ErrorEnvelopeを返す", async () => {

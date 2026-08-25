@@ -17,6 +17,7 @@ function setup() {
 describe("OrbitStore issue mutations", () => {
   it("[代表値] OwnerスコープでTASK番号を単調採番する", () => {
     const { store } = setup();
+    expect(store.bootstrap("owner").preferences.colorTheme).toBe("coral");
     const first = store.createIssue("owner", {
       idempotencyKey: "create-001",
       title: "最初のIssue",
@@ -191,6 +192,245 @@ describe("OrbitStore issue mutations", () => {
     expect(store.outbox).toHaveLength(outboxCount);
     expect(store.activities.filter((event) => event.entityId === issue.id)).toHaveLength(2);
     expect(store.outbox.filter((event) => event.type === "issue.updated")).toHaveLength(1);
+  });
+
+  it("[代表値] Issueを手動順へ移動するとactive Issueのpositionを再採番する", () => {
+    const { store } = setup();
+    const first = store.createIssue("owner", {
+      idempotencyKey: "reorder-create-1",
+      title: "一番目",
+    });
+    const second = store.createIssue("owner", {
+      idempotencyKey: "reorder-create-2",
+      title: "二番目",
+    });
+    const third = store.createIssue("owner", {
+      idempotencyKey: "reorder-create-3",
+      title: "三番目",
+    });
+
+    const moved = store.reorderIssue("owner", {
+      idempotencyKey: "reorder-1",
+      issueId: third.id,
+      version: third.version,
+      beforeIssueId: first.id,
+    });
+
+    expect(moved.id).toBe(third.id);
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual([
+      third.id,
+      first.id,
+      second.id,
+    ]);
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.position)).toEqual([
+      0, 1, 2,
+    ]);
+  });
+
+  it("[状態遷移/失敗系] Reorderはversion競合・lock・同一Key異なるRequestで部分更新しない", () => {
+    const { store } = setup();
+    const first = store.createIssue("owner", {
+      idempotencyKey: "reorder-create-4",
+      title: "一番目",
+    });
+    const second = store.createIssue("owner", {
+      idempotencyKey: "reorder-create-5",
+      title: "二番目",
+    });
+    const initialOrder = store.listIssues("owner", { order: "manual" }).map((issue) => issue.id);
+    const initialActivities = store.activities.length;
+    const initialOutbox = store.outbox.length;
+    const initialReceipts = store.receipts.size;
+    const state = () => ({
+      order: store.listIssues("owner", { order: "manual" }).map((issue) => issue.id),
+      versions: [first, second].map((issue) => store.issues.get(issue.id)?.version),
+      positions: [first, second].map((issue) => store.issues.get(issue.id)?.position),
+      activities: store.activities.length,
+      outbox: store.outbox.length,
+      receipts: store.receipts.size,
+    });
+    const initialState = state();
+
+    expect(() =>
+      store.reorderIssue("owner", {
+        idempotencyKey: "reorder-stale",
+        issueId: second.id,
+        version: 0,
+        beforeIssueId: first.id,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "ISSUE_VERSION_CONFLICT", status: 409 }));
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual(
+      initialOrder,
+    );
+    expect(state()).toEqual(initialState);
+
+    store.locks.set("owner", {
+      userId: "owner",
+      runId: "run-1",
+      token: "token-1",
+      status: "running",
+      leaseExpiresAt: 1_700_000_030_000,
+    });
+    expect(() =>
+      store.reorderIssue("owner", {
+        idempotencyKey: "reorder-locked",
+        issueId: second.id,
+        version: second.version,
+        beforeIssueId: first.id,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "OPERATION_IN_PROGRESS", status: 423 }));
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual(
+      initialOrder,
+    );
+    expect(state()).toEqual(initialState);
+    store.locks.set("owner", {
+      userId: "owner",
+      runId: null,
+      token: null,
+      status: "idle",
+      leaseExpiresAt: null,
+    });
+
+    const current = store.issues.get(second.id)!;
+    const replayInput = {
+      idempotencyKey: "reorder-replay",
+      issueId: second.id,
+      version: current.version,
+      beforeIssueId: first.id,
+    };
+    const replayed = store.reorderIssue("owner", replayInput);
+    const afterFirstReorder = state();
+    expect(store.reorderIssue("owner", replayInput)).toEqual(replayed);
+    expect(state()).toEqual(afterFirstReorder);
+    const beforeDifferentRequest = state();
+    expect(() => store.reorderIssue("owner", { ...replayInput, beforeIssueId: null })).toThrowError(
+      expect.objectContaining({ code: "IDEMPOTENCY_KEY_REUSED", status: 409 }),
+    );
+    expect(state()).toEqual(beforeDifferentRequest);
+    expect(store.activities.length).toBeGreaterThan(initialActivities);
+    expect(store.outbox.length).toBeGreaterThan(initialOutbox);
+    expect(store.receipts.size).toBeGreaterThan(initialReceipts);
+  });
+
+  it("[境界値] Reorderの末尾移動と同位置移動は順序・versionを安定させる", () => {
+    const { store } = setup();
+    const first = store.createIssue("owner", {
+      idempotencyKey: "reorder-end-1",
+      title: "一番目",
+    });
+    const second = store.createIssue("owner", {
+      idempotencyKey: "reorder-end-2",
+      title: "二番目",
+    });
+    const third = store.createIssue("owner", {
+      idempotencyKey: "reorder-end-3",
+      title: "三番目",
+    });
+
+    const unchanged = store.reorderIssue("owner", {
+      idempotencyKey: "reorder-end-unchanged",
+      issueId: first.id,
+      version: first.version,
+      beforeIssueId: second.id,
+    });
+    expect(unchanged.version).toBe(first.version);
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual([
+      first.id,
+      second.id,
+      third.id,
+    ]);
+
+    const moved = store.reorderIssue("owner", {
+      idempotencyKey: "reorder-end-move",
+      issueId: first.id,
+      version: first.version,
+      beforeIssueId: null,
+    });
+    expect(moved.position).toBe(2);
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual([
+      second.id,
+      third.id,
+      first.id,
+    ]);
+    const stableVersion = store.issues.get(first.id)!.version;
+    const stable = store.reorderIssue("owner", {
+      idempotencyKey: "reorder-end-stable",
+      issueId: first.id,
+      version: stableVersion,
+      beforeIssueId: null,
+    });
+    expect(stable.version).toBe(stableVersion);
+    expect(store.listIssues("owner", { order: "manual" }).map((issue) => issue.id)).toEqual([
+      second.id,
+      third.id,
+      first.id,
+    ]);
+  });
+
+  it("[デシジョンテーブル] Reorderの不存在・Owner外移動先を拒否する", () => {
+    const { store } = setup();
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "reorder-boundary-1",
+      title: "対象",
+    });
+    store.ensureOwner("other-owner", "other@example.com");
+    const foreign = store.createIssue("other-owner", {
+      idempotencyKey: "reorder-boundary-2",
+      title: "外部対象",
+    });
+
+    for (const beforeIssueId of ["missing", foreign.id]) {
+      expect(() =>
+        store.reorderIssue("owner", {
+          idempotencyKey: `reorder-boundary-${beforeIssueId}`,
+          issueId: issue.id,
+          version: issue.version,
+          beforeIssueId,
+        }),
+      ).toThrowError(expect.objectContaining({ code: "RESOURCE_NOT_FOUND", status: 404 }));
+    }
+
+    expect(() =>
+      store.reorderIssue("owner", {
+        idempotencyKey: "reorder-self-target",
+        issueId: issue.id,
+        version: issue.version,
+        beforeIssueId: issue.id,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }));
+
+    const archived = store.createIssue("owner", {
+      idempotencyKey: "reorder-archived-create",
+      title: "アーカイブ済み移動先",
+    });
+    store.archiveIssue("owner", archived.id, "reorder-archived");
+    expect(() =>
+      store.reorderIssue("owner", {
+        idempotencyKey: "reorder-archived-target",
+        issueId: issue.id,
+        version: issue.version,
+        beforeIssueId: archived.id,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "RESOURCE_NOT_FOUND", status: 404 }));
+
+    expect(() =>
+      store.reorderIssue("owner", {
+        idempotencyKey: "reorder-missing-target",
+        issueId: "missing-target",
+        version: 1,
+        beforeIssueId: issue.id,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "RESOURCE_NOT_FOUND", status: 404 }));
+  });
+
+  it("[同値分割] falsyなcolorThemeも保存せず400にする", () => {
+    const { store } = setup();
+    for (const [index, colorTheme] of ["", null, false, 0].entries()) {
+      expect(() =>
+        store.updatePreferences("owner", { colorTheme } as never, `invalid-color-theme-${index}`),
+      ).toThrowError(expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }));
+    }
+    expect(store.preferences.get("owner")?.colorTheme).toBe("coral");
   });
 
   it("[状態遷移] Issueをゴミ箱へ移動し、同じKeyの再送をNo-opにする", () => {

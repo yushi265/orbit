@@ -6,6 +6,7 @@ import {
   RUN_STEP_VALUES,
   WORKFLOW_CATEGORY_VALUES,
   type CycleStatus,
+  type ColorTheme,
   type Priority,
   type ProjectStatusCategory,
   type RunStatus,
@@ -24,6 +25,7 @@ export type { CycleStatus, Priority, ProjectStatusCategory, RunStatus, RunStep, 
 export type Estimate = null | 1 | 2 | 3 | 5 | 8;
 export type Locale = "ja" | "en";
 export type Theme = "light" | "dark" | "system";
+export type { ColorTheme };
 
 export interface User {
   id: string;
@@ -38,6 +40,7 @@ export interface Preferences {
   timezone: string;
   locale: Locale;
   theme: Theme;
+  colorTheme: ColorTheme;
   estimateEnabled: boolean;
   issueCounter: number;
 }

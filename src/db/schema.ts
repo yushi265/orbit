@@ -31,6 +31,7 @@ export const userPreferences = sqliteTable(
     timezone: text("timezone").notNull(),
     locale: text("locale").notNull().default("ja"),
     theme: text("theme").notNull().default("system"),
+    colorTheme: text("color_theme").notNull().default("coral"),
     issueCounter: integer("issue_counter", { mode: "number" }).notNull().default(0),
     estimateEnabled: integer("estimate_enabled", { mode: "boolean" }).notNull().default(true),
     defaultIssueDisplayJson: text("default_issue_display_json").notNull().default("{}"),
@@ -38,6 +39,10 @@ export const userPreferences = sqliteTable(
   (table) => [
     check("user_preferences_locale_check", sql`${table.locale} IN ('ja', 'en')`),
     check("user_preferences_theme_check", sql`${table.theme} IN ('light', 'dark', 'system')`),
+    check(
+      "user_preferences_color_theme_check",
+      sql`${table.colorTheme} IN ('coral', 'ocean', 'violet', 'forest', 'amber')`,
+    ),
     check("user_preferences_issue_counter_check", sql`${table.issueCounter} >= 0`),
   ],
 );

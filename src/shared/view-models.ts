@@ -1,5 +1,6 @@
 import type {
   CycleStatus,
+  ColorTheme,
   Estimate,
   Locale,
   Priority,
@@ -20,6 +21,7 @@ export interface PreferencesViewModel {
   timezone: string;
   locale: Locale;
   theme: Theme;
+  colorTheme: ColorTheme;
   estimateEnabled: boolean;
   issueCounter: number;
 }

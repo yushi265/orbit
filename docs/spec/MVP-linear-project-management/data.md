@@ -34,7 +34,7 @@
 | Table | 主な列・型 | 制約 / Index / 境界 |
 |---|---|---|
 | `users` | `id`, `name`, `email`, `avatar_url`, `created_at` | `id` PK、`email` は Owner 解決用に一意。MVP は唯一 Owner の 1 行を Bootstrap する。 |
-| `user_preferences` | `user_id`, `timezone`, `locale`, `theme`, `issue_counter`, `estimate_enabled`, `default_issue_display_json` | `user_id` PK / FK。`locale` は `ja / en`、`theme` は `light / dark / system`。Issue 採番カウンタは同一 Owner 行で更新する。 |
+| `user_preferences` | `user_id`, `timezone`, `locale`, `theme`, `color_theme`, `issue_counter`, `estimate_enabled`, `default_issue_display_json` | `user_id` PK / FK。`locale` は `ja / en`、`theme` は `light / dark / system`、`color_theme` は `coral / ocean / violet / forest / amber`。Issue 採番カウンタは同一 Owner 行で更新する。 |
 | `workflow_states` | `id`, `user_id`, `name`, `category`, `color`, `position`, `is_default` | `category` は `Backlog / Unstarted / Started / Completed / Canceled`。Owner ごとに `is_default = true` を部分 Unique。 |
 | `cycle_settings` | `user_id`, `enabled`, `duration_weeks`, `cooldown_weeks`, `start_weekday`, `future_count`, `auto_add_to_current_cycle` | `user_id` PK / FK。期間 `1..8`、Cooldown `0..4`、将来数 `1..15`、曜日 `0..6`。 |
 | `cycles` | `id`, `user_id`, `number`, `name_override`, `description_json`, `starts_at`, `ends_at`, `schedule_overridden`, `status`, `completed_at`, `completion_token` | `(user_id, number)` Unique。`status` は `upcoming / active / completed`。過去 Cycle の日付変更を Repository で拒否する。 |

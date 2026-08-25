@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COLOR_THEME_VALUES,
   CYCLE_STATUS_VALUES,
   ESTIMATE_VALUES,
   LOCALE_VALUES,
@@ -12,6 +13,7 @@ import {
   THEME_VALUES,
   WORKFLOW_CATEGORY_VALUES,
   cycleStatusSchema,
+  colorThemeSchema,
   estimateSchema,
   localeSchema,
   prioritySchema,
@@ -28,7 +30,12 @@ import {
   errorCodeSchema,
   httpStatusForErrorCode,
 } from "./errors";
-import { createIssueInputSchema, issueQuerySchema, updateIssueInputSchema } from "./issues";
+import {
+  createIssueInputSchema,
+  issueQuerySchema,
+  reorderIssueInputSchema,
+  updateIssueInputSchema,
+} from "./issues";
 import {
   continueRunInputSchema,
   continueRunResponseSchema,
@@ -45,6 +52,7 @@ import { classifyTransportFailure } from "../transport";
 describe("共有 wire enum", () => {
   it("仕様で固定された wire value だけを受け入れる", () => {
     expect(LOCALE_VALUES).toEqual(["ja", "en"]);
+    expect(COLOR_THEME_VALUES).toEqual(["coral", "ocean", "violet", "forest", "amber"]);
     expect(THEME_VALUES).toEqual(["light", "dark", "system"]);
     expect(PRIORITY_VALUES).toEqual(["no_priority", "low", "medium", "high", "urgent"]);
     expect(ESTIMATE_VALUES).toEqual([null, 1, 2, 3, 5, 8]);
@@ -76,6 +84,8 @@ describe("共有 wire enum", () => {
 
     expect(localeSchema.safeParse("ja").success).toBe(true);
     expect(themeSchema.safeParse("system").success).toBe(true);
+    expect(colorThemeSchema.safeParse("ocean").success).toBe(true);
+    expect(colorThemeSchema.safeParse("sepia").success).toBe(false);
     expect(prioritySchema.safeParse("high").success).toBe(true);
     expect(estimateSchema.safeParse(null).success).toBe(true);
     expect(estimateSchema.safeParse(4).success).toBe(false);
@@ -230,6 +240,32 @@ describe("Issue 契約", () => {
         order: "updated",
         layout: {},
         limit: 50,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("[契約] Reorderはtarget versionとbeforeIssueIdを必須にする", () => {
+    expect(
+      reorderIssueInputSchema.safeParse({
+        idempotencyKey: "reorder-1",
+        issueId: "issue-1",
+        version: 1,
+        beforeIssueId: "issue-2",
+      }).success,
+    ).toBe(true);
+    expect(
+      reorderIssueInputSchema.safeParse({
+        idempotencyKey: "reorder-1",
+        issueId: "issue-1",
+        version: 1,
+        beforeIssueId: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      reorderIssueInputSchema.safeParse({
+        idempotencyKey: "reorder-1",
+        issueId: "issue-1",
+        version: 1,
       }).success,
     ).toBe(false);
   });

@@ -1863,6 +1863,12 @@ function CyclesView({
   const tabCycles = cycles.filter((cycle) => cycleTabForStatus(cycle.status) === tab);
   const selectedCycle =
     tabCycles.find((cycle) => cycle.id === selectedCycleId) ?? tabCycles[0] ?? null;
+  const nextCycle =
+    selectedCycle?.status === "active"
+      ? cycles.find(
+          (cycle) => cycle.status === "upcoming" && cycle.number === selectedCycle.number + 1,
+        )
+      : null;
   const cycleIssues = selectedCycle
     ? issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt)
     : [];
@@ -1983,28 +1989,43 @@ function CyclesView({
           <h1>Cycles</h1>
           <p className="subheading">短い期間に、集中する仕事を選びます。</p>
         </div>
-        <button
-          className="button secondary"
-          onClick={() => {
-            if (!selectedCycle) return;
-            if (selectedCycle.status === "active") onClose(selectedCycle);
-            if (selectedCycle.status === "upcoming")
-              void onStart(selectedCycle).then((started) => {
-                if (started) setTab("current");
-              });
-          }}
-          disabled={
-            closeBusy || startBusy || !selectedCycle || selectedCycle.status === "completed"
-          }
-        >
-          {closeBusy
-            ? "完了処理中…"
-            : startBusy
-              ? "開始中…"
-              : selectedCycle?.status === "upcoming"
-                ? "Cycleを開始"
-                : "Cycleを完了"}
-        </button>
+        <div className="cycle-page-actions">
+          {nextCycle && (
+            <button
+              className="button primary"
+              onClick={() =>
+                void onStart(nextCycle).then((started) => {
+                  if (started) setTab("current");
+                })
+              }
+              disabled={closeBusy || startBusy}
+            >
+              {startBusy ? "開始中…" : "次のCycleを開始"}
+            </button>
+          )}
+          <button
+            className="button secondary"
+            onClick={() => {
+              if (!selectedCycle) return;
+              if (selectedCycle.status === "active") onClose(selectedCycle);
+              if (selectedCycle.status === "upcoming")
+                void onStart(selectedCycle).then((started) => {
+                  if (started) setTab("current");
+                });
+            }}
+            disabled={
+              closeBusy || startBusy || !selectedCycle || selectedCycle.status === "completed"
+            }
+          >
+            {closeBusy
+              ? "完了処理中…"
+              : startBusy
+                ? "開始中…"
+                : selectedCycle?.status === "upcoming"
+                  ? "Cycleを開始"
+                  : "Cycleを完了"}
+          </button>
+        </div>
       </div>
       <div className="cycle-tabs">
         {(["current", "upcoming", "past"] as const).map((value) => (

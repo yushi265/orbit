@@ -1624,6 +1624,27 @@ export class OrbitStore {
       .sort((a, b) => a.startsAt - b.startsAt);
   }
 
+  ensureUpcomingCycles(userId: string): void {
+    const settings = this.cycleSettings.get(userId);
+    if (!settings || settings.futureCount <= 0) return;
+    const ownedCycles = [...this.cycles.values()].filter((cycle) => cycle.userId === userId);
+    const upcoming = ownedCycles
+      .filter((cycle) => cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    if (upcoming.length >= settings.futureCount) return;
+    let previous = ownedCycles
+      .filter((cycle) => cycle.status === "active" || cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number)
+      .at(-1);
+    previous ??= ownedCycles.sort((left, right) => left.number - right.number).at(-1);
+    if (!previous) return;
+    while (upcoming.length < settings.futureCount) {
+      const next = this.createNextCycle(userId, previous);
+      upcoming.push(next);
+      previous = next;
+    }
+  }
+
   updateCycleMetadata(userId: string, cycleId: string, input: UpdateCycleMetadataInput): Cycle {
     this.assertUnlocked(userId);
     const existing = this.checkReceipt<Cycle>(
@@ -1908,6 +1929,7 @@ export class OrbitStore {
 
   bootstrap(userId: string): BootstrapPayload {
     this.assertOwner(userId);
+    this.ensureUpcomingCycles(userId);
     const active = this.currentRun(userId);
     return {
       me: this.users.get(userId)!,

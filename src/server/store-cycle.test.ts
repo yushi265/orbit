@@ -23,6 +23,22 @@ function setup() {
 }
 
 describe("Cycle workspace service", () => {
+  it("[代表値] Bootstrap時にActiveの後続Upcoming Cycleを補充する", () => {
+    const { store } = setup();
+
+    const first = store.bootstrap("owner");
+    const upcoming = first.cycles.filter((cycle) => cycle.status === "upcoming");
+
+    expect(upcoming).toHaveLength(3);
+    expect(upcoming.map((cycle) => cycle.number)).toEqual([2, 3, 4]);
+    expect(upcoming[0].startsAt).toBe(
+      first.cycles.find((cycle) => cycle.status === "active")!.endsAt,
+    );
+    expect(
+      store.bootstrap("owner").cycles.filter((cycle) => cycle.status === "upcoming"),
+    ).toHaveLength(3);
+  });
+
   it("[状態遷移] Cycle metadataを更新し、同じKeyは再利用、異なるRequestは409にする", () => {
     const { store, cycle } = setup();
     const before = {

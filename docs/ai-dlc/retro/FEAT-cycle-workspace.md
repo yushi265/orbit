@@ -18,6 +18,7 @@
 | 5 静的解析 | 11 files / 72 tests、typecheck / lint / format / build / refereeを通過した。 |
 | 6 セルフレビュー | 3観点の最終Must 0。UIはlocal browser smokeをE2E任意の既存方針と突合して受容した。 |
 | 8 成果提示 | Cycle workspaceをmainへコミットし、progress.mdは除去した。 |
+| Follow-up | Active Cycleだけの既存SnapshotではUpcomingがなく、開始導線が存在しなかったため、Bootstrap時の後続Cycle補充とCurrentからの開始導線を追加した。 |
 
 ## 振り返り（KPT）
 

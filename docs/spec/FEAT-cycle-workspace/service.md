@@ -6,6 +6,7 @@
 - **AC-2**: Cycle詳細でnameOverride（nullまたはUnicode 1〜100文字）とdescription（0〜2,000文字）を保存でき、成功時は同じCycleの再表示に反映され、同じidempotencyKeyの再送はNo-op、異なるRequestは409になる。Runtime lock中は423で副作用がない。
 - **AC-3**: Current / Upcoming Cycleの詳細で、Cycle未所属の本人所有Issueを追加し、所属Issueを解除できる。Issue version CAS、Owner境界、Runtime lock、409 / 423の既存契約を維持する。
 - **AC-4**: Cycle詳細にIssue総数、Completed数、進捗率、Canceledを除外したEstimate合計を表示し、Canceled Issueは完了率の分母から除外する。Active Cycleの完了操作は既存の繰越処理を呼び出し、処理中は画面をブロックする。
+- **AC-6**: Active Cycleの後続Upcoming Cycleが不足している場合、Bootstrap成功時にCycleSettings.futureCount（既定3）まで後続Upcomingを補充し、既存Snapshotへ保存する。Current画面から「次のCycleを開始」でそのUpcomingを開始できる。
 
 ## 公開HTTP API
 
@@ -34,3 +35,4 @@
 - [デシジョンテーブル] 404 / 400 / 409 / 423をErrorEnvelopeへ変換する。
 - [状態遷移] Issue cycleIdを未所属→Cycle→nullへ更新し、versionが進む。
 - [状態遷移] Active closeは既存`closeCycle`を呼び、移動対象を次Cycleへ渡す。
+- [状態遷移] Active CycleのみのSnapshotをBootstrap → UpcomingをfutureCount件補充し、次回読み込みでも保持する。

@@ -1,10 +1,10 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { describe, expect, it, vi } from "vitest";
-import { readStoreSnapshot } from "../db/repositories/store-snapshot";
+import { readStoreSnapshot, writeStoreSnapshot } from "../db/repositories/store-snapshot";
 import { ServiceError } from "./errors";
 import { withOwner, json } from "./http";
 import { openStoreSession } from "./store-session";
-import { resetOrbitStores } from "./store";
+import { OrbitStore, resetOrbitStores } from "./store";
 
 class FakeD1 {
   private readonly rows = new Map<
@@ -44,6 +44,48 @@ class FakeD1 {
 }
 
 describe("store session", () => {
+  it("persists Upcoming cycles derived during a successful bootstrap GET", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const seed = new OrbitStore(() => 1_700_000_000_000);
+    seed.ensureOwner("owner-1", "owner@example.com");
+    seed.cycles.set("cycle-1", {
+      id: "cycle-1",
+      userId: "owner-1",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "Active",
+      startsAt: 1_699_000_000_000,
+      endsAt: 1_701_000_000_000,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    await writeStoreSnapshot(database, "owner-1", 0, seed.toSnapshot(), 1_700_000_000_000);
+    const environment = { APP_ENV: "production", DB: database };
+    const resolvedOwner = {
+      userId: "owner-1",
+      email: "owner@example.com",
+      accessAuthenticated: true,
+    };
+
+    const response = await withOwner(
+      new Request("https://orbit.example/api/v1/bootstrap"),
+      async ({ owner }) => json({ cycles: owner.store.bootstrap("owner-1").cycles }),
+      {
+        resolveOwner: async () => resolvedOwner,
+        openStoreSession: (userId, email) => openStoreSession(userId, email, environment),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const persisted = (await readStoreSnapshot(database, "owner-1"))?.snapshot as
+      | { cycles: Array<{ status: string }> }
+      | undefined;
+    expect(persisted?.cycles).toHaveLength(4);
+    expect(persisted?.cycles.filter((cycle) => cycle.status === "upcoming")).toHaveLength(3);
+  });
+
   it("loads and persists the production store through D1", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const environment = { APP_ENV: "production", DB: database };
@@ -79,7 +121,7 @@ describe("store session", () => {
     const third = await openStoreSession("owner-1", "owner@example.com", environment);
     expect(third.store.preferences.get("owner-1")?.timezone).toBe("UTC");
     expect(third.store.cycleSettings.get("owner-1")?.durationWeeks).toBe(3);
-    expect(third.store.listCycles("owner-1")).toHaveLength(1);
+    expect(third.store.listCycles("owner-1")).toHaveLength(4);
   });
 
   it("does not persist a discarded session and rejects stale writers", async () => {

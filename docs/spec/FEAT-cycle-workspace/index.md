@@ -22,6 +22,7 @@
 - [ ] **AC-3**: Current / Upcoming Cycleの詳細で、Cycle未所属の本人所有Issueを追加し、所属Issueを解除できる。Issue version CAS、Owner境界、Runtime lock、409 / 423の既存契約を維持する。
 - [ ] **AC-4**: Cycle詳細にIssue総数、Completed数、進捗率、Canceledを除外したEstimate合計を表示し、Canceled Issueは完了率の分母から除外する。Active Cycleの完了操作は既存の繰越処理を呼び出し、処理中は画面をブロックする。
 - [ ] **AC-5**: Desktop / Tablet / Mobileでタブ、編集、Issue追加・解除、完了操作がPointerとKeyboardで実行でき、390pxで横overflowがなく、Status / Progress / Errorを色だけに依存しない。
+- [x] **AC-6**: Active Cycleの後続Upcoming Cycleが不足している場合、Bootstrap成功時にCycleSettings.futureCount（既定3）まで後続Upcomingを補充し、既存Snapshotへ保存する。Current画面から「次のCycleを開始」でそのUpcomingを開始できる。
 
 ## アーキテクチャ / レイヤー間フロー
 
@@ -54,6 +55,7 @@ Cycles UI
 | AC-3 | Progress and assignment mapper | Issue CAS assignment |
 | AC-4 | Metrics reducer | Cycle detail aggregation / close delegation |
 | AC-5 | — | local browser smoke（E2E自動化は任意） |
+| AC-6 | Upcoming schedule helper | Bootstrap / Snapshot persistence / start transition |
 
 AC-1 / AC-5の画面状態・Keyboard・responsiveは、既存testing ruleの「Browser E2Eは任意」を適用し、local browser smokeを受入証跡とする。React component test runnerは今回追加しない。
 

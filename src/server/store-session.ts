@@ -37,9 +37,12 @@ export async function openStoreSession(
   const store = row ? OrbitStore.fromSnapshot(row.snapshot, undefined, userId) : new OrbitStore();
   const initialSnapshotJson = row ? JSON.stringify(store.toSnapshot()) : null;
   store.ensureOwner(userId, email);
+  store.ensureUpcomingCycles(userId);
   const expectedVersion = row?.version ?? 0;
   let persisted = false;
-  let needsInitialPersist = row === null;
+  let needsInitialPersist =
+    row === null ||
+    (initialSnapshotJson !== null && JSON.stringify(store.toSnapshot()) !== initialSnapshotJson);
 
   return {
     store,

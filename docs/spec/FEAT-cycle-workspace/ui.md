@@ -7,10 +7,12 @@
 - **AC-3**: Current / Upcoming Cycleの詳細で、Cycle未所属の本人所有Issueを追加し、所属Issueを解除できる。Issue version CAS、Owner境界、Runtime lock、409 / 423の既存契約を維持する。
 - **AC-4**: Cycle詳細にIssue総数、Completed数、進捗率、Canceledを除外したEstimate合計を表示し、Canceled Issueは完了率の分母から除外する。Active Cycleの完了操作は既存の繰越処理を呼び出し、処理中は画面をブロックする。
 - **AC-5**: Desktop / Tablet / Mobileでタブ、編集、Issue追加・解除、完了操作がPointerとKeyboardで実行でき、390pxで横overflowがなく、Status / Progress / Errorを色だけに依存しない。
+- **AC-6**: Active Cycleの後続Upcoming Cycleが不足している場合、Bootstrap成功時にCycleSettings.futureCount（既定3）まで後続Upcomingを補充し、既存Snapshotへ保存する。Current画面から「次のCycleを開始」でそのUpcomingを開始できる。
 
 ## UI/UX方針
 
 - Current / Upcoming / PastタブはURL queryではなく画面内状態として保持し、初期値はCurrent。
+- Active Cycleに次Cycleがある場合、Current画面にも「次のCycleを開始」を表示し、Upcomingタブへ移動せずに開始できる。
 - Cycleカードを選ぶと詳細ワークスペースを同画面に表示し、metadata編集はSave / Cancelを持つ。
 - Current / Upcomingでは「Issueを追加」selectと、所属Issueごとの「解除」を表示する。Completedは読み取り専用。
 - Loading / 空 / Error / 保存中 / 成功を明示し、409はBootstrap再取得、423は操作を確定しない。

@@ -468,7 +468,7 @@ describe("HTTP service boundary", () => {
       cycles: Array<{ id: string }>;
       issues: Array<{ title: string; cycleId: string | null }>;
     }>(after);
-    expect(afterBody.cycles).toHaveLength(2);
+    expect(afterBody.cycles).toHaveLength(4);
     expect(
       afterBody.issues.find((issue) => issue.title === "Mobileの一覧を磨く")?.cycleId,
     ).not.toBe(cycleId);

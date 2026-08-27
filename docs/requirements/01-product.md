@@ -70,8 +70,8 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | 領域 | 要件 | 優先度 |
 | --- | --- | --- |
 | 認証 | Cloudflare Accessによる本人限定認証、ログアウト、セッション失効時の再認証 | Must |
-| 個人設定 | タイムゾーン、UI言語、Workflow、Cycle、Estimate、テーマ設定 | Must |
-| Issue | CRUD、状態、優先度、見積、期限、Label、Project、Cycle | Must |
+| 個人設定 | タイムゾーン、UI言語、Workflow、Cycle、テーマ設定 | Must |
+| Issue | CRUD、状態、優先度、期限、Label、Project、Cycle | Must |
 | Issue | 親子Issue、メモ、活動履歴、関連Issue | Should |
 | Cycle | 反復設定、手動実行による生成・計画・繰越、進捗、履歴 | Must |
 | Background processing | 手動RunによるCycle処理、Purge、Outbox再送、実行中の操作ロック・進捗・復旧 | Must |

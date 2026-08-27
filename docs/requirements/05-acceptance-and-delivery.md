@@ -13,7 +13,7 @@
 | Inbox | Notification list、Detail link | 下部タブ |
 | Saved Views | 保存View一覧 | 1列 |
 | Trash | 論理削除済みデータ、削除予定日、復元 | Settings配下のFull screen route |
-| Settings | Profile、Workflow、Cycle、Estimate、Label、Project status、通知、言語、Theme、Background processing / Run now | 項目ごとに下層Route |
+| Settings | Profile、Workflow、Cycle、Label、Project status、通知、言語、Theme、Background processing / Run now | 項目ごとに下層Route |
 
 Cloudflare Accessが提供する認証画面はアプリ画面一覧の対象外とする。
 
@@ -171,7 +171,7 @@ And user_id不一致・Run不存在は404、paused / failed Runへのcontinueは
 
 - Unit: Cycle境界・Cooldown、繰越対象、Estimate ON/OFF、権限、Workflow / Project status遷移、Filter変換、Position計算、Tiptap JSONから検索Textへの射影
 - Repository / Service Integration: 実D1 Migration、`user_id`所有境界、Issue作成・採番、Issue / CycleのCASと同時実行、Batch rollback、一意制約、検索Index、recent、30日Purge、Outbox再投入、Background runのlock CAS・Lease・423拒否
-- UI Integration: Issue CRUD、Bulk edit、Cycle繰越、Project進捗、Saved View、楽観的Rollback・Error・再試行・選択・Scroll保持、Access 401分類とTop-level Navigation、UI言語・Estimate表示切替、手動RunのOverlay・進捗・再読み込み復元
+- UI Integration: Issue CRUD、Bulk edit、Cycle繰越、Project進捗、Saved View、楽観的Rollback・Error・再試行・選択・Scroll保持、Access 401分類とTop-level Navigation、UI言語、手動RunのOverlay・進捗・再読み込み復元。Estimateの既存API互換はサービス層で担保し、現行UIでは表示しない
 - Browser E2E: Access実環境の認証・拒否・Logout・Deep link復帰、Keyboard / Touch統合、Mobile / standalone PWA、Service Worker Cache境界に絞った少数のSmoke test
 - Accessibility: axeによる自動検査 + Keyboardのみの主要Journey
 - Performance: 1万IssueのSeedで一覧、Filter、英日混在のtitle / description検索、Cycle集計を計測する。AC-01はEnter確定からServer採番済みIssueが描画されるまでをPreview環境で測り、p95を1秒以内とする
@@ -188,7 +188,7 @@ And user_id不一致・Run不存在は404、paused / failed Runへのcontinueは
 | Cycle繰越 | デシジョンテーブル | Backlog / Completed / Canceledは残留、Unstarted / Startedは移動、次Cycle既存行再利用、Issueごとの履歴、Outbox 1件、Batch失敗時Rollback |
 | Owner解決 | デシジョンテーブル | HTTP本人一致 / 不一致、手動Run正常、UUID不正、`users`行なし、Run `user_id`一致 / 不一致。拒否は業務更新0件と構造化Security log、Background失敗は加えてMetricで観測する |
 | Issue Mutation | デシジョンテーブル | Version一致、Version競合、同じKey・同じRequestの再送、同じKey・異なるRequestの拒否、並行更新で勝者1件、Activity / Outbox / Receipt重複なし |
-| Estimate | デシジョンテーブル | 無効、有効かつ全件未設定、有効かつ一部未設定、許可値`1 / 2 / 3 / 5 / 8`、不許可値`0 / 4 / 13`、無効化後の値保持と再有効化、ProjectのCanceled除外 |
+| Estimate互換 | デシジョンテーブル | 既存APIの無効、有効かつ全件未設定、有効かつ一部未設定、許可値`1 / 2 / 3 / 5 / 8`、不許可値`0 / 4 / 13`、既存値の保持。現行UIの表示・入力は対象外 |
 | Access失効 | デシジョンテーブル | 401、Offline、Timeout、5xxを区別し、401だけがTop-level再認証、元Deep link復帰、認証応答・個人データCacheなし |
 | 楽観的更新失敗 | 状態遷移 | Optimistic表示→成功確定、Optimistic表示→失敗Rollback→Error / 再試行、選択・Scroll位置維持 |
 | Search射影 | 状態遷移・障害注入 | Create / Edit / Delete時のJSON・`description_text`・FTS整合、途中失敗Rollback、短い検索語、MATCH特殊文字、英日混在、Fallback |

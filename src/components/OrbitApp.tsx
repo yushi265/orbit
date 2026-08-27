@@ -58,10 +58,7 @@ type Section =
 type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
 type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
-  Pick<
-    BootstrapPayload["preferences"],
-    "timezone" | "locale" | "theme" | "colorTheme" | "estimateEnabled"
-  >
+  Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
 >;
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
@@ -183,7 +180,6 @@ function OrbitAppInner(props: Props) {
   const [newTitle, setNewTitle] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
   const [newPriority, setNewPriority] = useState<Issue["priority"]>("no_priority");
-  const [newEstimate, setNewEstimate] = useState<Issue["estimate"]>(null);
   const [newDueAt, setNewDueAt] = useState<number | null>(null);
   const [newParentId, setNewParentId] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -558,7 +554,6 @@ function OrbitAppInner(props: Props) {
         idempotencyKey: idempotencyKey(),
         title: newTitle.trim(),
         priority: newPriority,
-        estimate: newEstimate,
         dueAt: newDueAt,
         parentId: newParentId || null,
         projectId: projectIdFromSelection(newProjectId),
@@ -571,7 +566,6 @@ function OrbitAppInner(props: Props) {
       setNewTitle("");
       setNewProjectId("");
       setNewPriority("no_priority");
-      setNewEstimate(null);
       setNewDueAt(null);
       setNewParentId("");
       setComposerOpen(false);
@@ -1122,7 +1116,6 @@ function OrbitAppInner(props: Props) {
               issueSort={issueSort}
               setIssueSort={setIssueSort}
               projects={projects}
-              estimateEnabled={data.preferences.estimateEnabled}
               allIssues={issueWorkspaceIssues}
               cycles={cycles}
               labels={labels}
@@ -1280,7 +1273,6 @@ function OrbitAppInner(props: Props) {
             onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
             pending={pendingIssueId === props.issueId}
             workflowStates={workflowStates}
-            estimateEnabled={data.preferences.estimateEnabled}
             onArchive={() => {
               const issue = issues.find((item) => item.id === props.issueId);
               return issue ? changeIssueLifecycle(issue, "archive") : Promise.resolve();
@@ -1296,20 +1288,16 @@ function OrbitAppInner(props: Props) {
             setProjectId={setNewProjectId}
             priority={newPriority}
             setPriority={setNewPriority}
-            estimate={newEstimate}
-            setEstimate={setNewEstimate}
             dueAt={newDueAt}
             setDueAt={setNewDueAt}
             parentId={newParentId}
             setParentId={setNewParentId}
             issues={issues}
-            estimateEnabled={data.preferences.estimateEnabled}
             onClose={() => {
               setComposerOpen(false);
               setNewTitle("");
               setNewProjectId("");
               setNewPriority("no_priority");
-              setNewEstimate(null);
               setNewDueAt(null);
               setNewParentId("");
             }}
@@ -1602,10 +1590,6 @@ function HomeView({
                   </strong>
                   <span>完了したIssue</span>
                 </div>
-                <div>
-                  <strong>{cycleMetrics.estimateTotal}</strong>
-                  <span>Scope points</span>
-                </div>
                 <button className="text-button" onClick={() => onNavigate("cycles")}>
                   Cycle詳細 →
                 </button>
@@ -1669,7 +1653,6 @@ export function IssuesView({
   issueSort,
   setIssueSort,
   projects,
-  estimateEnabled,
   allIssues,
   cycles,
   labels,
@@ -1708,7 +1691,6 @@ export function IssuesView({
   issueSort: IssueSort;
   setIssueSort: (value: IssueSort) => void;
   projects: Project[];
-  estimateEnabled: boolean;
   allIssues: Issue[];
   cycles: Cycle[];
   labels: Label[];
@@ -2040,7 +2022,6 @@ export function IssuesView({
                   issue={issue}
                   state={state}
                   labels={labels}
-                  estimateEnabled={estimateEnabled}
                   onClick={(trigger) => onOpenIssue(issue, trigger)}
                 />
               ))}
@@ -2074,7 +2055,6 @@ export function IssuesView({
             <span>ISSUE</span>
             <span>STATUS</span>
             <span>PRIORITY</span>
-            <span>ESTIMATE</span>
             <span>PROJECT</span>
             <span>DUE</span>
           </div>
@@ -2095,7 +2075,6 @@ export function IssuesView({
               }}
               onClick={(trigger) => onOpenIssue(issue, trigger)}
               onUpdate={scope === "active" ? onUpdate : undefined}
-              estimateEnabled={estimateEnabled}
               labels={labels}
               projects={projects}
               onRestore={scope === "archived" ? onRestore : undefined}
@@ -2171,7 +2150,6 @@ function IssueRow({
   onSelect,
   onClick,
   onUpdate,
-  estimateEnabled = true,
   onRestore,
   onFocusIssue,
   projects = [],
@@ -2195,7 +2173,6 @@ function IssueRow({
   onSelect?: (checked: boolean) => void;
   onClick?: (trigger: HTMLButtonElement) => void;
   onUpdate?: (issue: Issue, patch: Partial<Issue>) => void;
-  estimateEnabled?: boolean;
   onRestore?: (issue: Issue) => void;
   onFocusIssue?: (issueId: string) => void;
   projects?: Project[];
@@ -2345,33 +2322,6 @@ function IssueRow({
           <PriorityIcon priority={issue.priority} />
         )}
       </span>
-      <span className="estimate-cell">
-        {onUpdate && !compact && estimateEnabled ? (
-          <select
-            aria-label={`${issue.identifier}のEstimate`}
-            value={issue.estimate === null ? "" : String(issue.estimate)}
-            disabled={pending}
-            onChange={(event) =>
-              onUpdate(issue, {
-                estimate: event.target.value
-                  ? (Number(event.target.value) as Issue["estimate"])
-                  : null,
-              })
-            }
-          >
-            <option value="">未設定</option>
-            {[1, 2, 3, 5, 8].map((estimate) => (
-              <option value={estimate} key={estimate}>
-                {estimate} pt
-              </option>
-            ))}
-          </select>
-        ) : issue.estimate !== null && estimateEnabled ? (
-          `${issue.estimate} pt`
-        ) : (
-          "未設定"
-        )}
-      </span>
       <span className="project-cell">
         {projects.length > 0 && onUpdate ? (
           <select
@@ -2420,13 +2370,11 @@ function IssueCard({
   issue,
   state: _state,
   labels = [],
-  estimateEnabled = true,
   onClick,
 }: {
   issue: Issue;
   state: WorkflowState;
   labels?: Label[];
-  estimateEnabled?: boolean;
   onClick: (trigger: HTMLButtonElement) => void;
 }) {
   return (
@@ -2440,9 +2388,6 @@ function IssueCard({
       <div>
         <span className={`priority-badge ${priorityTone[issue.priority]}`}>
           {priorityLabel[issue.priority]}
-        </span>
-        <span className="card-meta">
-          {estimateEnabled && issue.estimate ? `${issue.estimate} pts` : "No estimate"}
         </span>
         {issue.labelIds.map((labelId) => {
           const label = labels.find((item) => item.id === labelId);
@@ -2747,10 +2692,6 @@ function CyclesView({
               <strong>{metrics.progressPercent}%</strong>
               <span>Progress</span>
             </div>
-            <div>
-              <strong>{metrics.estimateTotal}</strong>
-              <span>Estimate</span>
-            </div>
           </div>
           <div className="detail-progress">
             <div className="progress-line">
@@ -2804,9 +2745,6 @@ function CyclesView({
                 <strong>{issue.title}</strong>
                 <span className="cycle-issue-status">
                   {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "—"}
-                </span>
-                <span className="mini-points">
-                  {issue.estimate ? `${issue.estimate} pts` : "—"}
                 </span>
                 {selectedCycle.status !== "completed" && (
                   <button
@@ -3171,10 +3109,6 @@ function ProjectsView({
             <div>
               <strong>{projectMetrics.progressPercent}%</strong>
               <span>Progress</span>
-            </div>
-            <div>
-              <strong>{projectMetrics.estimateTotal}</strong>
-              <span>Estimate</span>
             </div>
           </div>
           <div className="cycle-list project-issue-list">
@@ -3664,7 +3598,7 @@ function ViewsView({
     setEditingView(view);
     setNameDraft(view.name);
     setModeDraft(view.query.mode);
-    setOrderDraft(view.query.order);
+    setOrderDraft(view.query.order === "estimate" ? "updated" : view.query.order);
     setError(null);
     setErrorAction(null);
   }
@@ -3833,7 +3767,6 @@ function ViewsView({
                 ["updated", "Updated"],
                 ["created", "Created"],
                 ["due_at", "Due date"],
-                ["estimate", "Estimate"],
               ].map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -3888,7 +3821,8 @@ function ViewsView({
           </div>
           <p>{filterSummary(selectedView)}</p>
           <span className="view-inspector-meta">
-            Order: {selectedView.query.order} · Limit: {String(selectedView.query.limit ?? "—")}
+            Order: {selectedView.query.order === "estimate" ? "updated" : selectedView.query.order}{" "}
+            · Limit: {String(selectedView.query.limit ?? "—")}
           </span>
         </section>
       )}
@@ -3969,7 +3903,6 @@ export function SettingsView({
   const [colorThemeDraft, setColorThemeDraft] = useState(preferences.colorTheme);
   const [timezoneDraft, setTimezoneDraft] = useState(preferences.timezone);
   const [localeDraft, setLocaleDraft] = useState(preferences.locale);
-  const [estimateDraft, setEstimateDraft] = useState(preferences.estimateEnabled);
   const [preferenceSaving, setPreferenceSaving] = useState(false);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const [preferenceFieldErrors, setPreferenceFieldErrors] = useState<Record<
@@ -3995,7 +3928,6 @@ export function SettingsView({
   useEffect(() => setColorThemeDraft(preferences.colorTheme), [preferences.colorTheme]);
   useEffect(() => setTimezoneDraft(preferences.timezone), [preferences.timezone]);
   useEffect(() => setLocaleDraft(preferences.locale), [preferences.locale]);
-  useEffect(() => setEstimateDraft(preferences.estimateEnabled), [preferences.estimateEnabled]);
 
   async function restoreTrashIssue(issue: Issue): Promise<void> {
     if (!onRestoreIssue || trashSavingId) return;
@@ -4463,47 +4395,6 @@ export function SettingsView({
             {labels.length === 0 && <p className="detail-empty">Labelはまだありません。</p>}
           </div>
         </section>
-        <section className="settings-card">
-          <div className="settings-card-title">
-            <span className="settings-icon purple">⌁</span>
-            <div>
-              <h2>Cycle defaults</h2>
-              <p>計画のリズムを設定</p>
-            </div>
-          </div>
-          <div className="setting-row">
-            <div>
-              <strong>Estimate</strong>
-              <span>Scope計算にpointを使う</span>
-              {preferenceFieldErrors?.estimateEnabled && (
-                <span id="preference-estimate-error" className="setting-field-error" role="alert">
-                  {preferenceFieldErrors.estimateEnabled.join(" ")}
-                </span>
-              )}
-            </div>
-            <label className="setting-value">
-              <input
-                type="checkbox"
-                aria-label="Estimateを有効にする"
-                aria-invalid={Boolean(preferenceFieldErrors?.estimateEnabled)}
-                aria-describedby={
-                  preferenceFieldErrors?.estimateEnabled ? "preference-estimate-error" : undefined
-                }
-                checked={estimateDraft}
-                disabled={preferenceSaving}
-                onChange={(event) => {
-                  const nextEstimateEnabled = event.target.checked;
-                  const previousEstimateEnabled = estimateDraft;
-                  setEstimateDraft(nextEstimateEnabled);
-                  void savePreference({ estimateEnabled: nextEstimateEnabled }, () =>
-                    setEstimateDraft(previousEstimateEnabled),
-                  );
-                }}
-              />
-              {estimateDraft ? "有効" : "無効"}
-            </label>
-          </div>
-        </section>
       </div>
     </div>
   );
@@ -4954,7 +4845,6 @@ function IssueDetailPanel({
   onUpdate,
   pending,
   workflowStates,
-  estimateEnabled,
   onArchive,
   onClose,
 }: {
@@ -4965,7 +4855,6 @@ function IssueDetailPanel({
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   pending: boolean;
   workflowStates: WorkflowState[];
-  estimateEnabled: boolean;
   onArchive: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -5311,26 +5200,6 @@ function IssueDetailPanel({
                   {workflowStates.map((state) => (
                     <option value={state.id} key={state.id}>
                       {state.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="detail-estimate-select"
-                  aria-label="IssueのEstimate"
-                  value={issue.estimate === null ? "" : String(issue.estimate)}
-                  disabled={!estimateEnabled || pending || saving}
-                  onChange={(event) =>
-                    onUpdate(issue, {
-                      estimate: event.target.value
-                        ? (Number(event.target.value) as Issue["estimate"])
-                        : null,
-                    })
-                  }
-                >
-                  <option value="">Estimateなし</option>
-                  {[1, 2, 3, 5, 8].map((estimate) => (
-                    <option value={estimate} key={estimate}>
-                      {estimate} pt
                     </option>
                   ))}
                 </select>
@@ -5695,14 +5564,11 @@ export function IssueComposer({
   setProjectId,
   priority,
   setPriority,
-  estimate,
-  setEstimate,
   dueAt,
   setDueAt,
   parentId,
   setParentId,
   issues,
-  estimateEnabled,
   existingIssue,
   onClose,
   onSubmit,
@@ -5715,14 +5581,11 @@ export function IssueComposer({
   setProjectId: (value: string) => void;
   priority: Issue["priority"];
   setPriority: (value: Issue["priority"]) => void;
-  estimate: Issue["estimate"];
-  setEstimate: (value: Issue["estimate"]) => void;
   dueAt: number | null;
   setDueAt: (value: number | null) => void;
   parentId: string;
   setParentId: (value: string) => void;
   issues: Issue[];
-  estimateEnabled: boolean;
   existingIssue?: Issue;
   onClose: () => void;
   onSubmit: () => void;
@@ -5814,28 +5677,6 @@ export function IssueComposer({
               {Object.entries(priorityLabel).map(([value, label]) => (
                 <option value={value} key={value}>
                   {label}
-                </option>
-              ))}
-            </select>
-            <label className="field-label" htmlFor="new-issue-estimate">
-              Estimate
-            </label>
-            <select
-              id="new-issue-estimate"
-              aria-label="新しいIssueのEstimate"
-              className="text-input"
-              value={estimate === null ? "" : String(estimate)}
-              disabled={!estimateEnabled}
-              onChange={(event) =>
-                setEstimate(
-                  event.target.value ? (Number(event.target.value) as Issue["estimate"]) : null,
-                )
-              }
-            >
-              <option value="">Estimateなし</option>
-              {[1, 2, 3, 5, 8].map((value) => (
-                <option value={value} key={value}>
-                  {value} pt
                 </option>
               ))}
             </select>

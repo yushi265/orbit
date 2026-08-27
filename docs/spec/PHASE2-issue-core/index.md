@@ -26,7 +26,7 @@ Phase 2「Issue core」のうち、先行実装で不足しているIssue属性�
 
 ## 受け入れ基準（AC）
 
-- [x] **AC-1**: 本人がIssue作成・一覧・詳細からEstimate（未設定 / `1 / 2 / 3 / 5 / 8`）とDue date（未設定または日付）を設定・解除でき、親Issueを同一OwnerのIssueへ設定・解除できる。ServerはEstimate / Due dateの値域、親のOwner・削除状態・自己参照・子孫参照を検証し、循環する親子関係を400で拒否する。Issue詳細は親Issue、直下のSub-issue、Completed / Canceledを考慮した子Issue進捗を返す。
+- [x] **AC-1**: 本人がIssue作成・一覧・詳細からDue date（未設定または日付）を設定・解除でき、親Issueを同一OwnerのIssueへ設定・解除できる。Estimateは既存Server / 保存 / API互換のため値域検証を保持するが、現行UIでは入力・表示しない。ServerはEstimate / Due dateの値域、親のOwner・削除状態・自己参照・子孫参照を検証し、循環する親子関係を400で拒否する。Issue詳細は親Issue、直下のSub-issue、Completed / Canceledを考慮した子Issue進捗を返す。
 - [x] **AC-2**: 本人がIssueをArchiveでき、通常一覧から除外されたArchived Filterで確認・Restoreできる。Trashへ移動したIssueは通常一覧とArchived Filterから除外され、Settings配下のTrashで確認・Restoreできる。Archive / Trash / RestoreはOwner・Lock・冪等性を既存契約どおり守り、他Owner・不存在・削除済み対象では業務データを変更しない。
 - [x] **AC-3**: 全体検索はIssue ID・title・descriptionを対象に、300msデバウンス後にStatus / Priority / Project / Cycle / Label / Dueの既存Filterを適用して検索できる。検索結果はOwner scopedで、削除済み・Archived Issueを含めず、入力不正・通信失敗時は現在の入力と結果を壊さず再試行できる。
 - [x] **AC-4**: 最近開いたIssueと最近の検索条件をOwner単位で保存し、各20件まで新しい順に表示する。同じIssueまたは正規化済み検索条件は時刻だけを更新し、削除済みIssueは表示しない。再読み込み・別端末のSnapshot再取得後も復元でき、保存失敗は検索・画面遷移を妨げない。

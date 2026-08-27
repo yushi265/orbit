@@ -49,7 +49,7 @@ describe("Phase 1 Settings UI contract", () => {
 
     expect(markup).toContain('aria-label="タイムゾーン"');
     expect(markup).toContain('aria-label="表示言語"');
-    expect(markup).toContain('aria-label="Estimateを有効にする"');
+    expect(markup).not.toContain("Estimate");
     expect(markup).toContain('aria-label="Workflow名"');
     expect(markup).toContain("Todo");
   });

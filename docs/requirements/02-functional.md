@@ -19,7 +19,7 @@ Cloudflare Accessの認証画面はアプリ内Routeではない。ログアウ�
 | --- | --- | --- |
 | PREF-01 | タイムゾーン、UI言語、表示モード、カラーテーマを設定できる | タイムゾーンはCycle境界と日時表示、UI言語は画面文言と日時・数値形式、表示モードとカラーテーマは配色へ反映される。表示モードはLight / Dark / System、カラーテーマはCoral / Ocean / Violet / Forest / Amberから選択し、初期値はCoralとする。MVPのUI言語は日本語・英語、初期値は日本語とする |
 | PREF-02 | Issue番号を`TASK-123`形式で一意かつ単調増加に採番する | 同時作成でも重複しない |
-| PREF-03 | Estimateを有効・無効にできる | MVPはpoint単位の`1 / 2 / 3 / 5 / 8`だけを許可する。無効化しても既存値は保持するが、入力・Filter・Order・集計では使用しない |
+| PREF-03 | Estimateは現行UIでは提供しない | 既存の`estimateEnabled`設定とIssue値は保存・API互換のため保持するが、新規UIの入力・Filter・Order・集計では使用しない |
 | WF-01 | Workflow状態を設定できる | Backlog / Unstarted / Started / Completed / Canceledのカテゴリを持つ |
 | WF-02 | 状態の名称、色、順序、既定値を変更できる | ユーザーごとの既定状態を常に1件だけ保ち、既存Issueとの整合性を保ったまま変更できる |
 | WF-03 | Workflow状態を削除できる | 参照するIssueがある状態と既定状態の削除を拒否し、先にIssueの一括変更または別の既定状態の選択を求める |
@@ -32,7 +32,7 @@ LinearではIssueはTeamに必ず属するが、本アプリはTeamを持たな�
 | --- | --- | --- |
 | ISS-01 | どの主要画面からでもIssueを作成できる | PCは`C`、モバイルは中央の作成ボタンから2操作以内でComposerが開く |
 | ISS-02 | Issueはtitle、description、statusを持つ | titleは1〜255文字、descriptionはMarkdown互換Rich Textである |
-| ISS-03 | priority、estimate、due dateを設定できる | 未設定を許容し、一覧からインライン更新できる |
+| ISS-03 | priority、due dateを設定できる | 未設定を許容し、一覧からインライン更新できる。既存Estimate値はAPI互換のため保持するが、現行UIでは扱わない |
 | ISS-04 | priorityはNo priority / Low / Medium / High / Urgentを持つ | 表示、Filter、Group、Orderで同じ定義を使う |
 | ISS-05 | Labelを複数付与できる | Labelは名前と色を持つ |
 | ISS-06 | Issueを最大1 Project、最大1 Cycleへ割り当てられる | ProjectとCycleの存在および本人所有を検証する |
@@ -88,9 +88,9 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 | --- | --- | --- |
 | CYC-13 | Current / Upcoming / Pastを切り替えられる | PC、タブレット、スマホで同じ情報へ到達できる。Cooldown中のCurrentは「Active Cycleなし」、次回開始時刻、Upcoming Cycleへの導線を表示する |
 | CYC-14 | CycleへIssueを追加・削除・並び替えできる | ListとBoardの両方から更新できる |
-| CYC-15 | Scopeと完了率をIssue数・Estimateの両方で表示する | Estimate無効時または全Issueが未設定の場合はIssue数を既定とし、有効時の未設定IssueはEstimate合計で0として扱う |
+| CYC-15 | Scopeと完了率をIssue数で表示する | Canceled Issueを完了率の分母から除外する |
 | CYC-16 | 日別のCompleted、Remaining、Scope changeを表示する | Cycle開始時点と追加・削除の差分を再現できる |
-| CYC-17 | 状態・優先度・Project別の内訳を表示する | Issue数またはEstimate合計を表示する |
+| CYC-17 | 状態・優先度・Project別の内訳を表示する | Issue数を表示する |
 | CYC-18 | Cycle名と説明を編集できる | 自動生成名とは別に任意の上書き名とRich Text説明を保存し、上書き名を解除すると自動生成名へ戻る |
 
 ## 6.5 Project
@@ -103,7 +103,7 @@ LinearのProjectは明確な成果または目標日を持つ作業単位で、I
 | PRJ-02 | status、priority、色、アイコンを設定できる | 一覧とIssue pickerに同じ表現を使う |
 | PRJ-03 | start dateとtarget dateを設定できる | 日・月・四半期の入力粒度を日付とは別に保持し、元の精度で再表示できる |
 | PRJ-04 | Project IssueをList / Boardで表示する | Filter、Group、Order、保存Viewに対応する |
-| PRJ-05 | 完了率をIssue数またはEstimateで表示する | canceled Issueを母数から除外し、Estimate無効時または全Issueが未設定の場合はIssue数を使う。Estimate有効時の未設定Issueは合計で0として扱う |
+| PRJ-05 | 完了率をIssue数で表示する | canceled Issueを母数から除外する |
 | PRJ-06 | Project詳細に概要、説明、プロパティ、Issue、進捗を表示する | タブまたはモバイル向けセクションで切り替えられる |
 | PRJ-07 | Project statusを手動更新する | Backlog / Planned / In Progress / Completed / Canceledカテゴリを持つ |
 | PRJ-08 | Project statusの名称、色、順序、既定値を設定できる | ユーザーごとの既定値を1件だけ保ち、参照中または既定の状態は削除を拒否して、先にProjectの一括変更または別の既定値の選択を求める |
@@ -117,7 +117,7 @@ LinearはList / Boardの切替、Group、Order、表示項目をDisplay options�
 | VIEW-01 | Issue一覧をList / Boardで切り替えられる | 同じFilter条件と選択状態を維持する |
 | VIEW-02 | status、priority、label、project、cycle、due date、created dateでFilterできる | 複数条件のANDをMVPで提供する |
 | VIEW-03 | status、priority、project、cycle、labelでGroup化できる | 空Groupの表示/非表示を切り替えられる |
-| VIEW-04 | manual、priority、updated、created、due date、estimateでOrderできる | OrderはListとBoardで共有する |
+| VIEW-04 | manual、priority、updated、created、due dateでOrderできる | OrderはListとBoardで共有する。既存Estimate順はAPI互換のため保持するが、現行UIでは選択肢に出さない |
 | VIEW-05 | 表示プロパティを選択できる | 全体の既定値を個人設定へ保存し、Saved Viewでは`layout_json`の値を優先する |
 | VIEW-06 | Filter・Group・Order・LayoutをViewとして保存できる | 名前を付けて追加・編集・削除できる |
 | VIEW-07 | Filter条件をURLへ反映する | URL共有で主要Filterを再現できる |

@@ -86,20 +86,17 @@ describe("Phase 2 Issue core UI helpers", () => {
         setProjectId: () => undefined,
         priority: "no_priority",
         setPriority: () => undefined,
-        estimate: null,
-        setEstimate: () => undefined,
         dueAt: null,
         setDueAt: () => undefined,
         parentId: "",
         setParentId: () => undefined,
         issues: [],
-        estimateEnabled: true,
         onClose: () => undefined,
         onSubmit: () => undefined,
         busy: false,
       }),
     );
-    expect(composer).toContain('aria-label="新しいIssueのEstimate"');
+    expect(composer).not.toContain("Estimate");
     expect(composer).toContain('aria-label="新しいIssueのDue date"');
     expect(composer).toContain('aria-label="新しいIssueのParent"');
 
@@ -188,7 +185,6 @@ describe("Phase 2 Issue core UI helpers", () => {
         issueSort: "updated_desc",
         setIssueSort: () => undefined,
         projects: [],
-        estimateEnabled: true,
         allIssues: [issue],
         cycles: [],
         labels: [],

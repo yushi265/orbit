@@ -5,7 +5,7 @@
 本番用D1 `orbit` の作成、Wrangler認証、productionビルド、preflight、dry-runまで完了しています。
 
 - D1: `orbit`（APAC、`53d2ce53-5326-47da-95b6-386732c50a9b`）
-- Worker: `orbit-project-manager-production` を生成する設定を確認済み
+- Worker: `orbit`（`https://orbit.ae265-1108.workers.dev`）へデプロイする設定を確認済み
 - `APP_ENV=production` とD1 bindingを含む最終設定をdry-runで確認済み
 - 本番の業務データはD1 Snapshot Adapter経由で永続化する実装へ切り替え済みです。正規化Repositoryへの段階移行はRelease hardeningの残課題です。
 - Cloudflare Accessの `OWNER_USER_ID` / `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` はSecretとして未設定です。
@@ -33,6 +33,14 @@ pnpm exec wrangler secret put OWNER_EMAIL --env production
 pnpm exec wrangler secret put ACCESS_TEAM_DOMAIN --env production
 pnpm exec wrangler secret put ACCESS_AUD --env production
 ```
+
+Access Secretを登録した後、`OWNER_USER_ID`と`OWNER_EMAIL`を環境変数へ設定してOwner行を初期化します。既存行は上書きされず、必須値が不正な場合はリモートD1を実行しません。
+
+```bash
+OWNER_USER_ID=... OWNER_EMAIL=... pnpm run db:bootstrap:production
+```
+
+表示名も指定する場合は`ORBIT_OWNER_NAME`を追加します。値はshell履歴やリポジトリへ保存しないでください。
 
 Cloudflare AccessはOriginへ`Cf-Access-Jwt-Assertion`を渡します。Worker側でもJWTの署名・issuer・audienceを検証する必要があります。[Validate JWTs](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 

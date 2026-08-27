@@ -38,6 +38,7 @@ import { priorityFromSelection, priorityIconFor } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { issueDetailPath, projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
+import { timezoneOptionsFor } from "./preferences";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -52,6 +53,12 @@ type Section =
   | "settings";
 type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
 type ToastAction = { label: string; onClick: () => void };
+type PreferencePatch = Partial<
+  Pick<
+    BootstrapPayload["preferences"],
+    "timezone" | "locale" | "theme" | "colorTheme" | "estimateEnabled"
+  >
+>;
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
 type IssueReorderVariables = {
@@ -310,6 +317,11 @@ function OrbitAppInner(props: Props) {
   }, [data?.preferences.theme, data?.preferences.colorTheme]);
 
   useEffect(() => {
+    if (!data || typeof document === "undefined") return;
+    document.documentElement.lang = data.preferences.locale === "en" ? "en" : "ja";
+  }, [data?.preferences.locale]);
+
+  useEffect(() => {
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       setInstallPrompt(event as BeforeInstallPromptEvent);
@@ -332,8 +344,33 @@ function OrbitAppInner(props: Props) {
 
   useEffect(() => {
     const current = data?.background.run ?? null;
-    if (current && ["running", "pending"].includes(current.status)) setRun(current);
+    setRun(current);
   }, [data?.background.run]);
+
+  useEffect(() => {
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    if (!shell) return;
+    const blocking = run?.status === "pending" || run?.status === "running";
+    const content = [...shell.children].filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && !element.classList.contains("run-overlay"),
+    );
+    content.forEach((element) => {
+      if (blocking) {
+        element.setAttribute("inert", "");
+        element.setAttribute("aria-hidden", "true");
+      } else {
+        element.removeAttribute("inert");
+        element.removeAttribute("aria-hidden");
+      }
+    });
+    return () => {
+      content.forEach((element) => {
+        element.removeAttribute("inert");
+        element.removeAttribute("aria-hidden");
+      });
+    };
+  }, [run?.status]);
 
   useEffect(() => {
     if (!composerOpen && !props.issueId) restoreIssueFocus();
@@ -583,6 +620,19 @@ function OrbitAppInner(props: Props) {
       );
     },
   });
+
+  async function savePreferences(
+    patch: PreferencePatch,
+    mutationKey = idempotencyKey(),
+  ): Promise<void> {
+    const result = await apiPatch<{ preferences: BootstrapPayload["preferences"] }>(
+      "/api/v1/preferences",
+      { idempotencyKey: mutationKey, ...patch },
+    );
+    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+      current ? { ...current, preferences: result.preferences } : current,
+    );
+  }
 
   async function saveColorTheme(
     colorTheme: ColorTheme,
@@ -984,17 +1034,14 @@ function OrbitAppInner(props: Props) {
           {section === "settings" && (
             <SettingsView
               preferences={data.preferences}
+              workflowStates={workflowStates}
               labels={labels}
               onRefresh={refresh}
               run={activeRun}
               runBusy={runBusy}
               onRun={runMaintenance}
               onResume={resumeMaintenance}
-              onTheme={(theme) =>
-                apiPatch("/api/v1/preferences", { idempotencyKey: idempotencyKey(), theme })
-                  .then(refresh)
-                  .catch(() => showToast("error", "テーマの変更に失敗しました"))
-              }
+              onPreferences={savePreferences}
               onColorTheme={saveColorTheme}
               canInstallPwa={installPrompt !== null}
               onInstallPwa={() => void installPwa()}
@@ -3326,33 +3373,47 @@ function ViewsView({
   );
 }
 
-function SettingsView({
+export function SettingsView({
   preferences,
+  workflowStates,
   labels,
   onRefresh,
   run,
   runBusy,
   onRun,
   onResume,
-  onTheme,
+  onPreferences,
   onColorTheme,
   canInstallPwa,
   onInstallPwa,
 }: {
   preferences: BootstrapPayload["preferences"];
+  workflowStates: WorkflowState[];
   labels: BootstrapPayload["labels"];
   onRefresh: () => Promise<unknown> | void;
   run: PublicRunSummary | null;
   runBusy: boolean;
   onRun: () => void;
   onResume: () => void;
-  onTheme: (theme: "light" | "dark" | "system") => void;
+  onPreferences: (patch: PreferencePatch, mutationKey?: string) => Promise<void>;
   onColorTheme: (colorTheme: ColorTheme, mutationKey: string) => Promise<void>;
   canInstallPwa: boolean;
   onInstallPwa: () => void;
 }) {
   const [themeDraft, setThemeDraft] = useState(preferences.theme);
   const [colorThemeDraft, setColorThemeDraft] = useState(preferences.colorTheme);
+  const [timezoneDraft, setTimezoneDraft] = useState(preferences.timezone);
+  const [localeDraft, setLocaleDraft] = useState(preferences.locale);
+  const [estimateDraft, setEstimateDraft] = useState(preferences.estimateEnabled);
+  const [preferenceSaving, setPreferenceSaving] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const [preferenceFieldErrors, setPreferenceFieldErrors] = useState<Record<
+    string,
+    string[]
+  > | null>(null);
+  const [preferenceSaved, setPreferenceSaved] = useState<string | null>(null);
+  const [preferenceRetry, setPreferenceRetry] = useState<(() => void) | null>(null);
+  const preferenceMutationKeyRef = useRef<{ key: string; patch: PreferencePatch } | null>(null);
   const [colorThemeSaving, setColorThemeSaving] = useState(false);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
@@ -3365,6 +3426,35 @@ function SettingsView({
 
   useEffect(() => setThemeDraft(preferences.theme), [preferences.theme]);
   useEffect(() => setColorThemeDraft(preferences.colorTheme), [preferences.colorTheme]);
+  useEffect(() => setTimezoneDraft(preferences.timezone), [preferences.timezone]);
+  useEffect(() => setLocaleDraft(preferences.locale), [preferences.locale]);
+  useEffect(() => setEstimateDraft(preferences.estimateEnabled), [preferences.estimateEnabled]);
+
+  async function savePreference(patch: PreferencePatch, restore: () => void): Promise<void> {
+    setPreferenceSaving(true);
+    setPreferenceError(null);
+    setPreferenceFieldErrors(null);
+    setPreferenceSaved(null);
+    const previous = preferenceMutationKeyRef.current;
+    const mutationKey =
+      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
+        ? previous.key
+        : idempotencyKey();
+    try {
+      await onPreferences(patch, mutationKey);
+      preferenceMutationKeyRef.current = null;
+      setPreferenceRetry(null);
+      setPreferenceSaved("設定を保存しました。");
+    } catch (error) {
+      preferenceMutationKeyRef.current = { key: mutationKey, patch };
+      restore();
+      setPreferenceError(error instanceof ApiError ? error.message : "設定の保存に失敗しました。");
+      setPreferenceFieldErrors(error instanceof ApiError ? (error.fieldErrors ?? null) : null);
+      setPreferenceRetry(() => () => void savePreference(patch, restore));
+    } finally {
+      setPreferenceSaving(false);
+    }
+  }
 
   function startLabelEdit(label: BootstrapPayload["labels"][number]) {
     labelMutationKeyRef.current = null;
@@ -3466,18 +3556,31 @@ function SettingsView({
               <h2>Appearance</h2>
               <p>テーマと表示の設定</p>
             </div>
+            <span className="setting-value" role="status">
+              {preferenceSaving ? "保存中…" : (preferenceSaved ?? "")}
+            </span>
           </div>
           <div className="setting-row">
             <div>
               <strong>Theme</strong>
               <span>ライト・ダーク・システム</span>
+              {preferenceFieldErrors?.theme && (
+                <span id="preference-theme-error" className="setting-field-error" role="alert">
+                  {preferenceFieldErrors.theme.join(" ")}
+                </span>
+              )}
             </div>
             <select
+              aria-label="表示モード"
+              aria-invalid={Boolean(preferenceFieldErrors?.theme)}
+              aria-describedby={preferenceFieldErrors?.theme ? "preference-theme-error" : undefined}
               value={themeDraft}
+              disabled={preferenceSaving}
               onChange={(event) => {
                 const nextTheme = event.target.value as "light" | "dark" | "system";
+                const previousTheme = themeDraft;
                 setThemeDraft(nextTheme);
-                onTheme(nextTheme);
+                void savePreference({ theme: nextTheme }, () => setThemeDraft(previousTheme));
               }}
             >
               <option value="system">System</option>
@@ -3523,12 +3626,66 @@ function SettingsView({
           </div>
           <div className="setting-row">
             <div>
+              <strong>Timezone</strong>
+              <span>Cycle境界と日付表示</span>
+              {preferenceFieldErrors?.timezone && (
+                <span id="preference-timezone-error" className="setting-field-error" role="alert">
+                  {preferenceFieldErrors.timezone.join(" ")}
+                </span>
+              )}
+            </div>
+            <select
+              aria-label="タイムゾーン"
+              aria-invalid={Boolean(preferenceFieldErrors?.timezone)}
+              aria-describedby={
+                preferenceFieldErrors?.timezone ? "preference-timezone-error" : undefined
+              }
+              value={timezoneDraft}
+              disabled={preferenceSaving}
+              onChange={(event) => {
+                const nextTimezone = event.target.value;
+                const previousTimezone = timezoneDraft;
+                setTimezoneDraft(nextTimezone);
+                void savePreference({ timezone: nextTimezone }, () =>
+                  setTimezoneDraft(previousTimezone),
+                );
+              }}
+            >
+              {timezoneOptionsFor(timezoneDraft).map((timezone) => (
+                <option value={timezone} key={timezone}>
+                  {timezone}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="setting-row">
+            <div>
               <strong>Language</strong>
               <span>表示言語</span>
+              {preferenceFieldErrors?.locale && (
+                <span id="preference-locale-error" className="setting-field-error" role="alert">
+                  {preferenceFieldErrors.locale.join(" ")}
+                </span>
+              )}
             </div>
-            <span className="setting-value">
-              {preferences.locale === "ja" ? "日本語" : "English"}
-            </span>
+            <select
+              aria-label="表示言語"
+              aria-invalid={Boolean(preferenceFieldErrors?.locale)}
+              aria-describedby={
+                preferenceFieldErrors?.locale ? "preference-locale-error" : undefined
+              }
+              value={localeDraft}
+              disabled={preferenceSaving}
+              onChange={(event) => {
+                const nextLocale = event.target.value as "ja" | "en";
+                const previousLocale = localeDraft;
+                setLocaleDraft(nextLocale);
+                void savePreference({ locale: nextLocale }, () => setLocaleDraft(previousLocale));
+              }}
+            >
+              <option value="ja">日本語</option>
+              <option value="en">English</option>
+            </select>
           </div>
           <div className="setting-row">
             <div>
@@ -3544,6 +3701,17 @@ function SettingsView({
             )}
           </div>
         </section>
+        {preferenceError && (
+          <div className="detail-live-error" role="alert">
+            {preferenceError}
+            {preferenceRetry && (
+              <button className="text-button" onClick={preferenceRetry} disabled={preferenceSaving}>
+                再試行
+              </button>
+            )}
+          </div>
+        )}
+        <WorkflowSettingsCard workflowStates={workflowStates} onRefresh={onRefresh} />
         <section className="settings-card">
           <div className="settings-card-title">
             <span className="settings-icon orange">↻</span>
@@ -3557,13 +3725,15 @@ function SettingsView({
             <div>
               <strong>
                 {run
-                  ? run.status === "running"
-                    ? "処理を実行中"
-                    : run.status === "paused"
-                      ? "一時停止中"
-                      : run.status === "failed"
-                        ? "復旧が必要"
-                        : "完了"
+                  ? run.status === "pending"
+                    ? "処理を開始中"
+                    : run.status === "running"
+                      ? "処理を実行中"
+                      : run.status === "paused"
+                        ? "一時停止中"
+                        : run.status === "failed"
+                          ? "復旧が必要"
+                          : "完了"
                   : "待機中"}
               </strong>
               <span>
@@ -3682,19 +3852,35 @@ function SettingsView({
           </div>
           <div className="setting-row">
             <div>
-              <strong>Timezone</strong>
-              <span>Cycle境界と日付表示</span>
-            </div>
-            <span className="setting-value">{preferences.timezone}</span>
-          </div>
-          <div className="setting-row">
-            <div>
               <strong>Estimate</strong>
               <span>Scope計算にpointを使う</span>
+              {preferenceFieldErrors?.estimateEnabled && (
+                <span id="preference-estimate-error" className="setting-field-error" role="alert">
+                  {preferenceFieldErrors.estimateEnabled.join(" ")}
+                </span>
+              )}
             </div>
-            <span className={`toggle ${preferences.estimateEnabled ? "on" : ""}`}>
-              <span />
-            </span>
+            <label className="setting-value">
+              <input
+                type="checkbox"
+                aria-label="Estimateを有効にする"
+                aria-invalid={Boolean(preferenceFieldErrors?.estimateEnabled)}
+                aria-describedby={
+                  preferenceFieldErrors?.estimateEnabled ? "preference-estimate-error" : undefined
+                }
+                checked={estimateDraft}
+                disabled={preferenceSaving}
+                onChange={(event) => {
+                  const nextEstimateEnabled = event.target.checked;
+                  const previousEstimateEnabled = estimateDraft;
+                  setEstimateDraft(nextEstimateEnabled);
+                  void savePreference({ estimateEnabled: nextEstimateEnabled }, () =>
+                    setEstimateDraft(previousEstimateEnabled),
+                  );
+                }}
+              />
+              {estimateDraft ? "有効" : "無効"}
+            </label>
           </div>
         </section>
       </div>
@@ -3702,7 +3888,354 @@ function SettingsView({
   );
 }
 
-function RunOverlay({
+const workflowCategoryLabels: Record<WorkflowState["category"], string> = {
+  backlog: "Backlog",
+  unstarted: "Unstarted",
+  started: "Started",
+  completed: "Completed",
+  canceled: "Canceled",
+};
+
+function WorkflowSettingsCard({
+  workflowStates,
+  onRefresh,
+}: {
+  workflowStates: WorkflowState[];
+  onRefresh: () => Promise<unknown> | void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState("#4F7CFF");
+  const [newCategory, setNewCategory] = useState<WorkflowState["category"]>("unstarted");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [editingColor, setEditingColor] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]> | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [retry, setRetry] = useState<(() => void) | null>(null);
+  const mutationKeyRef = useRef<{ key: string; signature: string } | null>(null);
+
+  type WorkflowMutation = (mutationKey: string) => Promise<void>;
+
+  function startEdit(state: WorkflowState) {
+    setEditingId(state.id);
+    setEditingName(state.name);
+    setEditingColor(state.color);
+    setError(null);
+    setFieldErrors(null);
+    setSaved(null);
+    setRetry(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingName("");
+    setEditingColor("");
+    setError(null);
+    setFieldErrors(null);
+    setRetry(null);
+  }
+
+  async function executeMutation(
+    operation: WorkflowMutation,
+    successMessage: string,
+    signature: string,
+    onSuccess?: () => void,
+  ): Promise<boolean> {
+    setSaving(true);
+    setError(null);
+    setFieldErrors(null);
+    setSaved(null);
+    const previous = mutationKeyRef.current;
+    const mutationKey =
+      previous && previous.signature === signature ? previous.key : idempotencyKey();
+    try {
+      await operation(mutationKey);
+      mutationKeyRef.current = null;
+      setRetry(null);
+      setFieldErrors(null);
+      await onRefresh();
+      onSuccess?.();
+      setSaved(successMessage);
+      return true;
+    } catch (cause) {
+      mutationKeyRef.current = { key: mutationKey, signature };
+      const message =
+        cause instanceof ApiError && cause.fieldErrors
+          ? Object.values(cause.fieldErrors).flat().join(" ")
+          : cause instanceof ApiError
+            ? cause.message
+            : "Workflowの保存に失敗しました。";
+      setError(message);
+      setFieldErrors(cause instanceof ApiError ? (cause.fieldErrors ?? null) : null);
+      setRetry(() => () => void executeMutation(operation, successMessage, signature, onSuccess));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function fieldError(field: string): string | null {
+    const messages = fieldErrors?.[field];
+    return messages?.length ? messages.join(" ") : null;
+  }
+
+  async function createState() {
+    if (!newName.trim() || saving) return;
+    const name = newName;
+    const color = newColor;
+    const category = newCategory;
+    await executeMutation(
+      (mutationKey) =>
+        apiPost("/api/v1/workflow-states", {
+          idempotencyKey: mutationKey,
+          name,
+          category,
+          color,
+        }),
+      "Workflowを追加しました。",
+      JSON.stringify({ action: "create", name, color, category }),
+      () => {
+        setNewName("");
+        setNewColor("#4F7CFF");
+      },
+    );
+  }
+
+  async function updateState(stateId: string) {
+    if (!editingName.trim() || saving) return;
+    const name = editingName;
+    const color = editingColor;
+    await executeMutation(
+      (mutationKey) =>
+        apiPatch(`/api/v1/workflow-states/${stateId}`, {
+          idempotencyKey: mutationKey,
+          name,
+          color,
+        }),
+      "Workflowを更新しました。",
+      JSON.stringify({ action: "update", stateId, name, color }),
+      cancelEdit,
+    );
+  }
+
+  function updatePosition(stateId: string, position: number) {
+    if (saving) return;
+    void executeMutation(
+      (mutationKey) =>
+        apiPatch(`/api/v1/workflow-states/${stateId}`, {
+          idempotencyKey: mutationKey,
+          position,
+        }),
+      "Workflowの順序を更新しました。",
+      JSON.stringify({ action: "position", stateId, position }),
+    );
+  }
+
+  function makeDefault(stateId: string) {
+    if (saving) return;
+    void executeMutation(
+      (mutationKey) =>
+        apiPatch(`/api/v1/workflow-states/${stateId}`, {
+          idempotencyKey: mutationKey,
+          isDefault: true,
+        }),
+      "既定Workflowを更新しました。",
+      JSON.stringify({ action: "default", stateId }),
+    );
+  }
+
+  function removeState(state: WorkflowState) {
+    if (saving || state.isDefault) return;
+    void executeMutation(
+      (mutationKey) => apiDelete(`/api/v1/workflow-states/${state.id}`, mutationKey),
+      "Workflowを削除しました。",
+      JSON.stringify({ action: "delete", stateId: state.id }),
+    );
+  }
+
+  return (
+    <section
+      className="settings-card label-settings-card"
+      aria-labelledby="workflow-settings-title"
+    >
+      <div className="settings-card-title">
+        <span className="settings-icon purple">≡</span>
+        <div>
+          <h2 id="workflow-settings-title">Workflow</h2>
+          <p>Issueの状態・順序・既定値</p>
+        </div>
+      </div>
+      <div className="label-editor-row workflow-editor-row">
+        <input
+          className="text-input"
+          aria-label="Workflow名"
+          aria-invalid={Boolean(fieldError("name"))}
+          aria-describedby={fieldError("name") ? "workflow-create-name-error" : undefined}
+          value={newName}
+          onChange={(event) => setNewName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void createState();
+          }}
+          placeholder="例：Review"
+          disabled={saving}
+        />
+        <input
+          className="text-input label-color-input"
+          aria-label="Workflow色"
+          aria-invalid={Boolean(fieldError("color"))}
+          aria-describedby={fieldError("color") ? "workflow-create-color-error" : undefined}
+          value={newColor}
+          onChange={(event) => setNewColor(event.target.value)}
+          disabled={saving}
+        />
+        <select
+          aria-label="Workflowカテゴリ"
+          aria-invalid={Boolean(fieldError("category"))}
+          aria-describedby={fieldError("category") ? "workflow-create-category-error" : undefined}
+          value={newCategory}
+          onChange={(event) => setNewCategory(event.target.value as WorkflowState["category"])}
+          disabled={saving}
+        >
+          {Object.entries(workflowCategoryLabels).map(([category, label]) => (
+            <option value={category} key={category}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <button
+          className="button secondary"
+          onClick={() => void createState()}
+          disabled={saving || !newName.trim()}
+        >
+          {saving ? "保存中…" : "追加"}
+        </button>
+      </div>
+      {fieldError("name") && (
+        <span id="workflow-create-name-error" className="setting-field-error" role="alert">
+          {fieldError("name")}
+        </span>
+      )}
+      {fieldError("color") && (
+        <span id="workflow-create-color-error" className="setting-field-error" role="alert">
+          {fieldError("color")}
+        </span>
+      )}
+      {fieldError("category") && (
+        <span id="workflow-create-category-error" className="setting-field-error" role="alert">
+          {fieldError("category")}
+        </span>
+      )}
+      {error && (
+        <div className="detail-live-error" role="alert">
+          {error}
+          {retry && (
+            <button className="text-button" onClick={retry} disabled={saving}>
+              再試行
+            </button>
+          )}
+        </div>
+      )}
+      {saved && (
+        <p className="setting-note" role="status">
+          {saved}
+        </p>
+      )}
+      <div className="label-settings-list workflow-settings-list">
+        {workflowStates.map((state, index) =>
+          editingId === state.id ? (
+            <div className="label-settings-row workflow-settings-row" key={state.id}>
+              <input
+                className="text-input"
+                aria-label={`${state.name}のWorkflow名`}
+                aria-invalid={Boolean(fieldError("name"))}
+                aria-describedby={fieldError("name") ? "workflow-edit-name-error" : undefined}
+                value={editingName}
+                onChange={(event) => setEditingName(event.target.value)}
+                disabled={saving}
+              />
+              <input
+                className="text-input label-color-input"
+                aria-label={`${state.name}のWorkflow色`}
+                aria-invalid={Boolean(fieldError("color"))}
+                aria-describedby={fieldError("color") ? "workflow-edit-color-error" : undefined}
+                value={editingColor}
+                onChange={(event) => setEditingColor(event.target.value)}
+                disabled={saving}
+              />
+              <button
+                className="button secondary"
+                onClick={() => void updateState(state.id)}
+                disabled={saving || !editingName.trim()}
+              >
+                保存
+              </button>
+              <button className="text-button" onClick={cancelEdit} disabled={saving}>
+                取消
+              </button>
+              {fieldError("name") && (
+                <span id="workflow-edit-name-error" className="setting-field-error" role="alert">
+                  {fieldError("name")}
+                </span>
+              )}
+              {fieldError("color") && (
+                <span id="workflow-edit-color-error" className="setting-field-error" role="alert">
+                  {fieldError("color")}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="label-settings-row workflow-settings-row" key={state.id}>
+              <span className="label-chip">
+                <span className="label-chip-dot" style={{ background: state.color }} />
+                {state.name}
+              </span>
+              <span className="setting-value">{workflowCategoryLabels[state.category]}</span>
+              {state.isDefault && <span className="setting-value">既定</span>}
+              <button
+                className="text-button"
+                onClick={() => updatePosition(state.id, index - 1)}
+                disabled={saving || index === 0}
+                aria-label={`${state.name}を上へ移動`}
+              >
+                ↑
+              </button>
+              <button
+                className="text-button"
+                onClick={() => updatePosition(state.id, index + 1)}
+                disabled={saving || index === workflowStates.length - 1}
+                aria-label={`${state.name}を下へ移動`}
+              >
+                ↓
+              </button>
+              <button className="text-button" onClick={() => startEdit(state)} disabled={saving}>
+                編集
+              </button>
+              <button
+                className="text-button"
+                onClick={() => makeDefault(state.id)}
+                disabled={saving || state.isDefault}
+              >
+                既定にする
+              </button>
+              <button
+                className="text-button danger"
+                onClick={() => removeState(state)}
+                disabled={saving || state.isDefault}
+              >
+                削除
+              </button>
+            </div>
+          ),
+        )}
+        {workflowStates.length === 0 && <p className="detail-empty">Workflowはまだありません。</p>}
+      </div>
+    </section>
+  );
+}
+
+export function RunOverlay({
   run,
   busy,
   onResume,
@@ -3712,21 +4245,41 @@ function RunOverlay({
   onResume: () => void;
 }) {
   const blocking = ["pending", "running"].includes(run.status);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (blocking) overlayRef.current?.focus();
+  }, [blocking]);
+
   return (
-    <div className={`run-overlay ${blocking ? "blocking" : ""}`} role="status">
+    <div
+      ref={overlayRef}
+      className={`run-overlay ${blocking ? "blocking" : ""}`}
+      role={blocking ? "dialog" : "status"}
+      aria-modal={blocking || undefined}
+      aria-labelledby="run-overlay-title"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (!blocking || event.key !== "Tab") return;
+        event.preventDefault();
+        overlayRef.current?.focus();
+      }}
+    >
       <div className="run-overlay-card">
         <div className="run-spinner">
           {blocking ? "◌" : run.status === "failed" || run.status === "paused" ? "!" : "✓"}
         </div>
         <span className="eyebrow coral">BACKGROUND RUN</span>
-        <h2>
-          {run.status === "running"
-            ? "ワークスペースを整えています"
-            : run.status === "paused"
-              ? "処理が一時停止しました"
-              : run.status === "failed"
-                ? "処理の再開が必要です"
-                : "Maintenance complete"}
+        <h2 id="run-overlay-title">
+          {run.status === "pending"
+            ? "処理を開始しています"
+            : run.status === "running"
+              ? "ワークスペースを整えています"
+              : run.status === "paused"
+                ? "処理が一時停止しました"
+                : run.status === "failed"
+                  ? "処理の再開が必要です"
+                  : "Maintenance complete"}
         </h2>
         <p>
           {run.progress.current_step

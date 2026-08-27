@@ -47,7 +47,7 @@ export async function openStoreSession(
   return {
     store,
     get needsInitialPersist() {
-      return needsInitialPersist;
+      return !persisted && (needsInitialPersist || store.hasBackgroundStateChanges());
     },
     persist: async () => {
       if (persisted) return;
@@ -60,6 +60,7 @@ export async function openStoreSession(
         await writeStoreSnapshot(database, userId, expectedVersion, snapshot, Date.now());
         persisted = true;
         needsInitialPersist = false;
+        store.clearBackgroundStateChanges();
       } catch (error) {
         if (error instanceof SnapshotVersionConflict)
           throw conflict("D1_WRITE_CONFLICT", "別の操作が先に保存されました。再試行してください。");

@@ -26,6 +26,7 @@ import {
   RunStatus,
   priorities,
   runSteps,
+  workflowCategories,
 } from "./model";
 import { conflict, locked, notFound, validationError } from "./errors";
 import { canonicalMutationJson } from "../shared/canonical-json";
@@ -37,8 +38,14 @@ import {
   type CycleMetadataMutation,
   type LabelMutation,
   type LabelUpdate,
+  type PreferencesMutation,
   type ReorderIssueInput,
   type SavedViewUpdate,
+  type WorkflowStateCreateMutation,
+  type WorkflowStateUpdateMutation,
+  isValidTimeZone,
+  workflowStateColorSchema,
+  workflowStateNameSchema,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 
@@ -158,6 +165,9 @@ export type UpdateViewInput = SavedViewUpdate;
 export type CreateLabelInput = LabelMutation;
 export type UpdateLabelInput = LabelUpdate;
 export type BulkIssueInput = BulkIssueMutation;
+export type PreferencesInput = PreferencesMutation;
+export type WorkflowStateCreateInput = WorkflowStateCreateMutation;
+export type WorkflowStateUpdateInput = WorkflowStateUpdateMutation;
 
 export interface MaintenanceRunInput {
   kind: "maintenance";
@@ -266,6 +276,7 @@ export class OrbitStore {
     movedAt: number;
   }> = [];
   private seededUsers = new Set<string>();
+  private backgroundStateDirty = false;
 
   constructor(private readonly clock: () => number = nowMs) {}
 
@@ -703,6 +714,241 @@ export class OrbitStore {
       .sort((a, b) => a.position - b.position);
   }
 
+  private validateWorkflowStateName(name: string): string {
+    if (typeof name !== "string" || !workflowStateNameSchema.safeParse(name).success)
+      throw validationError({ name: ["Workflow名はUnicode 1〜100文字で入力してください。"] });
+    const normalized = name.trim();
+    if (!normalized) throw validationError({ name: ["Workflow名は1文字以上で入力してください。"] });
+    return normalized;
+  }
+
+  private validateWorkflowStateColor(color: string): string {
+    if (typeof color !== "string" || !workflowStateColorSchema.safeParse(color).success)
+      throw validationError({ color: ["色は#RRGGBB形式で指定してください。"] });
+    return color.toUpperCase();
+  }
+
+  private normalizeWorkflowPositions(userId: string): void {
+    this.ownedWorkflowStates(userId).forEach((state, index) => {
+      state.position = index;
+    });
+  }
+
+  createWorkflowState(userId: string, input: WorkflowStateCreateInput): WorkflowState {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<WorkflowState>(
+      userId,
+      "workflow.create",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+    validateKey(input.idempotencyKey);
+    if (!workflowCategories.includes(input.category))
+      throw validationError({ category: ["Workflowカテゴリが不正です。"] });
+
+    const name = this.validateWorkflowStateName(input.name);
+    const color = this.validateWorkflowStateColor(input.color);
+    this.normalizeWorkflowPositions(userId);
+    const states = this.ownedWorkflowStates(userId);
+    const beforeDefaults = new Map(states.map((state) => [state.id, state.isDefault]));
+    const makeDefault = input.isDefault === true || !states.some((state) => state.isDefault);
+    if (makeDefault) states.forEach((state) => (state.isDefault = false));
+    const state: WorkflowState = {
+      id: createId("status"),
+      userId,
+      name,
+      category: input.category,
+      color,
+      position: states.length,
+      isDefault: makeDefault,
+    };
+    this.workflowStates.set(state.id, state);
+    for (const current of this.ownedWorkflowStates(userId)) {
+      if (current.id === state.id) {
+        this.recordActivity(
+          userId,
+          "workflow_state",
+          current.id,
+          "created",
+          `${input.idempotencyKey}:${current.id}`,
+          null,
+          {
+            name: current.name,
+            category: current.category,
+            color: current.color,
+            position: current.position,
+            isDefault: current.isDefault,
+          },
+        );
+        this.recordOutbox(
+          userId,
+          "workflow_state.created",
+          `workflow_state.created:${current.id}`,
+          { workflowStateId: current.id },
+        );
+      } else if (beforeDefaults.get(current.id) !== current.isDefault) {
+        this.recordActivity(
+          userId,
+          "workflow_state",
+          current.id,
+          "updated",
+          `${input.idempotencyKey}:${current.id}`,
+          { isDefault: beforeDefaults.get(current.id) },
+          { isDefault: current.isDefault },
+        );
+        this.recordOutbox(
+          userId,
+          "workflow_state.updated",
+          `workflow_state.updated:${current.id}:${input.idempotencyKey}`,
+          { workflowStateId: current.id },
+        );
+      }
+    }
+    this.recordReceipt(userId, "workflow.create", input.idempotencyKey, input, state);
+    return state;
+  }
+
+  updateWorkflowState(
+    userId: string,
+    stateId: string,
+    input: WorkflowStateUpdateInput,
+  ): WorkflowState {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const request = { stateId, ...input };
+    const existing = this.checkReceipt<WorkflowState>(
+      userId,
+      "workflow.update",
+      input.idempotencyKey,
+      request,
+    );
+    if (existing) return existing;
+    const state = this.workflowStates.get(stateId);
+    if (!state || state.userId !== userId) throw notFound();
+    if (input.position !== undefined && (!Number.isInteger(input.position) || input.position < 0))
+      throw validationError({ position: ["positionは0以上の整数で指定してください。"] });
+    if (input.isDefault === false && state.isDefault)
+      throw validationError({
+        isDefault: ["既定Workflowは別の状態を既定にしてから変更してください。"],
+      });
+
+    const nextName =
+      input.name === undefined ? state.name : this.validateWorkflowStateName(input.name);
+    const nextColor =
+      input.color === undefined ? state.color : this.validateWorkflowStateColor(input.color);
+    const states = this.ownedWorkflowStates(userId);
+    const beforeById = new Map(
+      states.map((item) => [
+        item.id,
+        {
+          name: item.name,
+          category: item.category,
+          color: item.color,
+          position: item.position,
+          isDefault: item.isDefault,
+        },
+      ]),
+    );
+    state.name = nextName;
+    state.color = nextColor;
+    if (input.isDefault === true) {
+      states.forEach((item) => (item.isDefault = item.id === stateId));
+    }
+    if (input.position !== undefined) {
+      const ordered = states.filter((item) => item.id !== stateId);
+      ordered.splice(Math.min(input.position, ordered.length), 0, state);
+      ordered.forEach((item, index) => (item.position = index));
+    } else {
+      this.normalizeWorkflowPositions(userId);
+    }
+
+    for (const current of this.ownedWorkflowStates(userId)) {
+      const before = beforeById.get(current.id);
+      const after = {
+        name: current.name,
+        category: current.category,
+        color: current.color,
+        position: current.position,
+        isDefault: current.isDefault,
+      };
+      if (JSON.stringify(before) === JSON.stringify(after)) continue;
+      this.recordActivity(
+        userId,
+        "workflow_state",
+        current.id,
+        "updated",
+        `${input.idempotencyKey}:${current.id}`,
+        before ?? null,
+        after,
+      );
+      this.recordOutbox(
+        userId,
+        "workflow_state.updated",
+        `workflow_state.updated:${current.id}:${input.idempotencyKey}`,
+        { workflowStateId: current.id },
+      );
+    }
+    this.recordReceipt(userId, "workflow.update", input.idempotencyKey, request, state);
+    return state;
+  }
+
+  deleteWorkflowState(userId: string, stateId: string, idempotencyKey: string): void {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const request = { stateId };
+    const existing = this.checkReceipt<boolean>(userId, "workflow.delete", idempotencyKey, request);
+    if (existing !== null) return;
+    const state = this.workflowStates.get(stateId);
+    if (!state || state.userId !== userId) throw notFound();
+    if (state.isDefault) throw validationError({ stateId: ["既定Workflowは削除できません。"] });
+    if (
+      [...this.issues.values()].some(
+        (issue) => issue.userId === userId && issue.statusId === stateId,
+      )
+    )
+      throw validationError({ stateId: ["Issueが参照中のWorkflowは削除できません。"] });
+
+    const beforeById = new Map(
+      this.ownedWorkflowStates(userId).map((item) => [item.id, { position: item.position }]),
+    );
+    this.workflowStates.delete(stateId);
+    this.normalizeWorkflowPositions(userId);
+    this.recordActivity(
+      userId,
+      "workflow_state",
+      stateId,
+      "deleted",
+      `${idempotencyKey}:${stateId}`,
+      { name: state.name, category: state.category, color: state.color, position: state.position },
+      null,
+    );
+    this.recordOutbox(userId, "workflow_state.deleted", `workflow_state.deleted:${stateId}`, {
+      workflowStateId: stateId,
+    });
+    for (const current of this.ownedWorkflowStates(userId)) {
+      const before = beforeById.get(current.id);
+      if (!before || before.position === current.position) continue;
+      this.recordActivity(
+        userId,
+        "workflow_state",
+        current.id,
+        "reordered",
+        `${idempotencyKey}:${current.id}`,
+        before,
+        { position: current.position },
+      );
+      this.recordOutbox(
+        userId,
+        "workflow_state.reordered",
+        `workflow_state.reordered:${current.id}:${idempotencyKey}`,
+        { workflowStateId: current.id, position: current.position },
+      );
+    }
+    this.recordReceipt(userId, "workflow.delete", idempotencyKey, request, true);
+  }
+
   ownedProjectStatuses(userId: string): ProjectStatus[] {
     return [...this.projectStatuses.values()]
       .filter((item) => item.userId === userId)
@@ -835,13 +1081,16 @@ export class OrbitStore {
   }
 
   private assertUnlocked(userId: string, runId?: string): void {
+    this.expireRunIfNeeded(userId);
     const lock = this.locks.get(userId);
-    if (
-      lock?.status === "running" &&
-      lock.runId !== runId &&
-      (lock.leaseExpiresAt ?? 0) > this.clock()
-    )
-      throw locked();
+    if (lock?.status === "running" && lock.runId !== runId) throw locked();
+    const pendingRun = [...this.runs.values()].find(
+      (run) =>
+        run.user_id === userId &&
+        run.run_id !== runId &&
+        (run.status === "pending" || run.status === "running"),
+    );
+    if (pendingRun) throw locked();
   }
 
   private recordActivity(
@@ -2060,6 +2309,7 @@ export class OrbitStore {
     >,
     idempotencyKey: string,
   ): Preferences {
+    this.assertOwner(userId);
     this.assertUnlocked(userId);
     const existing = this.checkReceipt<Preferences>(
       userId,
@@ -2070,9 +2320,14 @@ export class OrbitStore {
     if (existing) return existing;
     const preferences = this.preferences.get(userId);
     if (!preferences) throw notFound();
-    if (patch.locale && !["ja", "en"].includes(patch.locale))
+    if (
+      patch.timezone !== undefined &&
+      (typeof patch.timezone !== "string" || !isValidTimeZone(patch.timezone))
+    )
+      throw validationError({ timezone: ["IANA timezoneを指定してください。"] });
+    if (patch.locale !== undefined && !["ja", "en"].includes(patch.locale))
       throw validationError({ locale: ["ja / en から選択してください。"] });
-    if (patch.theme && !["light", "dark", "system"].includes(patch.theme))
+    if (patch.theme !== undefined && !["light", "dark", "system"].includes(patch.theme))
       throw validationError({ theme: ["light / dark / systemから選択してください。"] });
     if (
       patch.colorTheme !== undefined &&
@@ -2086,6 +2341,8 @@ export class OrbitStore {
         ["timezone", "locale", "theme", "colorTheme", "estimateEnabled"].includes(key),
       ),
     );
+    if (patch.estimateEnabled !== undefined && typeof patch.estimateEnabled !== "boolean")
+      throw validationError({ estimateEnabled: ["estimateEnabledはbooleanで指定してください。"] });
     Object.assign(preferences, safePatch);
     this.recordReceipt(userId, "preferences.update", idempotencyKey, patch, preferences);
     return preferences;
@@ -2100,6 +2357,14 @@ export class OrbitStore {
       )
       .sort((a, b) => b.requested_at - a.requested_at);
     return eligible[0] ?? null;
+  }
+
+  hasBackgroundStateChanges(): boolean {
+    return this.backgroundStateDirty;
+  }
+
+  clearBackgroundStateChanges(): void {
+    this.backgroundStateDirty = false;
   }
 
   getRun(userId: string, runId: string): BackgroundRun {
@@ -2142,14 +2407,17 @@ export class OrbitStore {
         );
       return existing;
     }
+    this.expireRunIfNeeded(userId);
     const now = this.clock();
     const lock = this.locks.get(userId)!;
-    if (lock.status === "running" && (lock.leaseExpiresAt ?? 0) > now) {
+    const blockingRun = [...this.runs.values()].find(
+      (run) => run.user_id === userId && (run.status === "pending" || run.status === "running"),
+    );
+    if (blockingRun || (lock.status === "running" && (lock.leaseExpiresAt ?? 0) > now)) {
       const rejected: BackgroundRun = this.makeRun(userId, input, "rejected", now);
       this.runs.set(rejected.run_id, rejected);
       throw locked();
     }
-    if (lock.leaseExpiresAt !== null && lock.leaseExpiresAt <= now) this.expireRunIfNeeded(userId);
     const run = this.makeRun(userId, input, "running", now);
     lock.status = "running";
     lock.runId = run.run_id;
@@ -2320,6 +2588,13 @@ export class OrbitStore {
 
   resumeRun(userId: string, runId: string): PublicRunSummary {
     const run = this.getRun(userId, runId);
+    const blockingRun = [...this.runs.values()].find(
+      (candidate) =>
+        candidate.user_id === userId &&
+        candidate.run_id !== runId &&
+        (candidate.status === "pending" || candidate.status === "running"),
+    );
+    if (blockingRun) throw locked();
     if (!["paused", "failed"].includes(run.status)) return this.publicRun(run);
     const now = this.clock();
     const lock = this.locks.get(userId)!;
@@ -2365,6 +2640,7 @@ export class OrbitStore {
     lock.runId = null;
     lock.token = null;
     lock.leaseExpiresAt = null;
+    this.backgroundStateDirty = true;
   }
 
   private runCycleTransition(userId: string, runId: string): number {

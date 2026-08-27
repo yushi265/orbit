@@ -14,6 +14,8 @@
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
 - Issue Listの手動順は `POST /api/v1/issues/reorder` の `{ idempotencyKey, issueId, version, beforeIssueId }` で保存し、Boardは共通Orderを表示するがDnDはListに限定する（参照: `src/server/api.ts`、`src/routes/api/v1/issues/reorder.ts`、`src/shared/contracts/issues.ts`）。
 - Preferencesの表示モード`theme`とは別に`colorTheme`（`coral / ocean / violet / forest / amber`）を`PATCH /api/v1/preferences`で保存する（参照: `src/shared/contracts/enums.ts`、`src/db/schema.ts`、`src/components/theme.ts`）。
+- Phase 1 Preferencesは`PATCH /api/v1/preferences`で`timezone`（IANA）、`locale`、`theme`、`colorTheme`、`estimateEnabled`をstrict検証し、Workflowは`GET/POST /api/v1/workflow-states`と`PATCH/DELETE /api/v1/workflow-states/:workflowStateId`でOwner scopedに管理する（参照: `src/shared/contracts/preferences.ts`、`src/shared/contracts/workflow.ts`、`src/server/api.ts`、`src/routes/api/v1/workflow-states/`）。
+- Production Ownerの初期化は`pnpm run db:bootstrap:production`で行い、`OWNER_USER_ID` / `OWNER_EMAIL` / 任意の`ORBIT_OWNER_NAME`をローカル検証してからWranglerのproduction D1へ3つのOwner関連行を`ON CONFLICT DO NOTHING`で投入する（参照: `scripts/bootstrap-owner.mjs`、`docs/deployment.md`）。
 
 ## 主要データ構造
 
@@ -41,7 +43,9 @@
 - Bulkはpatchを1属性に限定し、参照先を全件検証してから適用する。Activity mutation keyはIssueごとにsuffixを付け、全体Receiptとは分離する（参照: `src/shared/contracts/bulk.ts`、`src/server/store.ts`）。
 - SnapshotのVersion CASは既存Snapshotの読み取りではVersionを進めず、成功したMutationまたはSnapshot未作成時の初回成功GETだけがD1行を初期化・更新する。既存Versionとの不一致は`D1_WRITE_CONFLICT`になる（参照: `src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 - Drizzleの既存`user_preferences`へ列を追加する再作成migrationでは、旧テーブルに存在しない新列をSELECTせず、固定default（今回の`color_theme`は`'coral'`）をSELECTする（参照: `drizzle/0002_known_scarlet_spider.sql`）。
+- GETでLease期限切れを検出した場合だけ`OrbitStore`のbackground dirty flagを立て、任意のGET内業務変更を保存せず、Runの`paused`とLock解放だけを次のSnapshotへ永続化する（参照: `src/server/store.ts`、`src/server/store-session.ts`）。
+- Workflowの順序変更はサーバー側で0始まりの連続positionへ正規化し、既定stateまたはIssue参照中stateの削除を先に拒否する。UIのRetryは操作signatureが同じ場合だけ同じidempotencyKeyを再利用する（参照: `src/server/store.ts`、`src/components/OrbitApp.tsx`）。
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / 2026-08-25
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / 2026-08-27

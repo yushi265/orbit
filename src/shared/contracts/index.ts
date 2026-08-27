@@ -10,4 +10,6 @@ export * from "./text";
 export * from "./issue-detail";
 export * from "./labels";
 export * from "./notifications";
+export * from "./preferences";
 export * from "./views";
+export * from "./workflow";

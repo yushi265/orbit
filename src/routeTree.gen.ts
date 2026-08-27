@@ -41,6 +41,8 @@ import { Route as ApiV1ProjectsIndexRouteImport } from './routes/api/v1/projects
 import { Route as ApiV1ProjectsProjectIdRouteImport } from './routes/api/v1/projects/$projectId'
 import { Route as ApiV1ViewsIndexRouteImport } from './routes/api/v1/views/index'
 import { Route as ApiV1ViewsViewIdRouteImport } from './routes/api/v1/views/$viewId'
+import { Route as ApiV1WorkflowStatesIndexRouteImport } from './routes/api/v1/workflow-states/index'
+import { Route as ApiV1WorkflowStatesWorkflowStateIdRouteImport } from './routes/api/v1/workflow-states/$workflowStateId'
 import { Route as ApiV1BackgroundRunsRunIdContinueRouteImport } from './routes/api/v1/background-runs/$runId/continue'
 import { Route as ApiV1BackgroundRunsRunIdResumeRouteImport } from './routes/api/v1/background-runs/$runId/resume'
 import { Route as ApiV1CyclesCycleIdStartRouteImport } from './routes/api/v1/cycles/$cycleId/start'
@@ -213,6 +215,18 @@ const ApiV1ViewsViewIdRoute = ApiV1ViewsViewIdRouteImport.update({
   path: '/api/v1/views/$viewId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1WorkflowStatesIndexRoute =
+  ApiV1WorkflowStatesIndexRouteImport.update({
+    id: '/api/v1/workflow-states/',
+    path: '/api/v1/workflow-states/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1WorkflowStatesWorkflowStateIdRoute =
+  ApiV1WorkflowStatesWorkflowStateIdRouteImport.update({
+    id: '/api/v1/workflow-states/$workflowStateId',
+    path: '/api/v1/workflow-states/$workflowStateId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiV1BackgroundRunsRunIdContinueRoute =
   ApiV1BackgroundRunsRunIdContinueRouteImport.update({
     id: '/continue',
@@ -280,6 +294,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
+  '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs/': typeof ApiV1BackgroundRunsIndexRoute
   '/api/v1/cycles/': typeof ApiV1CyclesIndexRoute
   '/api/v1/issues/': typeof ApiV1IssuesIndexRoute
@@ -287,6 +302,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/notifications/': typeof ApiV1NotificationsIndexRoute
   '/api/v1/projects/': typeof ApiV1ProjectsIndexRoute
   '/api/v1/views/': typeof ApiV1ViewsIndexRoute
+  '/api/v1/workflow-states/': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
@@ -321,6 +337,7 @@ export interface FileRoutesByTo {
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
+  '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs': typeof ApiV1BackgroundRunsIndexRoute
   '/api/v1/cycles': typeof ApiV1CyclesIndexRoute
   '/api/v1/issues': typeof ApiV1IssuesIndexRoute
@@ -328,6 +345,7 @@ export interface FileRoutesByTo {
   '/api/v1/notifications': typeof ApiV1NotificationsIndexRoute
   '/api/v1/projects': typeof ApiV1ProjectsIndexRoute
   '/api/v1/views': typeof ApiV1ViewsIndexRoute
+  '/api/v1/workflow-states': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
@@ -363,6 +381,7 @@ export interface FileRoutesById {
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
+  '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs/': typeof ApiV1BackgroundRunsIndexRoute
   '/api/v1/cycles/': typeof ApiV1CyclesIndexRoute
   '/api/v1/issues/': typeof ApiV1IssuesIndexRoute
@@ -370,6 +389,7 @@ export interface FileRoutesById {
   '/api/v1/notifications/': typeof ApiV1NotificationsIndexRoute
   '/api/v1/projects/': typeof ApiV1ProjectsIndexRoute
   '/api/v1/views/': typeof ApiV1ViewsIndexRoute
+  '/api/v1/workflow-states/': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
@@ -406,6 +426,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
     | '/api/v1/views/$viewId'
+    | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs/'
     | '/api/v1/cycles/'
     | '/api/v1/issues/'
@@ -413,6 +434,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications/'
     | '/api/v1/projects/'
     | '/api/v1/views/'
+    | '/api/v1/workflow-states/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
     | '/api/v1/cycles/$cycleId/start'
@@ -447,6 +469,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
     | '/api/v1/views/$viewId'
+    | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs'
     | '/api/v1/cycles'
     | '/api/v1/issues'
@@ -454,6 +477,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications'
     | '/api/v1/projects'
     | '/api/v1/views'
+    | '/api/v1/workflow-states'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
     | '/api/v1/cycles/$cycleId/start'
@@ -488,6 +512,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
     | '/api/v1/views/$viewId'
+    | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs/'
     | '/api/v1/cycles/'
     | '/api/v1/issues/'
@@ -495,6 +520,7 @@ export interface FileRouteTypes {
     | '/api/v1/notifications/'
     | '/api/v1/projects/'
     | '/api/v1/views/'
+    | '/api/v1/workflow-states/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
     | '/api/v1/cycles/$cycleId/start'
@@ -530,6 +556,7 @@ export interface RootRouteChildren {
   ApiV1NotificationsNotificationIdRoute: typeof ApiV1NotificationsNotificationIdRoute
   ApiV1ProjectsProjectIdRoute: typeof ApiV1ProjectsProjectIdRoute
   ApiV1ViewsViewIdRoute: typeof ApiV1ViewsViewIdRoute
+  ApiV1WorkflowStatesWorkflowStateIdRoute: typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   ApiV1BackgroundRunsIndexRoute: typeof ApiV1BackgroundRunsIndexRoute
   ApiV1CyclesIndexRoute: typeof ApiV1CyclesIndexRoute
   ApiV1IssuesIndexRoute: typeof ApiV1IssuesIndexRoute
@@ -537,6 +564,7 @@ export interface RootRouteChildren {
   ApiV1NotificationsIndexRoute: typeof ApiV1NotificationsIndexRoute
   ApiV1ProjectsIndexRoute: typeof ApiV1ProjectsIndexRoute
   ApiV1ViewsIndexRoute: typeof ApiV1ViewsIndexRoute
+  ApiV1WorkflowStatesIndexRoute: typeof ApiV1WorkflowStatesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -765,6 +793,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1ViewsViewIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/workflow-states/': {
+      id: '/api/v1/workflow-states/'
+      path: '/api/v1/workflow-states'
+      fullPath: '/api/v1/workflow-states/'
+      preLoaderRoute: typeof ApiV1WorkflowStatesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/workflow-states/$workflowStateId': {
+      id: '/api/v1/workflow-states/$workflowStateId'
+      path: '/api/v1/workflow-states/$workflowStateId'
+      fullPath: '/api/v1/workflow-states/$workflowStateId'
+      preLoaderRoute: typeof ApiV1WorkflowStatesWorkflowStateIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/background-runs/$runId/continue': {
       id: '/api/v1/background-runs/$runId/continue'
       path: '/continue'
@@ -914,6 +956,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1NotificationsNotificationIdRoute: ApiV1NotificationsNotificationIdRoute,
   ApiV1ProjectsProjectIdRoute: ApiV1ProjectsProjectIdRoute,
   ApiV1ViewsViewIdRoute: ApiV1ViewsViewIdRoute,
+  ApiV1WorkflowStatesWorkflowStateIdRoute:
+    ApiV1WorkflowStatesWorkflowStateIdRoute,
   ApiV1BackgroundRunsIndexRoute: ApiV1BackgroundRunsIndexRoute,
   ApiV1CyclesIndexRoute: ApiV1CyclesIndexRoute,
   ApiV1IssuesIndexRoute: ApiV1IssuesIndexRoute,
@@ -921,6 +965,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1NotificationsIndexRoute: ApiV1NotificationsIndexRoute,
   ApiV1ProjectsIndexRoute: ApiV1ProjectsIndexRoute,
   ApiV1ViewsIndexRoute: ApiV1ViewsIndexRoute,
+  ApiV1WorkflowStatesIndexRoute: ApiV1WorkflowStatesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

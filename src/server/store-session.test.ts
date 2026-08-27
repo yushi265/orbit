@@ -4,7 +4,7 @@ import { readStoreSnapshot, writeStoreSnapshot } from "../db/repositories/store-
 import { ServiceError } from "./errors";
 import { withOwner, json } from "./http";
 import { openStoreSession } from "./store-session";
-import { OrbitStore, resetOrbitStores } from "./store";
+import { OrbitStore, resetOrbitStores, type OrbitStoreSnapshot } from "./store";
 
 class FakeD1 {
   private readonly rows = new Map<
@@ -366,6 +366,46 @@ describe("store session", () => {
     await expect(
       openStoreSession("owner-1", "owner@example.com", { APP_ENV: "production" }),
     ).rejects.toThrow("Production D1 binding is missing");
+  });
+
+  it("[状態遷移] persists a lease expiry discovered during a successful GET", async () => {
+    let now = 1_700_000_000_000;
+    const database = new FakeD1() as unknown as D1Database;
+    const seed = new OrbitStore(() => now);
+    seed.ensureOwner("owner-lease", "lease@example.com");
+    seed.ensureUpcomingCycles("owner-lease");
+    const run = seed.startRun("owner-lease", {
+      kind: "maintenance",
+      idempotencyKey: "lease-expiry-run",
+    });
+    await writeStoreSnapshot(database, "owner-lease", 0, seed.toSnapshot(), now);
+    now = run.leaseExpiresAt!;
+    const environment = { APP_ENV: "production", DB: database };
+    const resolvedOwner = {
+      userId: "owner-lease",
+      email: "lease@example.com",
+      accessAuthenticated: true,
+    };
+
+    const response = await withOwner(
+      new Request("https://orbit.example/api/v1/background-runs/current"),
+      async ({ owner }) => {
+        const current = owner.store.currentRun("owner-lease");
+        return json({ run: current ? owner.store.publicRun(current) : null });
+      },
+      {
+        resolveOwner: async () => resolvedOwner,
+        openStoreSession: (userId, email) => openStoreSession(userId, email, environment),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ run: { status: "paused" } });
+    const persisted = await readStoreSnapshot(database, "owner-lease");
+    const snapshot = persisted?.snapshot as OrbitStoreSnapshot | undefined;
+    expect(persisted?.version).toBe(2);
+    expect(snapshot?.runs[0]?.status).toBe("paused");
+    expect(snapshot?.locks[0]?.status).toBe("idle");
   });
 
   it("keeps development sessions on the existing Memory Store", async () => {

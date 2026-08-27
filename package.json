@@ -13,6 +13,7 @@
     "deploy:preflight": "node scripts/deploy-preflight.mjs",
     "deploy:dry-run": "pnpm run build:production && pnpm run deploy:preflight && pnpm exec wrangler deploy --dry-run",
     "deploy:production": "pnpm run build:production && pnpm run deploy:preflight && pnpm exec wrangler d1 migrations apply orbit --remote --config wrangler.jsonc --env production && pnpm exec wrangler deploy --keep-vars",
+    "db:bootstrap:production": "node scripts/bootstrap-owner.mjs",
     "cf-typegen": "wrangler types",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply orbit --remote",
@@ -22,8 +23,8 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
-    "format": "oxfmt package.json tsconfig.json vite.config.ts wrangler.jsonc drizzle.config.ts vitest.config.ts src/styles.css src/env.d.ts src/cloudflare.d.ts src/router.tsx src/components src/db src/lib src/routes src/server src/shared public drizzle",
-    "format:check": "oxfmt --check package.json tsconfig.json vite.config.ts wrangler.jsonc drizzle.config.ts vitest.config.ts src/styles.css src/env.d.ts src/cloudflare.d.ts src/router.tsx src/components src/db src/lib src/routes src/server src/shared public drizzle"
+    "format": "oxfmt package.json tsconfig.json vite.config.ts wrangler.jsonc drizzle.config.ts vitest.config.ts scripts src/styles.css src/env.d.ts src/cloudflare.d.ts src/router.tsx src/components src/db src/lib src/routes src/server src/shared public drizzle",
+    "format:check": "oxfmt --check package.json tsconfig.json vite.config.ts wrangler.jsonc drizzle.config.ts vitest.config.ts scripts src/styles.css src/env.d.ts src/cloudflare.d.ts src/router.tsx src/components src/db src/lib src/routes src/server src/shared public drizzle"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.89.0",

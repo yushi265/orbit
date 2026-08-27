@@ -47,22 +47,28 @@ export async function resolveOwner(
     throw new ServiceError(401, "AUTH_REQUIRED", "認証設定が未完了です。");
   const database = env.DB;
   if (!database) throw new ServiceError(500, "INTERNAL_ERROR", "認証基盤を確認できません。");
+  const issuer = `https://${teamDomain}.cloudflareaccess.com`;
+  let payload;
   try {
-    const issuer = `https://${teamDomain}.cloudflareaccess.com`;
     let jwks = jwksCache.get(issuer);
     if (!jwks) {
       jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
       jwksCache.set(issuer, jwks);
     }
-    const { payload } = await jwtVerify(token, jwks, { issuer, audience });
-    const email = typeof payload.email === "string" ? payload.email : "";
-    if (email.toLowerCase() !== ownerEmail.toLowerCase())
-      throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
-    const owner = await findOwnedUser(createDb({ DB: database }), userId, email);
-    if (!owner) throw new ServiceError(401, "AUTH_REQUIRED", "所有者を確認できません。");
-    return { userId, email, accessAuthenticated: true };
+    ({ payload } = await jwtVerify(token, jwks, { issuer, audience }));
   } catch (error) {
     if (error instanceof ServiceError) throw error;
     throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
   }
+  const email = typeof payload.email === "string" ? payload.email : "";
+  if (email.toLowerCase() !== ownerEmail.toLowerCase())
+    throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
+  let owner;
+  try {
+    owner = await findOwnedUser(createDb({ DB: database }), userId, email);
+  } catch {
+    throw new ServiceError(500, "INTERNAL_ERROR", "認証基盤を確認できません。");
+  }
+  if (!owner) throw new ServiceError(401, "AUTH_REQUIRED", "所有者を確認できません。");
+  return { userId, email, accessAuthenticated: true };
 }

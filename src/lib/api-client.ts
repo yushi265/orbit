@@ -1,3 +1,5 @@
+import { classifyTransportFailure } from "../shared/transport";
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -28,7 +30,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     | { error?: { code?: string; message?: string; fieldErrors?: Record<string, string[]> } }
     | T
     | null;
-  if (response.status === 401 && typeof window !== "undefined") {
+  if (
+    classifyTransportFailure({ status: response.status }) === "auth_required" &&
+    typeof window !== "undefined"
+  ) {
     const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     window.location.assign(returnTo || "/");
   }

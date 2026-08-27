@@ -17,6 +17,8 @@ import {
   UpdateLabelInput,
   UpdateCycleMetadataInput,
   UpdateViewInput,
+  WorkflowStateCreateInput,
+  WorkflowStateUpdateInput,
 } from "./store";
 import { IssueQuery, priorities } from "./model";
 import {
@@ -31,6 +33,7 @@ import {
   labelMutationSchema,
   labelUpdateSchema,
   notificationReadMutationSchema,
+  preferencesMutationSchema,
   projectCreateMutationSchema,
   projectMetadataMutationSchema,
   relationMutationSchema,
@@ -39,6 +42,8 @@ import {
   savedViewMutationSchema,
   savedViewUpdateSchema,
   updateIssueInputSchema,
+  workflowStateCreateMutationSchema,
+  workflowStateUpdateMutationSchema,
 } from "../shared/contracts";
 
 const projectMetadataPatchEnvelopeSchema = z.strictObject({
@@ -78,15 +83,6 @@ function textFromDocument(value: unknown): string {
     ? node.content.map(textFromDocument).join(separator)
     : "";
   return `${ownText}${children}`;
-}
-
-function pickFields(
-  body: Record<string, unknown>,
-  fields: readonly string[],
-): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.filter((field) => field in body).map((field) => [field, body[field]]),
-  );
 }
 
 function parsePriorityList(value: string | null): IssueQuery["filter"]["priorities"] {
@@ -502,17 +498,68 @@ export async function markNotification(
 export async function updatePreferences(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
+    const input = parseContract(preferencesMutationSchema, {
+      ...body,
+      idempotencyKey: bodyMutationKey(body, request),
+    });
     return json(
       {
-        preferences: owner.store.updatePreferences(
-          owner.userId,
-          pickFields(body, ["timezone", "locale", "theme", "colorTheme", "estimateEnabled"]),
-          String(body.idempotencyKey ?? keyFromRequest(request)),
-        ),
+        preferences: owner.store.updatePreferences(owner.userId, input, input.idempotencyKey),
       },
       200,
       requestId,
     );
+  });
+}
+
+export async function listWorkflowStates(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) =>
+    json({ workflowStates: owner.store.ownedWorkflowStates(owner.userId) }, 200, requestId),
+  );
+}
+
+export async function createWorkflowState(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      workflowStateCreateMutationSchema,
+      await parseBody(request),
+    ) as WorkflowStateCreateInput;
+    return json(
+      { workflowState: owner.store.createWorkflowState(owner.userId, input) },
+      200,
+      requestId,
+    );
+  });
+}
+
+export async function updateWorkflowState(
+  request: Request,
+  workflowStateId: string,
+): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      workflowStateUpdateMutationSchema,
+      await parseBody(request),
+    ) as WorkflowStateUpdateInput;
+    return json(
+      {
+        workflowState: owner.store.updateWorkflowState(owner.userId, workflowStateId, input),
+      },
+      200,
+      requestId,
+    );
+  });
+}
+
+export async function deleteWorkflowState(
+  request: Request,
+  workflowStateId: string,
+): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const mutationKey = request.headers.get("Idempotency-Key");
+    if (!mutationKey) throw validationError({ idempotencyKey: ["idempotencyKeyが必要です。"] });
+    owner.store.deleteWorkflowState(owner.userId, workflowStateId, mutationKey);
+    return json({ ok: true }, 200, requestId);
   });
 }
 

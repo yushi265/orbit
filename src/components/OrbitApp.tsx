@@ -1862,18 +1862,20 @@ export function IssuesView({
           完了Issueを表示
         </label>
         <div className="toolbar-spacer" />
-        <button
-          className={`view-toggle ${viewMode === "list" ? "selected" : ""}`}
-          onClick={() => setViewMode("list")}
-        >
-          ☷ List
-        </button>
-        <button
-          className={`view-toggle ${viewMode === "board" ? "selected" : ""}`}
-          onClick={() => setViewMode("board")}
-        >
-          ▦ Board
-        </button>
+        <div className="view-toggle-group">
+          <button
+            className={`view-toggle ${viewMode === "list" ? "selected" : ""}`}
+            onClick={() => setViewMode("list")}
+          >
+            ☷ List
+          </button>
+          <button
+            className={`view-toggle ${viewMode === "board" ? "selected" : ""}`}
+            onClick={() => setViewMode("board")}
+          >
+            ▦ Board
+          </button>
+        </div>
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (

@@ -215,5 +215,6 @@ describe("Phase 2 Issue core UI helpers", () => {
     expect(markup).toContain('aria-label="Issueの表示範囲"');
     expect(markup).toContain("復元");
     expect(markup).not.toContain('aria-label="TASK-2のEstimate"');
+    expect(markup).toContain('class="view-toggle-group"');
   });
 });

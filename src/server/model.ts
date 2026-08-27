@@ -12,6 +12,10 @@ import {
   type RunStatus,
   type RunStep,
   type WorkflowCategory,
+  type ChildProgress,
+  type IssueListScope,
+  type IssueSearchQuery,
+  type IssueSummary,
 } from "../shared/contracts";
 
 export const workflowCategories = WORKFLOW_CATEGORY_VALUES;
@@ -162,10 +166,29 @@ export interface IssueRelationView extends IssueRelation {
 
 export interface IssueDetail {
   issue: Issue;
+  parent: IssueSummary | null;
+  children: IssueSummary[];
+  childProgress: ChildProgress;
   notes: IssueNote[];
   relations: IssueRelationView[];
   activity: ActivityView[];
 }
+
+export interface RecentIssueViewRecord {
+  id: string;
+  userId: string;
+  issueId: string;
+  viewedAt: number;
+}
+
+export interface RecentSearchRecord {
+  id: string;
+  userId: string;
+  query: IssueSearchQuery;
+  searchedAt: number;
+}
+
+export type { IssueListScope, IssueSummary };
 
 export interface SavedView {
   id: string;

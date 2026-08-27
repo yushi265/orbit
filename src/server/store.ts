@@ -10,6 +10,8 @@ import {
   IssueRelation,
   IssueRelationType,
   IssueRelationView,
+  IssueListScope,
+  IssueSummary,
   IssueQuery,
   Notification,
   Preferences,
@@ -24,6 +26,8 @@ import {
   OutboxEvent,
   RunStep,
   RunStatus,
+  RecentIssueViewRecord,
+  RecentSearchRecord,
   priorities,
   runSteps,
   workflowCategories,
@@ -43,6 +47,8 @@ import {
   type SavedViewUpdate,
   type WorkflowStateCreateMutation,
   type WorkflowStateUpdateMutation,
+  issueSearchQuerySchema,
+  type IssueSearchQuery,
   isValidTimeZone,
   workflowStateColorSchema,
   workflowStateNameSchema,
@@ -69,6 +75,8 @@ export interface OrbitStoreSnapshot {
   labels: Label[];
   notes: IssueNote[];
   relations: IssueRelation[];
+  recentIssueViews: RecentIssueViewRecord[];
+  recentSearches: RecentSearchRecord[];
   views: SavedView[];
   notifications: Notification[];
   activities: ActivityEvent[];
@@ -260,6 +268,8 @@ export class OrbitStore {
   readonly labels = new Map<string, Label>();
   readonly notes = new Map<string, IssueNote>();
   readonly relations = new Map<string, IssueRelation>();
+  readonly recentIssueViews = new Map<string, RecentIssueViewRecord>();
+  readonly recentSearches = new Map<string, RecentSearchRecord>();
   readonly views = new Map<string, SavedView>();
   readonly notifications = new Map<string, Notification>();
   readonly activities: ActivityEvent[] = [];
@@ -293,6 +303,8 @@ export class OrbitStore {
       labels: [...this.labels.values()],
       notes: [...this.notes.values()],
       relations: [...this.relations.values()],
+      recentIssueViews: [...this.recentIssueViews.values()],
+      recentSearches: [...this.recentSearches.values()],
       views: [...this.views.values()],
       notifications: [...this.notifications.values()],
       activities: this.activities,
@@ -314,6 +326,8 @@ export class OrbitStore {
     if (!normalizedValue || typeof normalizedValue !== "object" || Array.isArray(normalizedValue))
       throw new Error("Invalid OrbitStore snapshot");
     const normalized = normalizedValue as Record<string, unknown>;
+    if (!Array.isArray(normalized.recentIssueViews)) normalized.recentIssueViews = [];
+    if (!Array.isArray(normalized.recentSearches)) normalized.recentSearches = [];
     if (Array.isArray(normalized.preferences)) {
       normalized.preferences = normalized.preferences.map((preference) => {
         if (
@@ -348,6 +362,8 @@ export class OrbitStore {
     setById(store.labels, source.labels);
     setById(store.notes, source.notes);
     setById(store.relations, source.relations);
+    setById(store.recentIssueViews, source.recentIssueViews);
+    setById(store.recentSearches, source.recentSearches);
     setById(store.views, source.views);
     setById(store.notifications, source.notifications);
     source.runs.forEach((run) => store.runs.set(run.run_id, run));
@@ -377,6 +393,8 @@ export class OrbitStore {
       "labels",
       "notes",
       "relations",
+      "recentIssueViews",
+      "recentSearches",
       "views",
       "notifications",
       "activities",
@@ -429,6 +447,8 @@ export class OrbitStore {
       "labels",
       "notes",
       "relations",
+      "recentIssueViews",
+      "recentSearches",
       "views",
       "notifications",
       "activities",
@@ -470,6 +490,18 @@ export class OrbitStore {
         strings: ["id", "userId", "sourceIssueId", "targetIssueId", "type"],
         numbers: ["createdAt"],
       }) &&
+      hasTypes("recentIssueViews", {
+        strings: ["id", "userId", "issueId"],
+        numbers: ["viewedAt"],
+      }) &&
+      hasTypes("recentSearches", {
+        strings: ["id", "userId"],
+        numbers: ["searchedAt"],
+      }) &&
+      hasObjects("recentSearches", ["query"]) &&
+      items("recentSearches").every(
+        (entry) => isRecord(entry) && issueSearchQuerySchema.safeParse(entry.query).success,
+      ) &&
       hasTypes("views", {
         strings: ["id", "userId", "name"],
         numbers: ["createdAt", "updatedAt"],
@@ -533,6 +565,8 @@ export class OrbitStore {
       "labels",
       "notes",
       "relations",
+      "recentIssueViews",
+      "recentSearches",
       "views",
       "notifications",
       "activities",
@@ -1171,6 +1205,48 @@ export class OrbitStore {
     return structuredClone(existing.response) as T;
   }
 
+  private validateParent(userId: string, issueId: string | null, parentId?: string | null): void {
+    if (parentId === undefined || parentId === null) return;
+    const parent = this.issues.get(parentId);
+    if (
+      !parent ||
+      parent.userId !== userId ||
+      parent.deletedAt !== null ||
+      parent.archivedAt !== null
+    )
+      throw notFound();
+    if (issueId !== null && parent.id === issueId)
+      throw validationError({ parentId: ["Issue自身を親には指定できません。"] });
+
+    const visited = new Set<string>();
+    let current: Issue | undefined = parent;
+    while (current?.parentId) {
+      if (current.parentId === issueId)
+        throw validationError({ parentId: ["Issueの子孫を親には指定できません。"] });
+      if (visited.has(current.id))
+        throw validationError({ parentId: ["親子関係が循環しています。"] });
+      visited.add(current.id);
+      const ancestor = this.issues.get(current.parentId);
+      if (!ancestor || ancestor.userId !== userId || ancestor.deletedAt !== null) break;
+      current = ancestor;
+    }
+  }
+
+  private issueSummary(issue: Issue): IssueSummary {
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      statusId: issue.statusId,
+    };
+  }
+
+  getIssueSummary(userId: string, issueId: string): IssueSummary {
+    const issue = this.issues.get(issueId);
+    if (!issue || issue.userId !== userId || issue.deletedAt !== null) throw notFound();
+    return this.issueSummary(issue);
+  }
+
   createIssue(userId: string, input: CreateIssueInput, bypassLock = false): Issue {
     this.assertOwner(userId);
     if (!bypassLock) this.assertUnlocked(userId);
@@ -1187,8 +1263,13 @@ export class OrbitStore {
       throw notFound();
     const cycle = input.cycleId ? this.cycles.get(input.cycleId) : null;
     if (cycle && cycle.userId !== userId) throw notFound();
-    const parent = input.parentId ? this.issues.get(input.parentId) : null;
-    if (parent && parent.userId !== userId) throw notFound();
+    this.validateParent(userId, null, input.parentId);
+    if (
+      input.dueAt !== undefined &&
+      input.dueAt !== null &&
+      (!Number.isInteger(input.dueAt) || !Number.isFinite(input.dueAt))
+    )
+      throw validationError({ dueAt: ["Due dateは整数のtimestampまたはnullで指定してください。"] });
     if (input.priority && !priorities.includes(input.priority))
       throw validationError({ priority: ["優先度が不正です。"] });
     if (
@@ -1241,6 +1322,25 @@ export class OrbitStore {
 
   getIssueDetail(userId: string, issueId: string): IssueDetail {
     const issue = this.getIssue(userId, issueId);
+    const parentIssue = issue.parentId ? this.issues.get(issue.parentId) : undefined;
+    const parent =
+      parentIssue && parentIssue.userId === userId && parentIssue.deletedAt === null
+        ? this.issueSummary(parentIssue)
+        : null;
+    const children = [...this.issues.values()]
+      .filter(
+        (candidate) =>
+          candidate.userId === userId &&
+          candidate.parentId === issueId &&
+          candidate.deletedAt === null,
+      )
+      .sort(
+        (left, right) =>
+          left.position - right.position ||
+          left.createdAt - right.createdAt ||
+          left.identifier.localeCompare(right.identifier, "ja"),
+      );
+    const childMetrics = calculateCycleMetrics(children, this.ownedWorkflowStates(userId));
     const notes = [...this.notes.values()]
       .filter(
         (note) => note.userId === userId && note.issueId === issueId && note.deletedAt === null,
@@ -1274,6 +1374,14 @@ export class OrbitStore {
       .sort((left, right) => right.createdAt - left.createdAt);
     return {
       issue,
+      parent,
+      children: children.map((child) => this.issueSummary(child)),
+      childProgress: {
+        total: childMetrics.total,
+        completed: childMetrics.completed,
+        canceled: childMetrics.canceled,
+        progressPercent: childMetrics.progressPercent,
+      },
       notes,
       relations,
       activity: activity.map(({ mutationKey: _mutationKey, ...publicEvent }) => publicEvent),
@@ -1502,7 +1610,11 @@ export class OrbitStore {
     );
   }
 
-  listIssues(userId: string, query: Partial<IssueQuery> = {}): Issue[] {
+  listIssues(
+    userId: string,
+    query: Partial<IssueQuery> = {},
+    scope: IssueListScope = "active",
+  ): Issue[] {
     const defaults = defaultQuery();
     const resolved: IssueQuery = {
       ...defaults,
@@ -1510,9 +1622,12 @@ export class OrbitStore {
       filter: { ...defaults.filter, ...query.filter },
       layout: { ...defaults.layout, ...query.layout },
     };
-    let items = [...this.issues.values()].filter(
-      (item) => item.userId === userId && !item.deletedAt && !item.archivedAt,
-    );
+    let items = [...this.issues.values()].filter((item) => {
+      if (item.userId !== userId) return false;
+      if (scope === "trash") return item.deletedAt !== null;
+      if (scope === "archived") return item.deletedAt === null && item.archivedAt !== null;
+      return item.deletedAt === null && item.archivedAt === null;
+    });
     const filter = resolved.filter;
     if (filter.text?.trim()) {
       const needle = filter.text.trim().toLocaleLowerCase();
@@ -1591,6 +1706,17 @@ export class OrbitStore {
       const cycle = this.cycles.get(patch.cycleId);
       if (!cycle || cycle.userId !== userId) throw notFound();
     }
+    if (patch.estimate !== undefined && ![null, 1, 2, 3, 5, 8].includes(patch.estimate as never))
+      throw validationError({
+        estimate: ["見積は未設定または1 / 2 / 3 / 5 / 8で指定してください。"],
+      });
+    if (
+      patch.dueAt !== undefined &&
+      patch.dueAt !== null &&
+      (!Number.isInteger(patch.dueAt) || !Number.isFinite(patch.dueAt))
+    )
+      throw validationError({ dueAt: ["Due dateは整数のtimestampまたはnullで指定してください。"] });
+    if (patch.parentId !== undefined) this.validateParent(userId, input.id, patch.parentId);
     const labelIds =
       patch.labelIds === undefined ? undefined : this.ownedLabelIds(userId, patch.labelIds);
     const before = { ...issue };
@@ -2279,8 +2405,111 @@ export class OrbitStore {
     return notification;
   }
 
-  search(userId: string, text: string): Issue[] {
-    return this.listIssues(userId, { filter: { text }, order: "updated", limit: 50 });
+  recordRecentIssueView(
+    userId: string,
+    issueId: string,
+    idempotencyKey: string,
+  ): RecentIssueViewRecord {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const request = { issueId };
+    const existing = this.checkReceipt<RecentIssueViewRecord>(
+      userId,
+      "recent.issueView",
+      idempotencyKey,
+      request,
+    );
+    if (existing) return existing;
+    const issue = this.getIssue(userId, issueId);
+    const current = [...this.recentIssueViews.values()].find(
+      (item) => item.userId === userId && item.issueId === issue.id,
+    );
+    const record: RecentIssueViewRecord = current ?? {
+      id: createId("recent-issue"),
+      userId,
+      issueId: issue.id,
+      viewedAt: this.clock(),
+    };
+    record.viewedAt = this.clock();
+    this.recentIssueViews.set(record.id, record);
+    this.trimRecentIssueViews(userId);
+    this.recordReceipt(userId, "recent.issueView", idempotencyKey, request, record);
+    return structuredClone(record);
+  }
+
+  recordRecentSearch(
+    userId: string,
+    query: IssueSearchQuery,
+    idempotencyKey: string,
+  ): RecentSearchRecord {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const parsed = issueSearchQuerySchema.safeParse(query);
+    if (!parsed.success) throw validationError(parsed.error.flatten().fieldErrors);
+    const normalized = parsed.data;
+    const request = { query: normalized };
+    const existing = this.checkReceipt<RecentSearchRecord>(
+      userId,
+      "recent.search",
+      idempotencyKey,
+      request,
+    );
+    if (existing) return existing;
+    const queryKey = canonicalMutationJson("recent.search.query", normalized);
+    const current = [...this.recentSearches.values()].find(
+      (item) =>
+        item.userId === userId &&
+        canonicalMutationJson("recent.search.query", item.query) === queryKey,
+    );
+    const record: RecentSearchRecord = current ?? {
+      id: createId("recent-search"),
+      userId,
+      query: normalized,
+      searchedAt: this.clock(),
+    };
+    record.query = normalized;
+    record.searchedAt = this.clock();
+    this.recentSearches.set(record.id, record);
+    this.trimRecentSearches(userId);
+    this.recordReceipt(userId, "recent.search", idempotencyKey, request, record);
+    return structuredClone(record);
+  }
+
+  private trimRecentIssueViews(userId: string): void {
+    const records = [...this.recentIssueViews.values()]
+      .filter((item) => item.userId === userId)
+      .sort((left, right) => right.viewedAt - left.viewedAt || right.id.localeCompare(left.id));
+    records.slice(20).forEach((item) => this.recentIssueViews.delete(item.id));
+  }
+
+  private trimRecentSearches(userId: string): void {
+    const records = [...this.recentSearches.values()]
+      .filter((item) => item.userId === userId)
+      .sort((left, right) => right.searchedAt - left.searchedAt || right.id.localeCompare(left.id));
+    records.slice(20).forEach((item) => this.recentSearches.delete(item.id));
+  }
+
+  listRecent(userId: string): {
+    issueViews: RecentIssueViewRecord[];
+    searches: RecentSearchRecord[];
+  } {
+    this.assertOwner(userId);
+    const issueViews = [...this.recentIssueViews.values()]
+      .filter((item) => {
+        const issue = this.issues.get(item.issueId);
+        return item.userId === userId && issue?.userId === userId && issue.deletedAt === null;
+      })
+      .sort((left, right) => right.viewedAt - left.viewedAt || right.id.localeCompare(left.id))
+      .slice(0, 20);
+    const searches = [...this.recentSearches.values()]
+      .filter((item) => item.userId === userId)
+      .sort((left, right) => right.searchedAt - left.searchedAt || right.id.localeCompare(left.id))
+      .slice(0, 20);
+    return { issueViews: structuredClone(issueViews), searches: structuredClone(searches) };
+  }
+
+  search(userId: string, text: string, query: Partial<IssueQuery> = {}): Issue[] {
+    return this.listIssues(userId, { ...query, filter: { ...query.filter, text } }, "active");
   }
 
   bootstrap(userId: string): BootstrapPayload {

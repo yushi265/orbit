@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { mutationMetaSchema } from "./issues";
 import { boundedUnicodeString } from "./text";
+import { childProgressSchema, issueSummarySchema } from "./issue-core";
 
 export const relationTypeValues = ["blocking", "blocked_by", "related", "duplicate"] as const;
 export const relationTypeSchema = z.enum(relationTypeValues);
@@ -63,12 +64,7 @@ const publicIssueSchema = z.strictObject({
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
-const publicIssueSummarySchema = z.strictObject({
-  id: z.string(),
-  identifier: z.string(),
-  title: z.string(),
-  statusId: z.string(),
-});
+const publicIssueSummarySchema = issueSummarySchema;
 const publicNoteSchema = z.strictObject({
   id: z.string(),
   userId: z.string(),
@@ -89,6 +85,9 @@ const publicRelationSchema = z.strictObject({
 });
 export const issueDetailResponseSchema = z.strictObject({
   issue: publicIssueSchema,
+  parent: publicIssueSummarySchema.nullable(),
+  children: z.array(publicIssueSummarySchema),
+  childProgress: childProgressSchema,
   notes: z.array(publicNoteSchema),
   relations: z.array(publicRelationSchema),
   activity: z.array(activityViewSchema),

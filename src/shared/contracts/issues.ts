@@ -73,6 +73,13 @@ const createdRangeSchema = z
 
 export const issueFilterSchema = z
   .object({
+    text: boundedUnicodeString(
+      1,
+      255,
+      "検索語はUnicode code pointで1〜255文字である必要があります。",
+    )
+      .refine((value) => value.trim().length > 0, "検索語は空白だけにできません。")
+      .optional(),
     statusIds: z.array(opaqueIdSchema).optional(),
     priorities: z.array(prioritySchema).optional(),
     labelIds: z.array(opaqueIdSchema).optional(),
@@ -116,6 +123,8 @@ function sortedUnique(values: string[] | Priority[]): string[] | Priority[] {
 
 export function normalizeIssueFilter(filter: IssueFilter): IssueFilter {
   const normalized: IssueFilter = {};
+
+  if (filter.text?.trim()) normalized.text = filter.text.trim();
 
   for (const key of sortableFilterKeys) {
     const values = filter[key];

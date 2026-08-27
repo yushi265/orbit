@@ -16,11 +16,13 @@
 - Preferencesの表示モード`theme`とは別に`colorTheme`（`coral / ocean / violet / forest / amber`）を`PATCH /api/v1/preferences`で保存する（参照: `src/shared/contracts/enums.ts`、`src/db/schema.ts`、`src/components/theme.ts`）。
 - Phase 1 Preferencesは`PATCH /api/v1/preferences`で`timezone`（IANA）、`locale`、`theme`、`colorTheme`、`estimateEnabled`をstrict検証し、Workflowは`GET/POST /api/v1/workflow-states`と`PATCH/DELETE /api/v1/workflow-states/:workflowStateId`でOwner scopedに管理する（参照: `src/shared/contracts/preferences.ts`、`src/shared/contracts/workflow.ts`、`src/server/api.ts`、`src/routes/api/v1/workflow-states/`）。
 - Production Ownerの初期化は`pnpm run db:bootstrap:production`で行い、`OWNER_USER_ID` / `OWNER_EMAIL` / 任意の`ORBIT_OWNER_NAME`をローカル検証してからWranglerのproduction D1へ3つのOwner関連行を`ON CONFLICT DO NOTHING`で投入する（参照: `scripts/bootstrap-owner.mjs`、`docs/deployment.md`）。
+- Phase 2 Issue coreは`GET /api/v1/issues?scope=active|archived|trash`、属性Filter付き`GET /api/v1/search`、`GET /api/v1/recent`、Recent記録の`POST /api/v1/recent-issue-views` / `POST /api/v1/recent-searches`を公開する。Issue detailは`parent` / `children` / `childProgress`を返し、Search / RecentはOwner scopedでArchived / Trashを検索結果から除外する（参照: `src/server/api.ts`、`src/routes/api/v1/recent.ts`、`src/shared/contracts/issue-core.ts`、`src/shared/contracts/issue-detail.ts`）。
 
 ## 主要データ構造
 
 - D1 / Drizzleの26テーブルとOwner scopeは `src/db/schema.ts`、初期DDLは `drizzle/0000_initial.sql`、Snapshot bridgeは `drizzle/0001_*.sql` を正本とする。
 - Preview未接続のローカルMVPは `OrbitStore` のOwner別Memory Storeを使う（参照: `src/server/store.ts`）。
+- Recent issue view / searchは`OrbitStoreSnapshot`の`recentIssueViews` / `recentSearches`配列へ保持し、旧Snapshotの配列欠落は空配列へ補完する。正規化D1 tableは既存Schemaを維持し、MVPの実運用境界はOwner単位Snapshot CASとする（参照: `src/server/store.ts`、`src/server/store-session.ts`）。
 - Notes / Relationsは既存D1テーブルを再利用し、Memory Storeでは `notes` / `relations` MapとOwner / Lock / Receipt / Activity / Outboxを同じ境界で適用する（参照: `src/server/store.ts`）。
 
 ## 再利用可能な部品
@@ -45,7 +47,9 @@
 - Drizzleの既存`user_preferences`へ列を追加する再作成migrationでは、旧テーブルに存在しない新列をSELECTせず、固定default（今回の`color_theme`は`'coral'`）をSELECTする（参照: `drizzle/0002_known_scarlet_spider.sql`）。
 - GETでLease期限切れを検出した場合だけ`OrbitStore`のbackground dirty flagを立て、任意のGET内業務変更を保存せず、Runの`paused`とLock解放だけを次のSnapshotへ永続化する（参照: `src/server/store.ts`、`src/server/store-session.ts`）。
 - Workflowの順序変更はサーバー側で0始まりの連続positionへ正規化し、既定stateまたはIssue参照中stateの削除を先に拒否する。UIのRetryは操作signatureが同じ場合だけ同じidempotencyKeyを再利用する（参照: `src/server/store.ts`、`src/components/OrbitApp.tsx`）。
+- Parent/Sub-issueの更新は同一Owner・未削除・未Archivedの親だけを受け付け、自己参照と子孫参照を`VALIDATION_ERROR` + field errorで拒否する。Detailの子進捗は直下の未削除Issueだけを対象にし、Canceledを分母から除外する（参照: `src/server/store.ts`、`src/shared/cycle-workspace.ts`）。
+- Command / Shortcutは新規Menuライブラリを使わず、`nextCommandIndex`、`shortcutActionFor`、`shortcutModifierLabel`を使ってArrow選択・入力フォーカス除外・OS別modifier表示を実装する（参照: `src/components/issue-core-ui.ts`、`src/components/OrbitApp.tsx`）。
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / 2026-08-27
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / 2026-08-27

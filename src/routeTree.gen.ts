@@ -23,6 +23,9 @@ import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsSectionRouteImport } from './routes/settings/$section'
 import { Route as ApiV1BootstrapRouteImport } from './routes/api/v1/bootstrap'
 import { Route as ApiV1PreferencesRouteImport } from './routes/api/v1/preferences'
+import { Route as ApiV1RecentRouteImport } from './routes/api/v1/recent'
+import { Route as ApiV1RecentIssueViewsRouteImport } from './routes/api/v1/recent-issue-views'
+import { Route as ApiV1RecentSearchesRouteImport } from './routes/api/v1/recent-searches'
 import { Route as ApiV1SearchRouteImport } from './routes/api/v1/search'
 import { Route as ApiV1BackgroundRunsIndexRouteImport } from './routes/api/v1/background-runs/index'
 import { Route as ApiV1BackgroundRunsRunIdRouteImport } from './routes/api/v1/background-runs/$runId'
@@ -119,6 +122,21 @@ const ApiV1BootstrapRoute = ApiV1BootstrapRouteImport.update({
 const ApiV1PreferencesRoute = ApiV1PreferencesRouteImport.update({
   id: '/api/v1/preferences',
   path: '/api/v1/preferences',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1RecentRoute = ApiV1RecentRouteImport.update({
+  id: '/api/v1/recent',
+  path: '/api/v1/recent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1RecentIssueViewsRoute = ApiV1RecentIssueViewsRouteImport.update({
+  id: '/api/v1/recent-issue-views',
+  path: '/api/v1/recent-issue-views',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1RecentSearchesRoute = ApiV1RecentSearchesRouteImport.update({
+  id: '/api/v1/recent-searches',
+  path: '/api/v1/recent-searches',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiV1SearchRoute = ApiV1SearchRouteImport.update({
@@ -283,6 +301,9 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
+  '/api/v1/recent': typeof ApiV1RecentRoute
+  '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
+  '/api/v1/recent-searches': typeof ApiV1RecentSearchesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
@@ -326,6 +347,9 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
+  '/api/v1/recent': typeof ApiV1RecentRoute
+  '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
+  '/api/v1/recent-searches': typeof ApiV1RecentSearchesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
@@ -370,6 +394,9 @@ export interface FileRoutesById {
   '/settings/': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
+  '/api/v1/recent': typeof ApiV1RecentRoute
+  '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
+  '/api/v1/recent-searches': typeof ApiV1RecentSearchesRoute
   '/api/v1/search': typeof ApiV1SearchRoute
   '/api/v1/background-runs/$runId': typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   '/api/v1/background-runs/current': typeof ApiV1BackgroundRunsCurrentRoute
@@ -415,6 +442,9 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
+    | '/api/v1/recent'
+    | '/api/v1/recent-issue-views'
+    | '/api/v1/recent-searches'
     | '/api/v1/search'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
@@ -458,6 +488,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
+    | '/api/v1/recent'
+    | '/api/v1/recent-issue-views'
+    | '/api/v1/recent-searches'
     | '/api/v1/search'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
@@ -501,6 +534,9 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/api/v1/bootstrap'
     | '/api/v1/preferences'
+    | '/api/v1/recent'
+    | '/api/v1/recent-issue-views'
+    | '/api/v1/recent-searches'
     | '/api/v1/search'
     | '/api/v1/background-runs/$runId'
     | '/api/v1/background-runs/current'
@@ -545,6 +581,9 @@ export interface RootRouteChildren {
   SettingsIndexRoute: typeof SettingsIndexRoute
   ApiV1BootstrapRoute: typeof ApiV1BootstrapRoute
   ApiV1PreferencesRoute: typeof ApiV1PreferencesRoute
+  ApiV1RecentRoute: typeof ApiV1RecentRoute
+  ApiV1RecentIssueViewsRoute: typeof ApiV1RecentIssueViewsRoute
+  ApiV1RecentSearchesRoute: typeof ApiV1RecentSearchesRoute
   ApiV1SearchRoute: typeof ApiV1SearchRoute
   ApiV1BackgroundRunsRunIdRoute: typeof ApiV1BackgroundRunsRunIdRouteWithChildren
   ApiV1BackgroundRunsCurrentRoute: typeof ApiV1BackgroundRunsCurrentRoute
@@ -665,6 +704,27 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/preferences'
       fullPath: '/api/v1/preferences'
       preLoaderRoute: typeof ApiV1PreferencesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/recent': {
+      id: '/api/v1/recent'
+      path: '/api/v1/recent'
+      fullPath: '/api/v1/recent'
+      preLoaderRoute: typeof ApiV1RecentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/recent-issue-views': {
+      id: '/api/v1/recent-issue-views'
+      path: '/api/v1/recent-issue-views'
+      fullPath: '/api/v1/recent-issue-views'
+      preLoaderRoute: typeof ApiV1RecentIssueViewsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/recent-searches': {
+      id: '/api/v1/recent-searches'
+      path: '/api/v1/recent-searches'
+      fullPath: '/api/v1/recent-searches'
+      preLoaderRoute: typeof ApiV1RecentSearchesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/search': {
@@ -945,6 +1005,9 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsIndexRoute: SettingsIndexRoute,
   ApiV1BootstrapRoute: ApiV1BootstrapRoute,
   ApiV1PreferencesRoute: ApiV1PreferencesRoute,
+  ApiV1RecentRoute: ApiV1RecentRoute,
+  ApiV1RecentIssueViewsRoute: ApiV1RecentIssueViewsRoute,
+  ApiV1RecentSearchesRoute: ApiV1RecentSearchesRoute,
   ApiV1SearchRoute: ApiV1SearchRoute,
   ApiV1BackgroundRunsRunIdRoute: ApiV1BackgroundRunsRunIdRouteWithChildren,
   ApiV1BackgroundRunsCurrentRoute: ApiV1BackgroundRunsCurrentRoute,

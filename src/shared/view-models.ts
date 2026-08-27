@@ -7,6 +7,8 @@ import type {
   ProjectStatusCategory,
   Theme,
   WorkflowCategory,
+  ChildProgress,
+  IssueSearchQuery,
 } from "./contracts";
 
 export interface UserViewModel {
@@ -104,9 +106,27 @@ export interface ActivityViewModel {
 }
 export interface IssueDetailViewModel {
   issue: IssueViewModel;
+  parent: IssueSummaryViewModel | null;
+  children: IssueSummaryViewModel[];
+  childProgress: ChildProgress;
   notes: IssueNoteViewModel[];
   relations: IssueRelationViewModel[];
   activity: ActivityViewModel[];
+}
+export interface IssueSummaryViewModel {
+  id: string;
+  identifier: string;
+  title: string;
+  statusId: string;
+}
+export interface RecentIssueViewModel {
+  issue: IssueSummaryViewModel;
+  viewedAt: number;
+}
+export interface RecentSearchViewModel {
+  id: string;
+  query: IssueSearchQuery;
+  searchedAt: number;
 }
 export interface ProjectViewModel {
   id: string;

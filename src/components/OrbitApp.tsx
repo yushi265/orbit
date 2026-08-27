@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -20,8 +21,10 @@ import type {
   IssueNoteViewModel,
   IssueRelationTypeViewModel,
   LabelViewModel as Label,
+  RecentIssueViewModel,
+  RecentSearchViewModel,
 } from "../shared/view-models";
-import type { ColorTheme } from "../shared/contracts";
+import type { ColorTheme, IssueListScope } from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import {
@@ -39,6 +42,7 @@ import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { issueDetailPath, projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
+import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 
@@ -68,6 +72,14 @@ type IssueReorderVariables = {
 };
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+type SearchFilters = {
+  statusId: string;
+  priority: Issue["priority"] | "all";
+  projectId: string;
+  cycleId: string;
+  labelId: string;
+  due: "all" | "none" | "overdue" | "today" | "upcoming";
 };
 
 const priorityLabel: Record<Issue["priority"], string> = {
@@ -121,6 +133,10 @@ function formatDateOnly(value: number | null): string {
   }).format(new Date(value));
 }
 
+function dateInputValue(value: number | null): string {
+  return value === null ? "" : new Date(value).toISOString().slice(0, 10);
+}
+
 function formatRange(start: number, end: number): string {
   return `${formatDate(start)} — ${formatDate(end)}`;
 }
@@ -167,6 +183,9 @@ function OrbitAppInner(props: Props) {
   const [newTitle, setNewTitle] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
   const [newPriority, setNewPriority] = useState<Issue["priority"]>("no_priority");
+  const [newEstimate, setNewEstimate] = useState<Issue["estimate"]>(null);
+  const [newDueAt, setNewDueAt] = useState<number | null>(null);
+  const [newParentId, setNewParentId] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [filterText, setFilterText] = useState("");
@@ -176,6 +195,7 @@ function OrbitAppInner(props: Props) {
   const [showCompleted, setShowCompleted] = useState(true);
   const [showCompletedReady, setShowCompletedReady] = useState(false);
   const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
+  const [issueScope, setIssueScope] = useState<IssueListScope>("active");
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -186,6 +206,17 @@ function OrbitAppInner(props: Props) {
   const [pendingIssueId, setPendingIssueId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<Issue[]>([]);
+  const [searchFilters, setSearchFilters] = useState<SearchFilters>({
+    statusId: "all",
+    priority: "all",
+    projectId: "all",
+    cycleId: "all",
+    labelId: "all",
+    due: "all",
+  });
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   const [projectComposerOpen, setProjectComposerOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [run, setRun] = useState<PublicRunSummary | null>(null);
@@ -197,9 +228,17 @@ function OrbitAppInner(props: Props) {
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
   const toastTimerRef = useRef<number | undefined>(undefined);
+  const issueFilterInputRef = useRef<HTMLInputElement>(null);
+  const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
 
   function rememberIssueFocus(issueId: string) {
     issueTriggerIdRef.current = issueId;
+    void apiPost("/api/v1/recent-issue-views", {
+      idempotencyKey: idempotencyKey(),
+      issueId,
+    })
+      .then(() => queryClient.invalidateQueries({ queryKey: ["recent"] }))
+      .catch(() => undefined);
     try {
       window.sessionStorage.setItem("orbit.issue-focus", issueId);
     } catch {
@@ -233,8 +272,28 @@ function OrbitAppInner(props: Props) {
     queryKey: ["bootstrap"],
     queryFn: () => apiGet<BootstrapPayload>("/api/v1/bootstrap"),
   });
+  const scopedIssuesQuery = useQuery({
+    queryKey: ["issues", issueScope],
+    queryFn: () => apiGet<{ items: Issue[] }>(`/api/v1/issues?scope=${issueScope}`),
+    enabled: section === "issues" && issueScope !== "active",
+  });
+  const recentQuery = useQuery({
+    queryKey: ["recent"],
+    queryFn: () =>
+      apiGet<{ issueViews: RecentIssueViewModel[]; searches: RecentSearchViewModel[] }>(
+        "/api/v1/recent",
+      ),
+    enabled: section === "search",
+  });
+  const trashQuery = useQuery({
+    queryKey: ["issues", "trash"],
+    queryFn: () => apiGet<{ items: Issue[] }>("/api/v1/issues?scope=trash"),
+    enabled: section === "settings",
+  });
   const data = bootstrap.data;
   const issues = data?.issues ?? [];
+  const issueWorkspaceIssues =
+    issueScope === "active" ? issues : (scopedIssuesQuery.data?.items ?? []);
   const projects = data?.projects ?? [];
   const cycles = data?.cycles ?? [];
   const labels = data?.labels ?? [];
@@ -242,8 +301,11 @@ function OrbitAppInner(props: Props) {
   const workflowStates = data?.workflowStates ?? [];
   const activeCycle = cycles.find((cycle) => cycle.status === "active");
   const unread = notifications.filter((notification) => !notification.readAt).length;
+  const modifierLabel = shortcutModifierLabel(
+    typeof navigator === "undefined" ? undefined : navigator.platform,
+  );
   const visibleIssues = useMemo(() => {
-    const filtered = issues.filter((issue) => {
+    const filtered = issueWorkspaceIssues.filter((issue) => {
       const matchesText =
         !filterText.trim() ||
         `${issue.identifier} ${issue.title} ${issue.description}`
@@ -258,7 +320,15 @@ function OrbitAppInner(props: Props) {
       issueSort,
       workflowStates,
     );
-  }, [issues, filterText, priorityFilter, labelFilter, workflowStates, showCompleted, issueSort]);
+  }, [
+    issueWorkspaceIssues,
+    filterText,
+    priorityFilter,
+    labelFilter,
+    workflowStates,
+    showCompleted,
+    issueSort,
+  ]);
 
   useEffect(() => {
     const visibleIds = new Set(visibleIssues.map((issue) => issue.id));
@@ -381,12 +451,20 @@ function OrbitAppInner(props: Props) {
       const target = event.target as HTMLElement;
       const editing =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
+      const action = shortcutActionFor({
+        key: event.key,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        editable: editing,
+      });
+      if (!action || run?.status === "pending" || run?.status === "running") return;
+      event.preventDefault();
+      if (action === "command") {
         setCommandOpen(true);
         return;
       }
-      if (event.key === "Escape") {
+      if (action === "close") {
         setCommandOpen(false);
         setShortcutsOpen(false);
         if (!bulkBusy) setSelected([]);
@@ -397,21 +475,53 @@ function OrbitAppInner(props: Props) {
         setComposerOpen(false);
         return;
       }
-      if (editing) return;
-      if (event.key.toLowerCase() === "c") {
-        event.preventDefault();
+      if (action === "create") {
         setComposerOpen(true);
+        return;
       }
-      if (event.key === "?") {
-        event.preventDefault();
+      if (action === "help") {
         setShortcutsOpen(true);
+        return;
       }
-      if (event.key.toLowerCase() === "b")
+      if (action === "toggle-board") {
         setViewMode((mode) => (mode === "list" ? "board" : "list"));
+        return;
+      }
+      if (action === "toggle-selection") {
+        if (!focusedIssueId) return;
+        setSelected((current) =>
+          current.includes(focusedIssueId)
+            ? current.filter((issueId) => issueId !== focusedIssueId)
+            : [...current, focusedIssueId],
+        );
+        return;
+      }
+      if (action === "focus-display") {
+        if (section === "issues") issueDisplayInputRef.current?.focus();
+        return;
+      }
+      if (action === "focus-filter") {
+        if (section === "issues")
+          document.querySelector<HTMLElement>("#issues-priority-filter")?.focus();
+        return;
+      }
+      if (action === "focus-search") {
+        if (section === "issues") issueFilterInputRef.current?.focus();
+        else if (section === "search")
+          document.querySelector<HTMLInputElement>("#global-search-input")?.focus();
+        else {
+          setSection("search");
+          void router.navigate({ to: "/search" as never }).then(() => {
+            window.setTimeout(() => {
+              document.querySelector<HTMLInputElement>("#global-search-input")?.focus();
+            }, 0);
+          });
+        }
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bulkBusy, composerOpen, props.issueId, router]);
+  }, [bulkBusy, composerOpen, focusedIssueId, props.issueId, router, run?.status, section]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   const dismissToast = () => {
@@ -448,6 +558,9 @@ function OrbitAppInner(props: Props) {
         idempotencyKey: idempotencyKey(),
         title: newTitle.trim(),
         priority: newPriority,
+        estimate: newEstimate,
+        dueAt: newDueAt,
+        parentId: newParentId || null,
         projectId: projectIdFromSelection(newProjectId),
         cycleId: activeCycle?.id ?? null,
       }),
@@ -458,6 +571,9 @@ function OrbitAppInner(props: Props) {
       setNewTitle("");
       setNewProjectId("");
       setNewPriority("no_priority");
+      setNewEstimate(null);
+      setNewDueAt(null);
+      setNewParentId("");
       setComposerOpen(false);
       showToast("success", `${issue.identifier} を作成しました`);
     },
@@ -508,6 +624,13 @@ function OrbitAppInner(props: Props) {
       queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", updatedIssue.id], (current) =>
         current ? { ...current, issue: updatedIssue } : current,
       );
+      for (const issueId of new Set([
+        updatedIssue.id,
+        variables.issue.parentId,
+        updatedIssue.parentId,
+      ])) {
+        if (issueId) void queryClient.invalidateQueries({ queryKey: ["issue-detail", issueId] });
+      }
       showToast(
         "success",
         variables.undo ? "元に戻しました" : "変更を保存しました",
@@ -761,20 +884,60 @@ function OrbitAppInner(props: Props) {
     }
   }
 
-  function executeSearch(value: string) {
+  function executeSearch(value: string, filtersForRequest = searchFilters) {
     setSearchText(value);
+    setSearchError(null);
     if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current);
     if (!value.trim()) {
       setRemoteSearch([]);
+      setSearchBusy(false);
       return;
     }
+    setSearchBusy(true);
     searchTimer.current = window.setTimeout(() => {
-      void apiGet<{ items: Issue[] }>(`/api/v1/search?q=${encodeURIComponent(value)}`)
-        .then((result) => setRemoteSearch(result.items))
-        .catch((error) =>
-          showToast("error", error instanceof ApiError ? error.message : "検索に失敗しました"),
-        );
+      const params = new URLSearchParams({ q: value.trim() });
+      if (filtersForRequest.statusId !== "all") params.set("status", filtersForRequest.statusId);
+      if (filtersForRequest.priority !== "all") params.set("priority", filtersForRequest.priority);
+      if (filtersForRequest.projectId !== "all") params.set("project", filtersForRequest.projectId);
+      if (filtersForRequest.cycleId !== "all") params.set("cycle", filtersForRequest.cycleId);
+      if (filtersForRequest.labelId !== "all") params.set("label", filtersForRequest.labelId);
+      if (filtersForRequest.due !== "all") params.set("due", filtersForRequest.due);
+      void apiGet<{ items: Issue[] }>(`/api/v1/search?${params.toString()}`)
+        .then((result) => {
+          setRemoteSearch(result.items);
+          setSearchBusy(false);
+          void apiPost("/api/v1/recent-searches", {
+            idempotencyKey: idempotencyKey(),
+            query: {
+              text: value.trim(),
+              filter: {
+                statusIds:
+                  filtersForRequest.statusId === "all" ? undefined : [filtersForRequest.statusId],
+                priorities:
+                  filtersForRequest.priority === "all" ? undefined : [filtersForRequest.priority],
+                projectIds:
+                  filtersForRequest.projectId === "all" ? undefined : [filtersForRequest.projectId],
+                cycleIds:
+                  filtersForRequest.cycleId === "all" ? undefined : [filtersForRequest.cycleId],
+                labelIds:
+                  filtersForRequest.labelId === "all" ? undefined : [filtersForRequest.labelId],
+                due: filtersForRequest.due === "all" ? undefined : filtersForRequest.due,
+              },
+            },
+          })
+            .then(() => queryClient.invalidateQueries({ queryKey: ["recent"] }))
+            .catch(() => undefined);
+        })
+        .catch((error) => {
+          setSearchBusy(false);
+          setSearchError(error instanceof ApiError ? error.message : "検索に失敗しました");
+        });
     }, 300);
+  }
+
+  function updateSearchFilters(next: SearchFilters) {
+    setSearchFilters(next);
+    if (searchText.trim()) executeSearch(searchText, next);
   }
 
   async function createProject() {
@@ -813,6 +976,22 @@ function OrbitAppInner(props: Props) {
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  async function changeIssueLifecycle(issue: Issue, action: "archive" | "restore" | "trash") {
+    await apiPost(`/api/v1/issues/${issue.id}?action=${action}`, {
+      idempotencyKey: idempotencyKey(),
+    });
+    await refresh();
+    await queryClient.invalidateQueries({ queryKey: ["issues"] });
+    showToast(
+      "success",
+      action === "archive"
+        ? `${issue.identifier}をアーカイブしました`
+        : action === "restore"
+          ? `${issue.identifier}を復元しました`
+          : `${issue.identifier}をゴミ箱へ移動しました`,
+    );
   }
 
   async function closeCycle(cycle: Cycle) {
@@ -872,6 +1051,8 @@ function OrbitAppInner(props: Props) {
 
   const activeRun =
     run && ["pending", "running", "paused", "failed"].includes(run.status) ? run : null;
+  const selectedIssue =
+    selected.length === 1 ? issues.find((issue) => issue.id === selected[0]) : undefined;
   return (
     <div className="app-shell">
       <Sidebar
@@ -901,7 +1082,7 @@ function OrbitAppInner(props: Props) {
             >
               <span>⌕</span>
               <span className="search-placeholder">検索</span>
-              <kbd>⌘ K</kbd>
+              <kbd>{modifierLabel} K</kbd>
             </button>
             <button className="icon-button" aria-label="通知" onClick={() => navigate("inbox")}>
               ♧{unread > 0 && <span className="notification-dot" />}
@@ -926,6 +1107,9 @@ function OrbitAppInner(props: Props) {
           {section === "issues" && (
             <IssuesView
               issues={visibleIssues}
+              scope={issueScope}
+              scopeLoading={scopedIssuesQuery.isLoading}
+              setScope={setIssueScope}
               workflowStates={workflowStates}
               filterText={filterText}
               setFilterText={setFilterText}
@@ -938,7 +1122,8 @@ function OrbitAppInner(props: Props) {
               issueSort={issueSort}
               setIssueSort={setIssueSort}
               projects={projects}
-              allIssues={issues}
+              estimateEnabled={data.preferences.estimateEnabled}
+              allIssues={issueWorkspaceIssues}
               cycles={cycles}
               labels={labels}
               viewMode={viewMode}
@@ -948,6 +1133,11 @@ function OrbitAppInner(props: Props) {
               pendingIssueId={pendingIssueId}
               reorderBusy={reorderIssueMutation.isPending}
               onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onRestore={(issue) => void changeIssueLifecycle(issue, "restore")}
+              onFocusIssue={setFocusedIssueId}
+              filterInputRef={issueFilterInputRef}
+              displayInputRef={issueDisplayInputRef}
+              modifierLabel={modifierLabel}
               onReorder={(issue, beforeIssueId) =>
                 reorderIssueMutation.mutate({
                   issue,
@@ -1008,7 +1198,27 @@ function OrbitAppInner(props: Props) {
               query={searchText}
               onQuery={executeSearch}
               results={remoteSearch}
+              onOpenIssueId={(issueId) => {
+                const issue = issues.find((item) => item.id === issueId);
+                if (issue) rememberIssueFocus(issue.id);
+                setSection("issues");
+                setComposerOpen(true);
+                void router.navigate({ to: `/issues/${issueId}` as never });
+              }}
+              searchBusy={searchBusy}
+              searchError={searchError}
+              onRetry={() => executeSearch(searchText)}
+              workflowStates={workflowStates}
+              projects={projects}
+              cycles={cycles}
+              labels={labels}
+              filters={searchFilters}
+              setFilters={updateSearchFilters}
+              recentIssueViews={recentQuery.data?.issueViews ?? []}
+              recentSearches={recentQuery.data?.searches ?? []}
+              modifierLabel={modifierLabel}
               onOpen={(issue) => {
+                rememberIssueFocus(issue.id);
                 setSection("issues");
                 setComposerOpen(true);
                 if (typeof window !== "undefined")
@@ -1045,6 +1255,9 @@ function OrbitAppInner(props: Props) {
               onColorTheme={saveColorTheme}
               canInstallPwa={installPrompt !== null}
               onInstallPwa={() => void installPwa()}
+              trashIssues={trashQuery.data?.items ?? []}
+              trashLoading={trashQuery.isLoading}
+              onRestoreIssue={(issue) => changeIssueLifecycle(issue, "restore")}
             />
           )}
         </main>
@@ -1067,6 +1280,11 @@ function OrbitAppInner(props: Props) {
             onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
             pending={pendingIssueId === props.issueId}
             workflowStates={workflowStates}
+            estimateEnabled={data.preferences.estimateEnabled}
+            onArchive={() => {
+              const issue = issues.find((item) => item.id === props.issueId);
+              return issue ? changeIssueLifecycle(issue, "archive") : Promise.resolve();
+            }}
             onClose={closeIssueDetail}
           />
         ) : (
@@ -1078,11 +1296,22 @@ function OrbitAppInner(props: Props) {
             setProjectId={setNewProjectId}
             priority={newPriority}
             setPriority={setNewPriority}
+            estimate={newEstimate}
+            setEstimate={setNewEstimate}
+            dueAt={newDueAt}
+            setDueAt={setNewDueAt}
+            parentId={newParentId}
+            setParentId={setNewParentId}
+            issues={issues}
+            estimateEnabled={data.preferences.estimateEnabled}
             onClose={() => {
               setComposerOpen(false);
               setNewTitle("");
               setNewProjectId("");
               setNewPriority("no_priority");
+              setNewEstimate(null);
+              setNewDueAt(null);
+              setNewParentId("");
             }}
             onSubmit={() => createIssue.mutate()}
             busy={createIssue.isPending}
@@ -1130,6 +1359,25 @@ function OrbitAppInner(props: Props) {
             void navigate("search");
             void executeSearch(value);
           }}
+          selectedIssue={selectedIssue}
+          onOpenSelected={() => {
+            if (!selectedIssue) return;
+            setCommandOpen(false);
+            rememberIssueFocus(selectedIssue.id);
+            setSection("issues");
+            setComposerOpen(true);
+            void router.navigate({ to: `/issues/${selectedIssue.id}` as never });
+          }}
+          onArchiveSelected={() => {
+            if (!selectedIssue) return;
+            setCommandOpen(false);
+            void changeIssueLifecycle(selectedIssue, "archive").then(() => setSelected([]));
+          }}
+          onClearSelection={() => {
+            setSelected([]);
+            setCommandOpen(false);
+          }}
+          modifierLabel={modifierLabel}
         />
       )}
       {shortcutsOpen && (
@@ -1137,8 +1385,12 @@ function OrbitAppInner(props: Props) {
           <div className="shortcut-list">
             {[
               ["C", "Issueを作成"],
-              ["⌘ K", "コマンドメニュー"],
-              ["B", "List / Board切替"],
+              [`${modifierLabel} K`, "コマンドメニュー"],
+              [`${modifierLabel} F`, "現在View内検索"],
+              ["F", "Filterへ移動"],
+              ["Shift + V", "Display optionsへ移動"],
+              [`${modifierLabel} B`, "List / Board切替"],
+              ["X", "Issue選択"],
               ["?", "ショートカット一覧"],
               ["Esc", "閉じる / 選択解除"],
             ].map(([key, label]) => (
@@ -1400,8 +1652,11 @@ function HomeView({
   );
 }
 
-function IssuesView({
+export function IssuesView({
   issues,
+  scope,
+  scopeLoading,
+  setScope,
   workflowStates,
   filterText,
   setFilterText,
@@ -1414,6 +1669,7 @@ function IssuesView({
   issueSort,
   setIssueSort,
   projects,
+  estimateEnabled,
   allIssues,
   cycles,
   labels,
@@ -1424,6 +1680,11 @@ function IssuesView({
   pendingIssueId,
   reorderBusy,
   onUpdate,
+  onRestore,
+  onFocusIssue,
+  filterInputRef,
+  displayInputRef,
+  modifierLabel,
   onReorder,
   onBulk,
   bulkBusy,
@@ -1432,6 +1693,9 @@ function IssuesView({
   onOpenIssue,
 }: {
   issues: Issue[];
+  scope: IssueListScope;
+  scopeLoading: boolean;
+  setScope: (value: IssueListScope) => void;
   workflowStates: WorkflowState[];
   filterText: string;
   setFilterText: (value: string) => void;
@@ -1444,6 +1708,7 @@ function IssuesView({
   issueSort: IssueSort;
   setIssueSort: (value: IssueSort) => void;
   projects: Project[];
+  estimateEnabled: boolean;
   allIssues: Issue[];
   cycles: Cycle[];
   labels: Label[];
@@ -1454,6 +1719,11 @@ function IssuesView({
   pendingIssueId: string | null;
   reorderBusy: boolean;
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
+  onRestore: (issue: Issue) => void;
+  onFocusIssue: (issueId: string) => void;
+  filterInputRef: RefObject<HTMLInputElement | null>;
+  displayInputRef: RefObject<HTMLSelectElement | null>;
+  modifierLabel: "⌘" | "Ctrl";
   onReorder: (issue: Issue, beforeIssueId: string | null) => void;
   onBulk: (patch: Record<string, unknown>) => Promise<void>;
   bulkBusy: boolean;
@@ -1523,14 +1793,18 @@ function IssuesView({
         <div className="inline-search">
           <span>⌕</span>
           <input
+            ref={filterInputRef}
+            id="issues-filter-input"
             value={filterText}
             onChange={(event) => setFilterText(event.target.value)}
             placeholder="Issueを検索…"
           />
-          <kbd>⌘ F</kbd>
+          <kbd>{modifierLabel} F</kbd>
         </div>
         <select
           className="filter-select"
+          id="issues-priority-filter"
+          aria-label="Priorityで絞り込む"
           value={priorityFilter}
           onChange={(event) => setPriorityFilter(event.target.value as Issue["priority"] | "all")}
         >
@@ -1540,6 +1814,17 @@ function IssuesView({
               {label}
             </option>
           ))}
+        </select>
+        <select
+          className="filter-select"
+          id="issues-scope-filter"
+          aria-label="Issueの表示範囲"
+          value={scope}
+          disabled={scopeLoading}
+          onChange={(event) => setScope(event.target.value as IssueListScope)}
+        >
+          <option value="active">Active Issues</option>
+          <option value="archived">Archived Issues</option>
         </select>
         <select
           className="filter-select"
@@ -1556,6 +1841,8 @@ function IssuesView({
         </select>
         <select
           className="filter-select"
+          ref={displayInputRef}
+          id="issues-sort-select"
           aria-label="Issueのソート"
           value={issueSort}
           onChange={(event) => setIssueSort(event.target.value as IssueSort)}
@@ -1588,6 +1875,7 @@ function IssuesView({
           ▦ Board
         </button>
       </div>
+      {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
         <p className="manual-order-hint">Issueをドラッグするか、↑↓ボタンで並び替えます。</p>
       )}
@@ -1750,6 +2038,7 @@ function IssuesView({
                   issue={issue}
                   state={state}
                   labels={labels}
+                  estimateEnabled={estimateEnabled}
                   onClick={(trigger) => onOpenIssue(issue, trigger)}
                 />
               ))}
@@ -1783,6 +2072,7 @@ function IssuesView({
             <span>ISSUE</span>
             <span>STATUS</span>
             <span>PRIORITY</span>
+            <span>ESTIMATE</span>
             <span>PROJECT</span>
             <span>DUE</span>
           </div>
@@ -1802,9 +2092,12 @@ function IssuesView({
                 );
               }}
               onClick={(trigger) => onOpenIssue(issue, trigger)}
-              onUpdate={onUpdate}
+              onUpdate={scope === "active" ? onUpdate : undefined}
+              estimateEnabled={estimateEnabled}
               labels={labels}
               projects={projects}
+              onRestore={scope === "archived" ? onRestore : undefined}
+              onFocusIssue={onFocusIssue}
               manualOrder={manualOrder}
               dragging={draggedIssueId === issue.id}
               dropTarget={dropTargetIssueId === issue.id}
@@ -1876,6 +2169,9 @@ function IssueRow({
   onSelect,
   onClick,
   onUpdate,
+  estimateEnabled = true,
+  onRestore,
+  onFocusIssue,
   projects = [],
   manualOrder = false,
   dragging = false,
@@ -1897,6 +2193,9 @@ function IssueRow({
   onSelect?: (checked: boolean) => void;
   onClick?: (trigger: HTMLButtonElement) => void;
   onUpdate?: (issue: Issue, patch: Partial<Issue>) => void;
+  estimateEnabled?: boolean;
+  onRestore?: (issue: Issue) => void;
+  onFocusIssue?: (issueId: string) => void;
   projects?: Project[];
   manualOrder?: boolean;
   dragging?: boolean;
@@ -1910,7 +2209,7 @@ function IssueRow({
 }) {
   return (
     <div
-      className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
+      className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
       draggable={manualOrder && !pending && !reorderBusy}
       onDragStart={
         manualOrder
@@ -1978,6 +2277,8 @@ function IssueRow({
       <button
         className="issue-main"
         data-issue-id={issue.id}
+        aria-pressed={selected}
+        onFocus={() => onFocusIssue?.(issue.id)}
         onClick={(event) => onClick?.(event.currentTarget)}
       >
         <span className="issue-id">{issue.identifier}</span>
@@ -2001,18 +2302,22 @@ function IssueRow({
       </button>
       <span className="status-cell">
         <span className="status-dot" style={{ background: state?.color }} />
-        <select
-          aria-label={`${issue.identifier}のStatus`}
-          value={issue.statusId}
-          disabled={pending}
-          onChange={(event) => onUpdate?.(issue, { statusId: event.target.value })}
-        >
-          {(workflowStates.length ? workflowStates : state ? [state] : []).map((status) => (
-            <option value={status.id} key={status.id}>
-              {status.name}
-            </option>
-          ))}
-        </select>
+        {onUpdate && !compact ? (
+          <select
+            aria-label={`${issue.identifier}のStatus`}
+            value={issue.statusId}
+            disabled={pending}
+            onChange={(event) => onUpdate(issue, { statusId: event.target.value })}
+          >
+            {(workflowStates.length ? workflowStates : state ? [state] : []).map((status) => (
+              <option value={status.id} key={status.id}>
+                {status.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span>{state?.name ?? "—"}</span>
+        )}
       </span>
       <span className="priority-cell">
         {onUpdate && !compact ? (
@@ -2038,6 +2343,33 @@ function IssueRow({
           <PriorityIcon priority={issue.priority} />
         )}
       </span>
+      <span className="estimate-cell">
+        {onUpdate && !compact && estimateEnabled ? (
+          <select
+            aria-label={`${issue.identifier}のEstimate`}
+            value={issue.estimate === null ? "" : String(issue.estimate)}
+            disabled={pending}
+            onChange={(event) =>
+              onUpdate(issue, {
+                estimate: event.target.value
+                  ? (Number(event.target.value) as Issue["estimate"])
+                  : null,
+              })
+            }
+          >
+            <option value="">未設定</option>
+            {[1, 2, 3, 5, 8].map((estimate) => (
+              <option value={estimate} key={estimate}>
+                {estimate} pt
+              </option>
+            ))}
+          </select>
+        ) : issue.estimate !== null && estimateEnabled ? (
+          `${issue.estimate} pt`
+        ) : (
+          "未設定"
+        )}
+      </span>
       <span className="project-cell">
         {projects.length > 0 && onUpdate ? (
           <select
@@ -2061,7 +2393,23 @@ function IssueRow({
           "Projectなし"
         )}
       </span>
-      <span className="due-cell">{formatDate(issue.dueAt)}</span>
+      <span className="due-cell">
+        {onRestore && !compact ? (
+          <button className="text-button" onClick={() => onRestore(issue)}>
+            復元
+          </button>
+        ) : onUpdate && !compact ? (
+          <input
+            type="date"
+            aria-label={`${issue.identifier}のDue date`}
+            value={dateInputValue(issue.dueAt)}
+            disabled={pending}
+            onChange={(event) => onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })}
+          />
+        ) : (
+          formatDate(issue.dueAt)
+        )}
+      </span>
     </div>
   );
 }
@@ -2070,11 +2418,13 @@ function IssueCard({
   issue,
   state: _state,
   labels = [],
+  estimateEnabled = true,
   onClick,
 }: {
   issue: Issue;
   state: WorkflowState;
   labels?: Label[];
+  estimateEnabled?: boolean;
   onClick: (trigger: HTMLButtonElement) => void;
 }) {
   return (
@@ -2090,7 +2440,7 @@ function IssueCard({
           {priorityLabel[issue.priority]}
         </span>
         <span className="card-meta">
-          {issue.estimate ? `${issue.estimate} pts` : "No estimate"}
+          {estimateEnabled && issue.estimate ? `${issue.estimate} pts` : "No estimate"}
         </span>
         {issue.labelIds.map((labelId) => {
           const label = labels.find((item) => item.id === labelId);
@@ -2851,17 +3201,50 @@ function ProjectsView({
   );
 }
 
-function SearchView({
+export function SearchView({
   query,
   onQuery,
   results,
   onOpen,
+  onOpenIssueId,
+  searchBusy,
+  searchError,
+  onRetry,
+  workflowStates,
+  projects,
+  cycles,
+  labels,
+  filters,
+  setFilters,
+  recentIssueViews,
+  recentSearches,
+  modifierLabel,
 }: {
   query: string;
-  onQuery: (value: string) => void;
+  onQuery: (value: string, filters?: SearchFilters) => void;
   results: Issue[];
   onOpen: (issue: Issue) => void;
+  onOpenIssueId: (issueId: string) => void;
+  searchBusy: boolean;
+  searchError: string | null;
+  onRetry: () => void;
+  workflowStates: WorkflowState[];
+  projects: Project[];
+  cycles: Cycle[];
+  labels: Label[];
+  filters: SearchFilters;
+  setFilters: (value: SearchFilters) => void;
+  recentIssueViews: RecentIssueViewModel[];
+  recentSearches: RecentSearchViewModel[];
+  modifierLabel: "⌘" | "Ctrl";
 }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => setActiveIndex(0), [query, results.length]);
+
+  function updateFilter<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
+    setFilters({ ...filters, [key]: value });
+  }
+
   return (
     <div className="page search-page">
       <div className="page-heading compact-heading">
@@ -2874,14 +3257,177 @@ function SearchView({
       <div className="search-hero">
         <span>⌕</span>
         <input
+          id="global-search-input"
           autoFocus
           value={query}
           onChange={(event) => onQuery(event.target.value)}
           placeholder="何を探していますか？"
+          role="combobox"
+          aria-controls="global-search-results"
+          aria-expanded={Boolean(query)}
+          aria-activedescendant={
+            query && results[activeIndex] ? `search-result-${results[activeIndex].id}` : undefined
+          }
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setActiveIndex((current) => nextCommandIndex(results.length, current, 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => nextCommandIndex(results.length, current, -1));
+            } else if (event.key === "Enter" && results[activeIndex]) {
+              event.preventDefault();
+              onOpen(results[activeIndex]);
+            }
+          }}
         />
-        <kbd>⌘ F</kbd>
+        <kbd>{modifierLabel} F</kbd>
       </div>
-      {query && (
+      <div className="search-filters" aria-label="検索Filter">
+        <select
+          aria-label="検索Status"
+          value={filters.statusId}
+          onChange={(event) => updateFilter("statusId", event.target.value)}
+        >
+          <option value="all">すべてのStatus</option>
+          {workflowStates.map((state) => (
+            <option value={state.id} key={state.id}>
+              {state.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="検索Priority"
+          value={filters.priority}
+          onChange={(event) =>
+            updateFilter("priority", event.target.value as SearchFilters["priority"])
+          }
+        >
+          <option value="all">すべてのPriority</option>
+          {Object.entries(priorityLabel).map(([value, label]) => (
+            <option value={value} key={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="検索Project"
+          value={filters.projectId}
+          onChange={(event) => updateFilter("projectId", event.target.value)}
+        >
+          <option value="all">すべてのProject</option>
+          {projects.map((project) => (
+            <option value={project.id} key={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="検索Cycle"
+          value={filters.cycleId}
+          onChange={(event) => updateFilter("cycleId", event.target.value)}
+        >
+          <option value="all">すべてのCycle</option>
+          {cycles.map((cycle) => (
+            <option value={cycle.id} key={cycle.id}>
+              {cycle.nameOverride ?? cycle.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="検索Label"
+          value={filters.labelId}
+          onChange={(event) => updateFilter("labelId", event.target.value)}
+        >
+          <option value="all">すべてのLabel</option>
+          {labels.map((label) => (
+            <option value={label.id} key={label.id}>
+              {label.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="検索Due"
+          value={filters.due}
+          onChange={(event) => updateFilter("due", event.target.value as SearchFilters["due"])}
+        >
+          <option value="all">すべての期限</option>
+          <option value="none">期限なし</option>
+          <option value="overdue">期限超過</option>
+          <option value="today">今日</option>
+          <option value="upcoming">近日</option>
+        </select>
+      </div>
+      {searchError && (
+        <div className="detail-live-error" role="alert">
+          {searchError}
+          <button className="text-button" onClick={onRetry} disabled={searchBusy}>
+            再試行
+          </button>
+        </div>
+      )}
+      {!query ? (
+        <div className="search-recent">
+          <section>
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">RECENT ISSUES</span>
+                <h2>最近開いたIssue</h2>
+              </div>
+            </div>
+            {recentIssueViews.map((view) => (
+              <button
+                className="search-result"
+                key={view.issue.id}
+                onClick={() => onOpenIssueId(view.issue.id)}
+              >
+                <span className="issue-id">{view.issue.identifier}</span>
+                <strong>{view.issue.title}</strong>
+                <span>最近開いたIssue</span>
+                <span>→</span>
+              </button>
+            ))}
+            {recentIssueViews.length === 0 && (
+              <p className="detail-empty">最近開いたIssueはありません。</p>
+            )}
+          </section>
+          <section>
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">RECENT SEARCHES</span>
+                <h2>最近の検索</h2>
+              </div>
+            </div>
+            {recentSearches.map((search) => (
+              <button
+                className="search-result"
+                key={search.id}
+                onClick={() => {
+                  const filter = search.query.filter;
+                  const nextFilters = {
+                    statusId: filter.statusIds?.[0] ?? "all",
+                    priority: filter.priorities?.[0] ?? "all",
+                    projectId: filter.projectIds?.[0] ?? "all",
+                    cycleId: filter.cycleIds?.[0] ?? "all",
+                    labelId: filter.labelIds?.[0] ?? "all",
+                    due: filter.due ?? "all",
+                  } satisfies SearchFilters;
+                  setFilters(nextFilters);
+                  onQuery(search.query.text, nextFilters);
+                }}
+              >
+                <span className="issue-id">検索</span>
+                <strong>{search.query.text}</strong>
+                <span>{search.query.filter.text ?? ""}</span>
+                <span>→</span>
+              </button>
+            ))}
+            {recentSearches.length === 0 && (
+              <p className="detail-empty">最近の検索はありません。</p>
+            )}
+          </section>
+        </div>
+      ) : (
         <div className="search-results">
           <div className="section-heading">
             <div>
@@ -2889,14 +3435,25 @@ function SearchView({
               <h2>{results.length}件のIssue</h2>
             </div>
           </div>
-          {results.map((issue) => (
-            <button className="search-result" key={issue.id} onClick={() => onOpen(issue)}>
-              <span className="issue-id">{issue.identifier}</span>
-              <strong>{issue.title}</strong>
-              <span>{issue.description || "説明なし"}</span>
-              <span>→</span>
-            </button>
-          ))}
+          {searchBusy && <p className="detail-empty">検索しています…</p>}
+          <div id="global-search-results" role="listbox" aria-label="検索結果">
+            {results.map((issue, index) => (
+              <button
+                className={`search-result ${index === activeIndex ? "active" : ""}`}
+                id={`search-result-${issue.id}`}
+                role="option"
+                aria-selected={index === activeIndex}
+                key={issue.id}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => onOpen(issue)}
+              >
+                <span className="issue-id">{issue.identifier}</span>
+                <strong>{issue.title}</strong>
+                <span>{issue.description || "説明なし"}</span>
+                <span>→</span>
+              </button>
+            ))}
+          </div>
           {results.length === 0 && (
             <EmptyState
               title="見つかりませんでした"
@@ -3386,6 +3943,9 @@ export function SettingsView({
   onColorTheme,
   canInstallPwa,
   onInstallPwa,
+  trashIssues,
+  trashLoading,
+  onRestoreIssue,
 }: {
   preferences: BootstrapPayload["preferences"];
   workflowStates: WorkflowState[];
@@ -3399,6 +3959,9 @@ export function SettingsView({
   onColorTheme: (colorTheme: ColorTheme, mutationKey: string) => Promise<void>;
   canInstallPwa: boolean;
   onInstallPwa: () => void;
+  trashIssues?: Issue[];
+  trashLoading?: boolean;
+  onRestoreIssue?: (issue: Issue) => Promise<void>;
 }) {
   const [themeDraft, setThemeDraft] = useState(preferences.theme);
   const [colorThemeDraft, setColorThemeDraft] = useState(preferences.colorTheme);
@@ -3423,12 +3986,27 @@ export function SettingsView({
   const labelMutationKeyRef = useRef<string | null>(null);
   const labelDeleteRetryRef = useRef<BootstrapPayload["labels"][number] | null>(null);
   const [labelErrorAction, setLabelErrorAction] = useState<"save" | "delete" | null>(null);
+  const [trashSavingId, setTrashSavingId] = useState<string | null>(null);
+  const [trashError, setTrashError] = useState<string | null>(null);
 
   useEffect(() => setThemeDraft(preferences.theme), [preferences.theme]);
   useEffect(() => setColorThemeDraft(preferences.colorTheme), [preferences.colorTheme]);
   useEffect(() => setTimezoneDraft(preferences.timezone), [preferences.timezone]);
   useEffect(() => setLocaleDraft(preferences.locale), [preferences.locale]);
   useEffect(() => setEstimateDraft(preferences.estimateEnabled), [preferences.estimateEnabled]);
+
+  async function restoreTrashIssue(issue: Issue): Promise<void> {
+    if (!onRestoreIssue || trashSavingId) return;
+    setTrashSavingId(issue.id);
+    setTrashError(null);
+    try {
+      await onRestoreIssue(issue);
+    } catch (error) {
+      setTrashError(error instanceof ApiError ? error.message : "Issueの復元に失敗しました。");
+    } finally {
+      setTrashSavingId(null);
+    }
+  }
 
   async function savePreference(patch: PreferencePatch, restore: () => void): Promise<void> {
     setPreferenceSaving(true);
@@ -3712,6 +4290,47 @@ export function SettingsView({
           </div>
         )}
         <WorkflowSettingsCard workflowStates={workflowStates} onRefresh={onRefresh} />
+        {trashIssues !== undefined && (
+          <section className="settings-card trash-settings-card">
+            <div className="settings-card-title">
+              <span className="settings-icon orange">⌫</span>
+              <div>
+                <h2>Trash</h2>
+                <p>削除したIssueを30日以内に復元できます</p>
+              </div>
+            </div>
+            {trashLoading ? (
+              <p className="detail-empty">Trashを読み込んでいます…</p>
+            ) : trashIssues.length === 0 ? (
+              <p className="detail-empty">Trashは空です。</p>
+            ) : (
+              <div className="trash-list">
+                {trashIssues.map((issue) => (
+                  <div className="trash-row" key={issue.id}>
+                    <div>
+                      <strong>{issue.identifier}</strong>
+                      <span>{issue.title}</span>
+                    </div>
+                    {onRestoreIssue && (
+                      <button
+                        className="text-button"
+                        disabled={trashSavingId !== null}
+                        onClick={() => void restoreTrashIssue(issue)}
+                      >
+                        {trashSavingId === issue.id ? "復元中…" : "復元"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {trashError && (
+              <div className="detail-live-error" role="alert">
+                {trashError}
+              </div>
+            )}
+          </section>
+        )}
         <section className="settings-card">
           <div className="settings-card-title">
             <span className="settings-icon orange">↻</span>
@@ -4333,6 +4952,8 @@ function IssueDetailPanel({
   onUpdate,
   pending,
   workflowStates,
+  estimateEnabled,
+  onArchive,
   onClose,
 }: {
   issueId: string;
@@ -4342,6 +4963,8 @@ function IssueDetailPanel({
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   pending: boolean;
   workflowStates: WorkflowState[];
+  estimateEnabled: boolean;
+  onArchive: () => Promise<void>;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -4498,10 +5121,25 @@ function IssueDetailPanel({
           ? { ...current, issues: current.issues.filter((item) => item.id !== issue.id) }
           : current,
       );
+      await queryClient.invalidateQueries({ queryKey: ["issues"] });
       queryClient.removeQueries({ queryKey: ["issue-detail", issue.id] });
       onClose();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Issueの削除に失敗しました。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function archiveCurrentIssue() {
+    if (!issue || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onArchive();
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Issueのアーカイブに失敗しました。");
     } finally {
       setSaving(false);
     }
@@ -4674,6 +5312,26 @@ function IssueDetailPanel({
                     </option>
                   ))}
                 </select>
+                <select
+                  className="detail-estimate-select"
+                  aria-label="IssueのEstimate"
+                  value={issue.estimate === null ? "" : String(issue.estimate)}
+                  disabled={!estimateEnabled || pending || saving}
+                  onChange={(event) =>
+                    onUpdate(issue, {
+                      estimate: event.target.value
+                        ? (Number(event.target.value) as Issue["estimate"])
+                        : null,
+                    })
+                  }
+                >
+                  <option value="">Estimateなし</option>
+                  {[1, 2, 3, 5, 8].map((estimate) => (
+                    <option value={estimate} key={estimate}>
+                      {estimate} pt
+                    </option>
+                  ))}
+                </select>
                 <span className="detail-date">更新 {formatDate(issue.updatedAt)}</span>
               </div>
               <div className="detail-property-editor">
@@ -4702,6 +5360,84 @@ function IssueDetailPanel({
                   {saving ? "保存中…" : "Projectを保存"}
                 </button>
               </div>
+              <div className="detail-property-editor issue-core-properties">
+                <label className="field-label" htmlFor="issue-due-date">
+                  Due date
+                </label>
+                <input
+                  id="issue-due-date"
+                  type="date"
+                  aria-label="IssueのDue date"
+                  value={dateInputValue(issue.dueAt)}
+                  disabled={pending || saving}
+                  onChange={(event) =>
+                    onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })
+                  }
+                />
+                <label className="field-label" htmlFor="issue-parent">
+                  Parent Issue
+                </label>
+                <select
+                  id="issue-parent"
+                  aria-label="IssueのParent"
+                  value={issue.parentId ?? ""}
+                  disabled={pending || saving}
+                  onChange={(event) => onUpdate(issue, { parentId: event.target.value || null })}
+                >
+                  <option value="">Parentなし</option>
+                  {knownIssues
+                    .filter(
+                      (candidate) =>
+                        candidate.id !== issue.id &&
+                        candidate.deletedAt === null &&
+                        candidate.archivedAt === null,
+                    )
+                    .map((candidate) => (
+                      <option value={candidate.id} key={candidate.id}>
+                        {candidate.identifier} · {candidate.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              {detail && (
+                <section className="issue-hierarchy" aria-label="親子Issue">
+                  <div className="detail-section-heading">
+                    <div>
+                      <span className="eyebrow">HIERARCHY</span>
+                      <h3>親子Issue</h3>
+                    </div>
+                    <span className="detail-count">{detail.children.length}</span>
+                  </div>
+                  {detail.parent && (
+                    <button
+                      className="text-button hierarchy-parent"
+                      onClick={() =>
+                        void router.navigate({ to: `/issues/${detail.parent!.id}` as never })
+                      }
+                    >
+                      ↑ {detail.parent.identifier} · {detail.parent.title}
+                    </button>
+                  )}
+                  <p className="child-progress-summary">
+                    子Issue {detail.childProgress.completed} / {detail.childProgress.total} 完了 （
+                    {detail.childProgress.progressPercent}%）
+                  </p>
+                  <div className="child-issue-list">
+                    {detail.children.map((child) => (
+                      <button
+                        className="text-button child-issue-link"
+                        key={child.id}
+                        onClick={() => void router.navigate({ to: `/issues/${child.id}` as never })}
+                      >
+                        {child.identifier} · {child.title}
+                      </button>
+                    ))}
+                    {detail.children.length === 0 && (
+                      <p className="detail-empty">Sub-issueはまだありません。</p>
+                    )}
+                  </div>
+                </section>
+              )}
               <label className="detail-label" htmlFor="issue-description">
                 Description
               </label>
@@ -4725,6 +5461,13 @@ function IssueDetailPanel({
                 </button>
                 <button className="button ghost" onClick={onClose}>
                   閉じる
+                </button>
+                <button
+                  className="button ghost"
+                  disabled={saving || pending}
+                  onClick={() => void archiveCurrentIssue()}
+                >
+                  アーカイブ
                 </button>
                 <button
                   className="button ghost danger"
@@ -4942,7 +5685,7 @@ function IssueDetailPanel({
   );
 }
 
-function IssueComposer({
+export function IssueComposer({
   title,
   setTitle,
   projects,
@@ -4950,6 +5693,14 @@ function IssueComposer({
   setProjectId,
   priority,
   setPriority,
+  estimate,
+  setEstimate,
+  dueAt,
+  setDueAt,
+  parentId,
+  setParentId,
+  issues,
+  estimateEnabled,
   existingIssue,
   onClose,
   onSubmit,
@@ -4962,6 +5713,14 @@ function IssueComposer({
   setProjectId: (value: string) => void;
   priority: Issue["priority"];
   setPriority: (value: Issue["priority"]) => void;
+  estimate: Issue["estimate"];
+  setEstimate: (value: Issue["estimate"]) => void;
+  dueAt: number | null;
+  setDueAt: (value: number | null) => void;
+  parentId: string;
+  setParentId: (value: string) => void;
+  issues: Issue[];
+  estimateEnabled: boolean;
   existingIssue?: Issue;
   onClose: () => void;
   onSubmit: () => void;
@@ -4970,6 +5729,9 @@ function IssueComposer({
   return (
     <div
       className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="issue-composer-title"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -4977,6 +5739,9 @@ function IssueComposer({
       <div className="composer modal-panel">
         <div className="composer-top">
           <span className="eyebrow">{existingIssue ? existingIssue.identifier : "NEW ISSUE"}</span>
+          <h2 id="issue-composer-title" className="visually-hidden">
+            {existingIssue ? "Issue詳細" : "新しいIssue"}
+          </h2>
           <button className="icon-button" onClick={onClose}>
             ×
           </button>
@@ -5050,6 +5815,58 @@ function IssueComposer({
                 </option>
               ))}
             </select>
+            <label className="field-label" htmlFor="new-issue-estimate">
+              Estimate
+            </label>
+            <select
+              id="new-issue-estimate"
+              aria-label="新しいIssueのEstimate"
+              className="text-input"
+              value={estimate === null ? "" : String(estimate)}
+              disabled={!estimateEnabled}
+              onChange={(event) =>
+                setEstimate(
+                  event.target.value ? (Number(event.target.value) as Issue["estimate"]) : null,
+                )
+              }
+            >
+              <option value="">Estimateなし</option>
+              {[1, 2, 3, 5, 8].map((value) => (
+                <option value={value} key={value}>
+                  {value} pt
+                </option>
+              ))}
+            </select>
+            <label className="field-label" htmlFor="new-issue-due-date">
+              Due date
+            </label>
+            <input
+              id="new-issue-due-date"
+              type="date"
+              aria-label="新しいIssueのDue date"
+              className="text-input"
+              value={dateInputValue(dueAt)}
+              onChange={(event) => setDueAt(dateInputToUnix(event.target.value))}
+            />
+            <label className="field-label" htmlFor="new-issue-parent">
+              Parent Issue
+            </label>
+            <select
+              id="new-issue-parent"
+              aria-label="新しいIssueのParent"
+              className="text-input"
+              value={parentId}
+              onChange={(event) => setParentId(event.target.value)}
+            >
+              <option value="">Parentなし</option>
+              {issues
+                .filter((issue) => issue.deletedAt === null && issue.archivedAt === null)
+                .map((issue) => (
+                  <option value={issue.id} key={issue.id}>
+                    {issue.identifier} · {issue.title}
+                  </option>
+                ))}
+            </select>
             <div className="composer-hint">
               <span>Enterで作成</span>
               <span>Shift + Enterで改行</span>
@@ -5074,64 +5891,131 @@ function IssueComposer({
   );
 }
 
-function CommandPalette({
+export function CommandPalette({
   onClose,
   onCreate,
   onNavigate,
   onSearch,
+  selectedIssue,
+  onOpenSelected,
+  onArchiveSelected,
+  onClearSelection,
+  modifierLabel,
 }: {
   onClose: () => void;
   onCreate: () => void;
   onNavigate: (section: Section) => void;
   onSearch: (value: string) => void;
+  selectedIssue?: Issue;
+  onOpenSelected: () => void;
+  onArchiveSelected: () => void;
+  onClearSelection: () => void;
+  modifierLabel: "⌘" | "Ctrl";
 }) {
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const commands = [
     { label: "新しいIssueを作成", hint: "C", action: onCreate },
-    ...(["issues", "cycles", "projects", "search", "inbox", "settings"] as Section[]).map(
-      (item) => ({
-        label: sectionLabels[item],
-        hint: sectionIcons[item],
-        action: () => onNavigate(item),
-      }),
-    ),
+    ...(
+      ["home", "issues", "cycles", "projects", "search", "inbox", "views", "settings"] as Section[]
+    ).map((item) => ({
+      label: sectionLabels[item],
+      hint: sectionIcons[item],
+      action: () => onNavigate(item),
+    })),
+    ...(query.trim()
+      ? [{ label: `検索「${query.trim()}」`, hint: "Enter", action: () => onSearch(query.trim()) }]
+      : []),
+    ...(selectedIssue
+      ? [
+          { label: "選択中Issueを開く", hint: "↵", action: onOpenSelected },
+          { label: "選択中Issueをアーカイブ", hint: "Archive", action: onArchiveSelected },
+          { label: "選択解除", hint: "Esc", action: onClearSelection },
+        ]
+      : []),
   ];
   const filtered = commands.filter((item) =>
     item.label.toLowerCase().includes(query.toLowerCase()),
   );
+  useEffect(() => {
+    setActiveIndex((current) => Math.min(Math.max(current, 0), Math.max(filtered.length - 1, 0)));
+  }, [query, filtered.length]);
+  useEffect(() => inputRef.current?.focus(), []);
+
+  function activate(index: number) {
+    const command = filtered[index];
+    if (!command) return;
+    command.action();
+  }
+
   return (
     <div
       className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="command-palette-title"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div className="command-palette">
+        <h2 id="command-palette-title" className="visually-hidden">
+          コマンドパレット
+        </h2>
         <div className="command-input">
           <span>⌕</span>
           <input
-            autoFocus
+            ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="コマンドやページを検索…"
+            role="combobox"
+            aria-controls="command-palette-options"
+            aria-expanded="true"
+            aria-activedescendant={
+              filtered[activeIndex] ? `command-option-${activeIndex}` : undefined
+            }
             onKeyDown={(event) => {
-              if (event.key === "Enter" && query.trim()) onSearch(query);
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setActiveIndex((current) => nextCommandIndex(filtered.length, current, 1));
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveIndex((current) => nextCommandIndex(filtered.length, current, -1));
+              } else if (event.key === "Enter") {
+                event.preventDefault();
+                activate(activeIndex);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onClose();
+              }
             }}
           />
         </div>
-        <div className="command-list">
-          {filtered.map((command) => (
-            <button key={command.label} onClick={command.action}>
+        <div className="command-list" id="command-palette-options" role="listbox">
+          {filtered.map((command, index) => (
+            <button
+              key={command.label}
+              id={`command-option-${index}`}
+              role="option"
+              aria-selected={index === activeIndex}
+              className={index === activeIndex ? "active" : ""}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => activate(index)}
+            >
               <span>{command.label}</span>
               <kbd>{command.hint}</kbd>
             </button>
           ))}
+          {filtered.length === 0 && <p className="command-empty">コマンドが見つかりません。</p>}
         </div>
         <div className="command-footer">
           <span>↑↓ 移動</span>
           <span>Enter 決定</span>
           <span>Esc 閉じる</span>
         </div>
+        <span className="visually-hidden">修飾キー: {modifierLabel}</span>
       </div>
     </div>
   );
@@ -5146,6 +6030,49 @@ function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () => [
+      ...panel.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
+      ),
+    ];
+    (focusable()[0] ?? panel).focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    panel.addEventListener("keydown", onKeyDown);
+    return () => {
+      panel.removeEventListener("keydown", onKeyDown);
+      previous?.focus?.();
+    };
+  }, []);
+
   return (
     <div
       className="modal-backdrop"
@@ -5153,9 +6080,16 @@ function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-panel generic-modal">
+      <div
+        ref={panelRef}
+        className="modal-panel generic-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="generic-modal-title"
+        tabIndex={-1}
+      >
         <div className="modal-title">
-          <h2>{title}</h2>
+          <h2 id="generic-modal-title">{title}</h2>
           <button className="icon-button" onClick={onClose}>
             ×
           </button>

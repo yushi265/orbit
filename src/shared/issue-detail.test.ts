@@ -106,6 +106,9 @@ describe("Issue detail shared contract", () => {
         createdAt: 1,
         updatedAt: 1,
       },
+      parent: null,
+      children: [],
+      childProgress: { total: 0, completed: 0, canceled: 0, progressPercent: 0 },
       notes: [
         {
           id: "note-1",

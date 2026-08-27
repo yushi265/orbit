@@ -74,3 +74,4 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 - [FEAT-feedback-polish.md](./FEAT-feedback-polish.md) — 動作確認フィードバック対応（2026-08-25）
 - [FEAT-issue-controls.md](./FEAT-issue-controls.md) — Issue操作性の向上（2026-08-25）
 - [PHASE1-foundation.md](./PHASE1-foundation.md) — Phase 1 Foundation（2026-08-27）
+- [PHASE2-issue-core.md](./PHASE2-issue-core.md) — Phase 2 Issue core（2026-08-27）

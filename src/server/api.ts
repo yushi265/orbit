@@ -44,6 +44,10 @@ import {
   updateIssueInputSchema,
   workflowStateCreateMutationSchema,
   workflowStateUpdateMutationSchema,
+  issueListScopeSchema,
+  issueSearchQuerySchema,
+  recentIssueViewMutationSchema,
+  recentSearchMutationSchema,
 } from "../shared/contracts";
 
 const projectMetadataPatchEnvelopeSchema = z.strictObject({
@@ -120,9 +124,17 @@ export async function bootstrap(request: Request): Promise<Response> {
 }
 
 export async function listIssues(request: Request): Promise<Response> {
-  return withOwner(request, async ({ owner, requestId }) =>
-    json({ items: owner.store.listIssues(owner.userId, parseQuery(request)) }, 200, requestId),
-  );
+  return withOwner(request, async ({ owner, requestId }) => {
+    const rawScope = new URL(request.url).searchParams.get("scope") ?? "active";
+    const scopeResult = issueListScopeSchema.safeParse(rawScope);
+    if (!scopeResult.success) throw validationError({ scope: ["Issue scopeが不正です。"] });
+    const scope = scopeResult.data;
+    return json(
+      { items: owner.store.listIssues(owner.userId, parseQuery(request), scope) },
+      200,
+      requestId,
+    );
+  });
 }
 
 export async function createIssue(request: Request): Promise<Response> {
@@ -463,8 +475,85 @@ export async function deleteView(request: Request, viewId: string): Promise<Resp
 
 export async function searchIssues(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const query = new URL(request.url).searchParams.get("q") ?? "";
-    return json({ items: owner.store.search(owner.userId, query) }, 200, requestId);
+    const url = new URL(request.url);
+    const query = parseContract(issueSearchQuerySchema, {
+      text: url.searchParams.get("q") ?? "",
+      filter: parseQuery(request).filter ?? {},
+    });
+    return json(
+      {
+        items: owner.store.search(owner.userId, query.text, {
+          filter: query.filter,
+          order: "updated",
+          limit: parseNumber(url.searchParams.get("limit"), 50),
+        }),
+      },
+      200,
+      requestId,
+    );
+  });
+}
+
+function recentResponse(owner: { userId: string; store: import("./store").OrbitStore }) {
+  const recent = owner.store.listRecent(owner.userId);
+  return {
+    issueViews: recent.issueViews.flatMap((view) => {
+      try {
+        return [
+          {
+            issue: owner.store.getIssueSummary(owner.userId, view.issueId),
+            viewedAt: view.viewedAt,
+          },
+        ];
+      } catch {
+        return [];
+      }
+    }),
+    searches: recent.searches,
+  };
+}
+
+export async function listRecent(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) =>
+    json(recentResponse(owner), 200, requestId),
+  );
+}
+
+export async function recordRecentIssueView(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(recentIssueViewMutationSchema, await parseBody(request));
+    const record = owner.store.recordRecentIssueView(
+      owner.userId,
+      input.issueId,
+      input.idempotencyKey,
+    );
+    return json(
+      {
+        recentIssueView: {
+          issue: owner.store.getIssueSummary(owner.userId, record.issueId),
+          viewedAt: record.viewedAt,
+        },
+      },
+      200,
+      requestId,
+    );
+  });
+}
+
+export async function recordRecentSearch(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(recentSearchMutationSchema, await parseBody(request));
+    return json(
+      {
+        recentSearch: owner.store.recordRecentSearch(
+          owner.userId,
+          input.query,
+          input.idempotencyKey,
+        ),
+      },
+      200,
+      requestId,
+    );
   });
 }
 

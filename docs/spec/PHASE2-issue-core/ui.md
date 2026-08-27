@@ -28,7 +28,7 @@
 
 ## UI/UX 方針
 
-- **画面フロー / 導線**: IssuesのtoolbarにActive / Archived Filterを置き、SettingsにTrash入口を置く。Issue DetailではPropertiesにDue / Parent、本文下にChild progressとSub-issue一覧を置く。Searchは検索入力の下にFilter、Recent、Resultsの順で表示する。Estimateは現行UIの導線から外す。
+- **画面フロー / 導線**: IssuesのtoolbarにActive / Archived Filterを置き、SettingsにTrash入口を置く。Issue DetailではPropertiesにDue / Parent、本文下にChild progressとSub-issue一覧を置く。Searchは検索入力の下にFilter、Recent、Resultsの順で表示する。Cycle / Projectの進捗はIssue数・完了率だけを表示し、Estimate / Scope pointsは現行UIの導線から外す。
 - **主要操作とフィードバック**: 属性変更は既存Issue PATCHのoptimistic updateを使う。Archive / Restore / Trashは既存actionを呼び、成功後にscopeの一覧を再取得する。検索は入力を保持し、通信失敗時は結果を消さずRetryを表示する。Recent保存失敗は画面遷移を止めない。
 - **状態設計（出し分け）**: 初期は既存Issue snapshotを表示し、Detail / Search / RecentはSkeletonを表示する。0件は説明付きEmpty state、保存中は該当操作だけdisabled、400はfield error、404はNot Found、409は最新値再取得、423はRun Overlay、500 / OfflineはRetryとする。
 - **既存デザインシステムとの整合**: 既存`toolbar`、`filter-select`、`detail-properties`、`button`、`modal-backdrop`、`EmptyState`、`ApiError`、Toast / Retryを再利用する。新規Menuライブラリや状態管理Storeは追加しない。

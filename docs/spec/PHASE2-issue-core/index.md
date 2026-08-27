@@ -102,6 +102,7 @@ PrivateなToken、Cookie、メールアドレス、内部mutation keyはResponse
 
 ## 判断根拠 / 未決事項
 
+- **EstimateをUIから撤去する**: 個人用運用では入力・表示・設定の負担が価値を上回るため、現行UIはIssue数・完了率・Due / Parentを中心とする。既存の`estimate` / `estimateEnabled`は保存データとAPIの後方互換のため残し、新規Migrationは作らない。
 - **RecentはSnapshotへ追加する**: 本番の既存永続化境界がOwner単位Snapshot CASであり、Recentだけ別D1書き込みにするとVersion競合・Owner境界・障害時の整合性が二重化するため。旧Snapshotには空配列を補完し、Migrationを増やさない。
 - **Recent保存は明示POSTへ分離する**: Search / DetailのGETに副作用を持たせず、Service Workerや再検証による意図しない履歴更新を避けるため。履歴保存の失敗は本体の検索・遷移を妨げない。
 - **Parent進捗は直下のみ・Canceled除外**: 再帰集計や循環グラフの複雑さを持ち込まず、Issue detailで説明可能な最小契約にする。深い階層の全体集計は対象外とする。

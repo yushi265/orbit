@@ -22,6 +22,7 @@ import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projec
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsSectionRouteImport } from './routes/settings/$section'
 import { Route as ApiV1BootstrapRouteImport } from './routes/api/v1/bootstrap'
+import { Route as ApiV1CycleSettingsRouteImport } from './routes/api/v1/cycle-settings'
 import { Route as ApiV1PreferencesRouteImport } from './routes/api/v1/preferences'
 import { Route as ApiV1RecentRouteImport } from './routes/api/v1/recent'
 import { Route as ApiV1RecentIssueViewsRouteImport } from './routes/api/v1/recent-issue-views'
@@ -117,6 +118,11 @@ const SettingsSectionRoute = SettingsSectionRouteImport.update({
 const ApiV1BootstrapRoute = ApiV1BootstrapRouteImport.update({
   id: '/api/v1/bootstrap',
   path: '/api/v1/bootstrap',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1CycleSettingsRoute = ApiV1CycleSettingsRouteImport.update({
+  id: '/api/v1/cycle-settings',
+  path: '/api/v1/cycle-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiV1PreferencesRoute = ApiV1PreferencesRouteImport.update({
@@ -300,6 +306,7 @@ export interface FileRoutesByFullPath {
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
+  '/api/v1/cycle-settings': typeof ApiV1CycleSettingsRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/recent': typeof ApiV1RecentRoute
   '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
@@ -346,6 +353,7 @@ export interface FileRoutesByTo {
   '/projects': typeof ProjectsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
+  '/api/v1/cycle-settings': typeof ApiV1CycleSettingsRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/recent': typeof ApiV1RecentRoute
   '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
@@ -393,6 +401,7 @@ export interface FileRoutesById {
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/v1/bootstrap': typeof ApiV1BootstrapRoute
+  '/api/v1/cycle-settings': typeof ApiV1CycleSettingsRoute
   '/api/v1/preferences': typeof ApiV1PreferencesRoute
   '/api/v1/recent': typeof ApiV1RecentRoute
   '/api/v1/recent-issue-views': typeof ApiV1RecentIssueViewsRoute
@@ -441,6 +450,7 @@ export interface FileRouteTypes {
     | '/projects/'
     | '/settings/'
     | '/api/v1/bootstrap'
+    | '/api/v1/cycle-settings'
     | '/api/v1/preferences'
     | '/api/v1/recent'
     | '/api/v1/recent-issue-views'
@@ -487,6 +497,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/settings'
     | '/api/v1/bootstrap'
+    | '/api/v1/cycle-settings'
     | '/api/v1/preferences'
     | '/api/v1/recent'
     | '/api/v1/recent-issue-views'
@@ -533,6 +544,7 @@ export interface FileRouteTypes {
     | '/projects/'
     | '/settings/'
     | '/api/v1/bootstrap'
+    | '/api/v1/cycle-settings'
     | '/api/v1/preferences'
     | '/api/v1/recent'
     | '/api/v1/recent-issue-views'
@@ -580,6 +592,7 @@ export interface RootRouteChildren {
   ProjectsIndexRoute: typeof ProjectsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   ApiV1BootstrapRoute: typeof ApiV1BootstrapRoute
+  ApiV1CycleSettingsRoute: typeof ApiV1CycleSettingsRoute
   ApiV1PreferencesRoute: typeof ApiV1PreferencesRoute
   ApiV1RecentRoute: typeof ApiV1RecentRoute
   ApiV1RecentIssueViewsRoute: typeof ApiV1RecentIssueViewsRoute
@@ -697,6 +710,13 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/bootstrap'
       fullPath: '/api/v1/bootstrap'
       preLoaderRoute: typeof ApiV1BootstrapRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/cycle-settings': {
+      id: '/api/v1/cycle-settings'
+      path: '/api/v1/cycle-settings'
+      fullPath: '/api/v1/cycle-settings'
+      preLoaderRoute: typeof ApiV1CycleSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/preferences': {
@@ -1004,6 +1024,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsIndexRoute: ProjectsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   ApiV1BootstrapRoute: ApiV1BootstrapRoute,
+  ApiV1CycleSettingsRoute: ApiV1CycleSettingsRoute,
   ApiV1PreferencesRoute: ApiV1PreferencesRoute,
   ApiV1RecentRoute: ApiV1RecentRoute,
   ApiV1RecentIssueViewsRoute: ApiV1RecentIssueViewsRoute,

@@ -76,3 +76,4 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 - [PHASE1-foundation.md](./PHASE1-foundation.md) — Phase 1 Foundation（2026-08-27）
 - [PHASE2-issue-core.md](./PHASE2-issue-core.md) — Phase 2 Issue core（2026-08-27）
 - [FIX-cycle-initial-bootstrap.md](./FIX-cycle-initial-bootstrap.md) — 初回Cycleの自動初期化（2026-08-28）
+- [FEAT-cycle-settings.md](./FEAT-cycle-settings.md) — Cycle期間・開始曜日設定（2026-08-28）

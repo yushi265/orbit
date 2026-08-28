@@ -310,6 +310,7 @@ export interface IssueQuery {
 export interface BootstrapPayload {
   me: User;
   preferences: Preferences;
+  cycleSettings: CycleSettings;
   workflowStates: WorkflowState[];
   projectStatuses: ProjectStatus[];
   issues: Issue[];

@@ -26,9 +26,18 @@ const workflowStates = [
     isDefault: true,
   },
 ];
+const cycleSettings = {
+  userId: "owner",
+  enabled: true,
+  durationWeeks: 2,
+  cooldownWeeks: 0,
+  startWeekday: 1,
+  futureCount: 3,
+};
 
 const settingsProps = {
   preferences,
+  cycleSettings,
   labels: [],
   onRefresh: () => undefined,
   run: null,
@@ -36,6 +45,7 @@ const settingsProps = {
   onRun: () => undefined,
   onResume: () => undefined,
   onPreferences: async () => undefined,
+  onCycleSettings: async () => undefined,
   onColorTheme: async () => undefined,
   canInstallPwa: false,
   onInstallPwa: () => undefined,
@@ -125,6 +135,7 @@ describe("Phase 1 Settings UI contract", () => {
     );
 
     expect(css).toContain(".workflow-settings-row");
+    expect(css).toContain(".cycle-settings-actions");
     expect(css).toContain("@media (max-width: 767px)");
     expect(markup).not.toContain('role="alert"');
   });

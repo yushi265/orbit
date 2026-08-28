@@ -22,8 +22,26 @@ export const cycleStartMutationSchema = z.strictObject({
   idempotencyKey: mutationMetaSchema.shape.idempotencyKey,
 });
 
+export const cycleDurationWeeksSchema = z
+  .number()
+  .int("durationWeeks must be an integer")
+  .min(1, "durationWeeks must be between 1 and 8")
+  .max(8, "durationWeeks must be between 1 and 8");
+export const cycleStartWeekdaySchema = z
+  .number()
+  .int("startWeekday must be an integer")
+  .min(0, "startWeekday must be between 0 and 6")
+  .max(6, "startWeekday must be between 0 and 6");
+export const cycleSettingsMutationSchema = z.strictObject({
+  idempotencyKey: mutationMetaSchema.shape.idempotencyKey.max(200),
+  durationWeeks: cycleDurationWeeksSchema,
+  startWeekday: cycleStartWeekdaySchema,
+});
+
 export type CycleMetadataMutation = z.infer<typeof cycleMetadataMutationSchema>;
 export type CycleStartMutation = z.infer<typeof cycleStartMutationSchema>;
+export type CycleSettingsMutation = z.infer<typeof cycleSettingsMutationSchema>;
 
 export const CycleMetadataMutationSchema = cycleMetadataMutationSchema;
 export const CycleStartMutationSchema = cycleStartMutationSchema;
+export const CycleSettingsMutationSchema = cycleSettingsMutationSchema;

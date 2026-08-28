@@ -15,6 +15,15 @@ const preferences = {
   issueCounter: 0,
 };
 
+const cycleSettings = {
+  userId: "owner",
+  enabled: true,
+  durationWeeks: 2,
+  cooldownWeeks: 0,
+  startWeekday: 1,
+  futureCount: 3,
+};
+
 const workflowStates = [
   {
     id: "state-todo",
@@ -56,6 +65,7 @@ describe("Phase 1 Settings runtime interactions", () => {
       root.render(
         createElement(SettingsView, {
           preferences,
+          cycleSettings,
           workflowStates,
           labels: [],
           onRefresh: () => undefined,
@@ -64,6 +74,7 @@ describe("Phase 1 Settings runtime interactions", () => {
           onRun: () => undefined,
           onResume: () => undefined,
           onPreferences,
+          onCycleSettings: async () => undefined,
           onColorTheme: async () => undefined,
           canInstallPwa: false,
           onInstallPwa: () => undefined,
@@ -107,6 +118,7 @@ describe("Phase 1 Settings runtime interactions", () => {
       root.render(
         createElement(SettingsView, {
           preferences,
+          cycleSettings,
           workflowStates,
           labels: [],
           onRefresh: () => undefined,
@@ -115,6 +127,7 @@ describe("Phase 1 Settings runtime interactions", () => {
           onRun: () => undefined,
           onResume: () => undefined,
           onPreferences,
+          onCycleSettings: async () => undefined,
           onColorTheme: async () => undefined,
           canInstallPwa: false,
           onInstallPwa: () => undefined,
@@ -179,6 +192,7 @@ describe("Phase 1 Settings runtime interactions", () => {
       root.render(
         createElement(SettingsView, {
           preferences,
+          cycleSettings,
           workflowStates: states,
           labels: [],
           onRefresh,
@@ -187,6 +201,7 @@ describe("Phase 1 Settings runtime interactions", () => {
           onRun: () => undefined,
           onResume: () => undefined,
           onPreferences: async () => undefined,
+          onCycleSettings: async () => undefined,
           onColorTheme: async () => undefined,
           canInstallPwa: false,
           onInstallPwa: () => undefined,

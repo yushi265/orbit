@@ -16,6 +16,7 @@ import {
   startBackgroundRun,
   startCycle,
   updateCycleMetadata,
+  updateCycleSettings,
   updateIssueNote,
   updateIssue,
   updatePreferences,
@@ -72,6 +73,77 @@ describe("HTTP service boundary", () => {
     expect((await body<{ issue: { description: string } }>(multiline)).issue.description).toBe(
       "1行目\n2行目",
     );
+  });
+
+  it("[状態遷移] CycleSettings APIを保存し、Bootstrapで再取得できる", async () => {
+    const response = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-1",
+        durationWeeks: 4,
+        startWeekday: 5,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = await body<{
+      cycleSettings: { durationWeeks: number; startWeekday: number };
+    }>(response);
+    expect(responseBody).toMatchObject({
+      cycleSettings: { durationWeeks: 4, startWeekday: 5 },
+    });
+    const reloaded = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(
+      await body<{ cycleSettings: { durationWeeks: number; startWeekday: number } }>(reloaded),
+    ).toMatchObject({
+      cycleSettings: { durationWeeks: 4, startWeekday: 5 },
+    });
+
+    const replay = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-1",
+        durationWeeks: 4,
+        startWeekday: 5,
+      }),
+    );
+    expect(await body(replay)).toEqual(responseBody);
+    const conflict = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-1",
+        durationWeeks: 3,
+        startWeekday: 5,
+      }),
+    );
+    expect(conflict.status).toBe(409);
+
+    const invalidDuration = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-invalid-duration",
+        durationWeeks: 9,
+        startWeekday: 5,
+      }),
+    );
+    expect(invalidDuration.status).toBe(400);
+    const invalidWeekday = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-invalid-weekday",
+        durationWeeks: 4,
+        startWeekday: 7,
+      }),
+    );
+    expect(invalidWeekday.status).toBe(400);
+
+    getOrbitStore("dev-owner").startRun("dev-owner", {
+      kind: "maintenance",
+      idempotencyKey: "api-cycle-settings-lock-run",
+    });
+    const locked = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-locked",
+        durationWeeks: 2,
+        startWeekday: 1,
+      }),
+    );
+    expect(locked.status).toBe(423);
   });
 
   it("[状態遷移/セキュリティ境界] Issue APIでProjectを割り当て・解除する", async () => {

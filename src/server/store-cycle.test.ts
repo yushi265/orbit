@@ -23,6 +23,133 @@ function setup() {
 }
 
 describe("Cycle workspace service", () => {
+  it("[状態遷移] Cycle設定保存でUpcomingだけをTimezone基準に再計算し、Active・Past・overrideを保持する", () => {
+    const { store, cycle } = setup();
+    const past = {
+      ...cycle,
+      id: "cycle-past-settings",
+      number: 0,
+      status: "completed" as const,
+      startsAt: 1,
+      endsAt: 2,
+      completedAt: 2,
+    };
+    store.cycles.set(past.id, past);
+    store.bootstrap("owner");
+    const activeBefore = structuredClone(cycle);
+    const upcoming = store
+      .listCycles("owner")
+      .filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    const overridden = upcoming[1];
+    overridden.scheduleOverridden = true;
+    overridden.startsAt = 1_702_000_000_000;
+    overridden.endsAt = 1_702_604_800_000;
+    const overriddenBefore = structuredClone(overridden);
+    const pastBefore = structuredClone(past);
+
+    const updated = store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-update-1",
+      durationWeeks: 1,
+      startWeekday: 5,
+    });
+
+    expect(updated).toMatchObject({ durationWeeks: 1, startWeekday: 5 });
+    expect(store.cycles.get(cycle.id)).toEqual(activeBefore);
+    expect(store.cycles.get(past.id)).toEqual(pastBefore);
+    expect(store.cycles.get(overridden.id)).toEqual(overriddenBefore);
+    const automatic = store
+      .listCycles("owner")
+      .filter((item) => item.status === "upcoming" && !item.scheduleOverridden)
+      .sort((left, right) => left.number - right.number);
+    expect(automatic[0].endsAt - automatic[0].startsAt).toBe(7 * 24 * 60 * 60 * 1000);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Tokyo",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(automatic[0].startsAt));
+    expect(Object.fromEntries(parts.map((part) => [part.type, part.value]))).toMatchObject({
+      weekday: "Fri",
+      hour: "00",
+      minute: "00",
+    });
+  });
+
+  it("[デシジョンテーブル] Cycle設定の不正値・再送・lock中を拒否または冪等に扱う", () => {
+    const { store } = setup();
+    store.bootstrap("owner");
+    const beforeInvalid = store.toSnapshot();
+
+    expect(() =>
+      store.updateCycleSettings("owner", {
+        idempotencyKey: "cycle-settings-invalid",
+        durationWeeks: 0,
+        startWeekday: 1,
+      } as never),
+    ).toThrowError(expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }));
+    expect(store.toSnapshot()).toEqual(beforeInvalid);
+
+    const input = {
+      idempotencyKey: "cycle-settings-replay",
+      durationWeeks: 3,
+      startWeekday: 2,
+    };
+    const updated = store.updateCycleSettings("owner", input);
+    const activityCount = store.activities.length;
+    const outboxCount = store.outbox.length;
+    const replay = store.updateCycleSettings("owner", input);
+    expect(replay).toEqual(updated);
+    expect(store.activities).toHaveLength(activityCount);
+    expect(store.outbox).toHaveLength(outboxCount);
+    expect(() =>
+      store.updateCycleSettings("owner", {
+        ...input,
+        durationWeeks: 4,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "IDEMPOTENCY_KEY_REUSED", status: 409 }));
+
+    const locked = setup().store;
+    const beforeLocked = locked.toSnapshot();
+    locked.startRun("owner", { kind: "maintenance", idempotencyKey: "cycle-settings-lock-run" });
+    expect(() => locked.updateCycleSettings("owner", input)).toThrowError(
+      expect.objectContaining({ code: "OPERATION_IN_PROGRESS", status: 423 }),
+    );
+    expect(locked.toSnapshot()).toMatchObject({
+      cycleSettings: beforeLocked.cycleSettings,
+      cycles: beforeLocked.cycles,
+    });
+  });
+
+  it("[状態遷移] 設定変更後にcloseで生成するUpcomingも新しい期間と開始曜日を使う", () => {
+    const { store, cycle } = setup();
+    store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-close",
+      durationWeeks: 1,
+      startWeekday: 2,
+    });
+
+    expect(store.closeCycle("owner", cycle.id, "cycle-close-after-settings")).toMatchObject({
+      status: "completed",
+    });
+    const next = store.listCycles("owner").find((item) => item.number === 2)!;
+    expect(next).toMatchObject({ status: "upcoming", number: 2 });
+    expect(next.endsAt - next.startsAt).toBe(7 * 24 * 60 * 60 * 1000);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Tokyo",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(next.startsAt));
+    expect(Object.fromEntries(parts.map((part) => [part.type, part.value]))).toMatchObject({
+      weekday: "Tue",
+      hour: "00",
+      minute: "00",
+    });
+  });
+
   it("[代表値] Cycle 0件のBootstrapでActive Cycle 1とUpcomingを作成し、再実行で増やさない", () => {
     const store = new OrbitStore(() => 1_700_000_000_000);
 
@@ -67,9 +194,8 @@ describe("Cycle workspace service", () => {
     expect(store.cycles.get("cycle-active")).toEqual(existing);
     expect(upcoming).toHaveLength(3);
     expect(upcoming.map((cycle) => cycle.number)).toEqual([2, 3, 4]);
-    expect(upcoming[0].startsAt).toBe(
-      first.cycles.find((cycle) => cycle.status === "active")!.endsAt,
-    );
+    expect(upcoming[0].startsAt).toBe(1_701_010_800_000);
+    expect(upcoming[0].startsAt).toBeGreaterThan(existing!.endsAt);
     expect(
       store.bootstrap("owner").cycles.filter((cycle) => cycle.status === "upcoming"),
     ).toHaveLength(3);
@@ -220,9 +346,8 @@ describe("Cycle workspace service", () => {
       started.startsAt + store.cycleSettings.get("owner")!.durationWeeks * 7 * 24 * 60 * 60 * 1000,
     );
     expect(store.cycles.get(future.id)).toMatchObject({
-      startsAt: started.endsAt,
-      endsAt:
-        started.endsAt + store.cycleSettings.get("owner")!.durationWeeks * 7 * 24 * 60 * 60 * 1000,
+      startsAt: 1_701_615_600_000,
+      endsAt: 1_702_825_200_000,
     });
     const activityCount = store.activities.length;
     const outboxCount = store.outbox.length;

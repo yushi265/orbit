@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
+  type FormEvent as ReactFormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
   useEffect,
@@ -12,6 +13,7 @@ import {
 import type {
   BootstrapViewModel as BootstrapPayload,
   CycleViewModel as Cycle,
+  CycleSettingsViewModel as CycleSettings,
   IssueViewModel as Issue,
   ProjectViewModel as Project,
   PublicRunViewModel as PublicRunSummary,
@@ -60,6 +62,7 @@ type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
   Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
 >;
+type CycleSettingsPatch = Pick<BootstrapPayload["cycleSettings"], "durationWeeks" | "startWeekday">;
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
 type IssueReorderVariables = {
@@ -113,6 +116,15 @@ const sectionIcons: Record<Section, string> = {
   views: "▤",
   settings: "⚙",
 };
+const cycleWeekdayOptions = [
+  [0, "日曜日"],
+  [1, "月曜日"],
+  [2, "火曜日"],
+  [3, "水曜日"],
+  [4, "木曜日"],
+  [5, "金曜日"],
+  [6, "土曜日"],
+] as const;
 
 function formatDate(value: number | null): string {
   if (!value) return "未設定";
@@ -751,6 +763,20 @@ function OrbitAppInner(props: Props) {
     );
   }
 
+  async function saveCycleSettings(
+    patch: CycleSettingsPatch,
+    mutationKey = idempotencyKey(),
+  ): Promise<void> {
+    const result = await apiPatch<{ cycleSettings: BootstrapPayload["cycleSettings"] }>(
+      "/api/v1/cycle-settings",
+      { idempotencyKey: mutationKey, ...patch },
+    );
+    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+      current ? { ...current, cycleSettings: result.cycleSettings } : current,
+    );
+    await refresh();
+  }
+
   async function saveColorTheme(
     colorTheme: ColorTheme,
     mutationKey = idempotencyKey(),
@@ -1237,6 +1263,7 @@ function OrbitAppInner(props: Props) {
           {section === "settings" && (
             <SettingsView
               preferences={data.preferences}
+              cycleSettings={data.cycleSettings}
               workflowStates={workflowStates}
               labels={labels}
               onRefresh={refresh}
@@ -1245,6 +1272,7 @@ function OrbitAppInner(props: Props) {
               onRun={runMaintenance}
               onResume={resumeMaintenance}
               onPreferences={savePreferences}
+              onCycleSettings={saveCycleSettings}
               onColorTheme={saveColorTheme}
               canInstallPwa={installPrompt !== null}
               onInstallPwa={() => void installPwa()}
@@ -3868,6 +3896,7 @@ function ViewsView({
 
 export function SettingsView({
   preferences,
+  cycleSettings,
   workflowStates,
   labels,
   onRefresh,
@@ -3876,6 +3905,7 @@ export function SettingsView({
   onRun,
   onResume,
   onPreferences,
+  onCycleSettings,
   onColorTheme,
   canInstallPwa,
   onInstallPwa,
@@ -3884,6 +3914,7 @@ export function SettingsView({
   onRestoreIssue,
 }: {
   preferences: BootstrapPayload["preferences"];
+  cycleSettings: CycleSettings;
   workflowStates: WorkflowState[];
   labels: BootstrapPayload["labels"];
   onRefresh: () => Promise<unknown> | void;
@@ -3892,6 +3923,7 @@ export function SettingsView({
   onRun: () => void;
   onResume: () => void;
   onPreferences: (patch: PreferencePatch, mutationKey?: string) => Promise<void>;
+  onCycleSettings: (patch: CycleSettingsPatch, mutationKey?: string) => Promise<void>;
   onColorTheme: (colorTheme: ColorTheme, mutationKey: string) => Promise<void>;
   canInstallPwa: boolean;
   onInstallPwa: () => void;
@@ -3912,6 +3944,20 @@ export function SettingsView({
   const [preferenceSaved, setPreferenceSaved] = useState<string | null>(null);
   const [preferenceRetry, setPreferenceRetry] = useState<(() => void) | null>(null);
   const preferenceMutationKeyRef = useRef<{ key: string; patch: PreferencePatch } | null>(null);
+  const [cycleDurationDraft, setCycleDurationDraft] = useState(cycleSettings.durationWeeks);
+  const [cycleStartWeekdayDraft, setCycleStartWeekdayDraft] = useState(cycleSettings.startWeekday);
+  const [cycleSettingsSaving, setCycleSettingsSaving] = useState(false);
+  const [cycleSettingsError, setCycleSettingsError] = useState<string | null>(null);
+  const [cycleSettingsFieldErrors, setCycleSettingsFieldErrors] = useState<Record<
+    string,
+    string[]
+  > | null>(null);
+  const [cycleSettingsSaved, setCycleSettingsSaved] = useState<string | null>(null);
+  const [cycleSettingsRetry, setCycleSettingsRetry] = useState<(() => void) | null>(null);
+  const cycleSettingsMutationKeyRef = useRef<{
+    key: string;
+    patch: CycleSettingsPatch;
+  } | null>(null);
   const [colorThemeSaving, setColorThemeSaving] = useState(false);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
@@ -3928,6 +3974,14 @@ export function SettingsView({
   useEffect(() => setColorThemeDraft(preferences.colorTheme), [preferences.colorTheme]);
   useEffect(() => setTimezoneDraft(preferences.timezone), [preferences.timezone]);
   useEffect(() => setLocaleDraft(preferences.locale), [preferences.locale]);
+  useEffect(
+    () => setCycleDurationDraft(cycleSettings.durationWeeks),
+    [cycleSettings.durationWeeks],
+  );
+  useEffect(
+    () => setCycleStartWeekdayDraft(cycleSettings.startWeekday),
+    [cycleSettings.startWeekday],
+  );
 
   async function restoreTrashIssue(issue: Issue): Promise<void> {
     if (!onRestoreIssue || trashSavingId) return;
@@ -3965,6 +4019,53 @@ export function SettingsView({
       setPreferenceRetry(() => () => void savePreference(patch, restore));
     } finally {
       setPreferenceSaving(false);
+    }
+  }
+
+  async function saveCycleSettingsForm(
+    event?: ReactFormEvent<HTMLFormElement>,
+    retryPatch?: CycleSettingsPatch,
+  ): Promise<void> {
+    event?.preventDefault();
+    if (cycleSettingsSaving) return;
+    const patch: CycleSettingsPatch = retryPatch ?? {
+      durationWeeks: cycleDurationDraft,
+      startWeekday: cycleStartWeekdayDraft,
+    };
+    setCycleSettingsSaving(true);
+    setCycleSettingsError(null);
+    setCycleSettingsFieldErrors(null);
+    setCycleSettingsSaved(null);
+    const previous = cycleSettingsMutationKeyRef.current;
+    const mutationKey =
+      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
+        ? previous.key
+        : idempotencyKey();
+    try {
+      await onCycleSettings(patch, mutationKey);
+      cycleSettingsMutationKeyRef.current = null;
+      setCycleSettingsRetry(null);
+      setCycleSettingsSaved("Cycle設定を保存しました。");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        cycleSettingsMutationKeyRef.current = null;
+        try {
+          await onRefresh();
+        } catch {
+          // Keep the conflict message visible when the refresh itself fails.
+        }
+      } else if (error instanceof ApiError && error.status === 423) {
+        cycleSettingsMutationKeyRef.current = { key: mutationKey, patch };
+      } else {
+        cycleSettingsMutationKeyRef.current = null;
+      }
+      setCycleSettingsError(
+        error instanceof ApiError ? error.message : "Cycle設定の保存に失敗しました。",
+      );
+      setCycleSettingsFieldErrors(error instanceof ApiError ? (error.fieldErrors ?? null) : null);
+      setCycleSettingsRetry(() => () => void saveCycleSettingsForm(undefined, patch));
+    } finally {
+      setCycleSettingsSaving(false);
     }
   }
 
@@ -4212,6 +4313,103 @@ export function SettingsView({
               <span className="setting-value">ブラウザメニューから追加</span>
             )}
           </div>
+        </section>
+        <section className="settings-card cycle-settings-card">
+          <div className="settings-card-title">
+            <span className="settings-icon orange">◷</span>
+            <div>
+              <h2>Cycle</h2>
+              <p>期間と開始曜日の設定</p>
+            </div>
+            <span className="setting-value" role="status">
+              {cycleSettingsSaving ? "保存中…" : (cycleSettingsSaved ?? "")}
+            </span>
+          </div>
+          <form
+            className="cycle-settings-form"
+            onSubmit={(event) => void saveCycleSettingsForm(event)}
+          >
+            <div className="setting-row">
+              <div>
+                <strong>Cycle期間</strong>
+                <span>1〜8週間</span>
+                {cycleSettingsFieldErrors?.durationWeeks && (
+                  <span id="cycle-duration-error" className="setting-field-error" role="alert">
+                    {cycleSettingsFieldErrors.durationWeeks.join(" ")}
+                  </span>
+                )}
+              </div>
+              <select
+                aria-label="Cycle期間"
+                aria-invalid={Boolean(cycleSettingsFieldErrors?.durationWeeks)}
+                aria-describedby={
+                  cycleSettingsFieldErrors?.durationWeeks ? "cycle-duration-error" : undefined
+                }
+                value={String(cycleDurationDraft)}
+                disabled={cycleSettingsSaving}
+                onChange={(event) => {
+                  setCycleDurationDraft(Number(event.target.value));
+                  setCycleSettingsSaved(null);
+                }}
+              >
+                {Array.from({ length: 8 }, (_, index) => index + 1).map((weeks) => (
+                  <option value={weeks} key={weeks}>
+                    {weeks}週間
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Cycle開始曜日</strong>
+                <span>Timezoneの00:00を開始境界にします</span>
+                {cycleSettingsFieldErrors?.startWeekday && (
+                  <span id="cycle-weekday-error" className="setting-field-error" role="alert">
+                    {cycleSettingsFieldErrors.startWeekday.join(" ")}
+                  </span>
+                )}
+              </div>
+              <select
+                aria-label="Cycle開始曜日"
+                aria-invalid={Boolean(cycleSettingsFieldErrors?.startWeekday)}
+                aria-describedby={
+                  cycleSettingsFieldErrors?.startWeekday ? "cycle-weekday-error" : undefined
+                }
+                value={String(cycleStartWeekdayDraft)}
+                disabled={cycleSettingsSaving}
+                onChange={(event) => {
+                  setCycleStartWeekdayDraft(Number(event.target.value));
+                  setCycleSettingsSaved(null);
+                }}
+              >
+                {cycleWeekdayOptions.map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="cycle-settings-actions">
+              <span className="setting-value">{preferences.timezone}</span>
+              <button className="button secondary" type="submit" disabled={cycleSettingsSaving}>
+                {cycleSettingsSaving ? "保存中…" : "Cycle設定を保存"}
+              </button>
+            </div>
+          </form>
+          {cycleSettingsError && (
+            <div className="detail-live-error" role="alert">
+              {cycleSettingsError}
+              {cycleSettingsRetry && (
+                <button
+                  className="text-button"
+                  onClick={cycleSettingsRetry}
+                  disabled={cycleSettingsSaving}
+                >
+                  再試行
+                </button>
+              )}
+            </div>
+          )}
         </section>
         {preferenceError && (
           <div className="detail-live-error" role="alert">

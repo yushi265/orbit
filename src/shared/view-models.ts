@@ -157,6 +157,14 @@ export interface CycleViewModel {
   completedAt: number | null;
   scheduleOverridden: boolean;
 }
+export interface CycleSettingsViewModel {
+  userId: string;
+  enabled: boolean;
+  durationWeeks: number;
+  cooldownWeeks: number;
+  startWeekday: number;
+  futureCount: number;
+}
 export interface SavedViewViewModel {
   id: string;
   userId: string;
@@ -208,6 +216,7 @@ export interface PublicRunViewModel {
 export interface BootstrapViewModel {
   me: UserViewModel;
   preferences: PreferencesViewModel;
+  cycleSettings: CycleSettingsViewModel;
   workflowStates: WorkflowStateViewModel[];
   projectStatuses: ProjectStatusViewModel[];
   issues: IssueViewModel[];

@@ -44,6 +44,26 @@ class FakeD1 {
 }
 
 describe("store session", () => {
+  it("[状態遷移] productionのCycleSettingsを保存し、次回Sessionで再読込できる", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV: "production", DB: database };
+    const first = await openStoreSession("owner-cycle-settings", "owner@example.com", environment);
+
+    const updated = first.store.updateCycleSettings("owner-cycle-settings", {
+      idempotencyKey: "production-cycle-settings",
+      durationWeeks: 6,
+      startWeekday: 4,
+    });
+    expect(updated).toMatchObject({ durationWeeks: 6, startWeekday: 4 });
+    await first.persist();
+
+    const second = await openStoreSession("owner-cycle-settings", "owner@example.com", environment);
+    expect(second.store.cycleSettings.get("owner-cycle-settings")).toMatchObject({
+      durationWeeks: 6,
+      startWeekday: 4,
+    });
+  });
+
   it("[状態遷移] productionの空Snapshotを初回GETでActiveとUpcomingへ初期化し、再読込できる", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const environment = { APP_ENV: "production", DB: database };

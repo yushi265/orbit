@@ -40,6 +40,7 @@ import {
   labelNameSchema,
   type BulkIssueMutation,
   type CycleMetadataMutation,
+  type CycleSettingsMutation,
   type LabelMutation,
   type LabelUpdate,
   type PreferencesMutation,
@@ -54,6 +55,7 @@ import {
   workflowStateNameSchema,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
+import { cycleEndAt, nextCycleStartAt } from "./cycle-schedule";
 
 export type OrbitStoreLock = {
   userId: string;
@@ -144,6 +146,7 @@ export interface RelationMutationInput {
   type: IssueRelationType;
 }
 export type UpdateCycleMetadataInput = CycleMetadataMutation;
+export type UpdateCycleSettingsInput = CycleSettingsMutation;
 
 export interface CreateProjectInput {
   idempotencyKey: string;
@@ -2145,6 +2148,103 @@ export class OrbitStore {
     }
   }
 
+  updateCycleSettings(userId: string, input: UpdateCycleSettingsInput): CycleSettings {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<CycleSettings>(
+      userId,
+      "cycle.settings.update",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+    const settings = this.cycleSettings.get(userId);
+    if (!settings) throw notFound();
+    if (
+      !Number.isInteger(input.durationWeeks) ||
+      input.durationWeeks < 1 ||
+      input.durationWeeks > 8
+    )
+      throw validationError({ durationWeeks: ["Cycle期間は1〜8週間で指定してください。"] });
+    if (!Number.isInteger(input.startWeekday) || input.startWeekday < 0 || input.startWeekday > 6)
+      throw validationError({ startWeekday: ["開始曜日は0〜6で指定してください。"] });
+    const timezone = this.preferences.get(userId)?.timezone;
+    if (!timezone || !isValidTimeZone(timezone))
+      throw validationError({ timezone: ["IANA timezoneを指定してください。"] });
+
+    const nextSettings: CycleSettings = {
+      ...settings,
+      durationWeeks: input.durationWeeks,
+      startWeekday: input.startWeekday,
+    };
+    const updates = this.upcomingScheduleUpdates(userId, nextSettings, timezone);
+    const before = {
+      durationWeeks: settings.durationWeeks,
+      startWeekday: settings.startWeekday,
+    };
+    settings.durationWeeks = input.durationWeeks;
+    settings.startWeekday = input.startWeekday;
+    updates.forEach(({ cycle, startsAt, endsAt }) => {
+      cycle.startsAt = startsAt;
+      cycle.endsAt = endsAt;
+    });
+    const after = {
+      durationWeeks: settings.durationWeeks,
+      startWeekday: settings.startWeekday,
+    };
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      this.recordActivity(
+        userId,
+        "cycle_settings",
+        userId,
+        "updated",
+        input.idempotencyKey,
+        before,
+        after,
+      );
+      this.recordOutbox(
+        userId,
+        "cycle_settings.updated",
+        `cycle_settings.updated:${userId}:${input.idempotencyKey}`,
+        { durationWeeks: settings.durationWeeks, startWeekday: settings.startWeekday },
+      );
+    }
+    this.recordReceipt(userId, "cycle.settings.update", input.idempotencyKey, input, settings);
+    return settings;
+  }
+
+  private upcomingScheduleUpdates(
+    userId: string,
+    settings: CycleSettings,
+    timezone: string,
+  ): Array<{ cycle: Cycle; startsAt: number; endsAt: number }> {
+    const cycles = this.listCycles(userId);
+    const upcoming = cycles
+      .filter((cycle) => cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    if (upcoming.length === 0) return [];
+    const active = cycles.find((cycle) => cycle.status === "active");
+    const previous =
+      active ??
+      cycles
+        .filter((cycle) => cycle.number < upcoming[0].number)
+        .sort((left, right) => left.number - right.number)
+        .at(-1);
+    let cursor = previous?.endsAt ?? upcoming[0].startsAt;
+    const updates: Array<{ cycle: Cycle; startsAt: number; endsAt: number }> = [];
+    for (const cycle of upcoming) {
+      if (cycle.scheduleOverridden) {
+        cursor = Math.max(cursor, cycle.endsAt);
+        continue;
+      }
+      const startsAt = nextCycleStartAt(cursor, settings.startWeekday, timezone);
+      const endsAt = cycleEndAt(startsAt, settings.durationWeeks, timezone);
+      updates.push({ cycle, startsAt, endsAt });
+      cursor = endsAt;
+    }
+    return updates;
+  }
+
   updateCycleMetadata(userId: string, cycleId: string, input: UpdateCycleMetadataInput): Cycle {
     this.assertUnlocked(userId);
     const existing = this.checkReceipt<Cycle>(
@@ -2267,6 +2367,7 @@ export class OrbitStore {
     const duration = settings.durationWeeks * 7 * DAY;
     const nextStartsAt = now;
     const nextEndsAt = now + duration;
+    const timezone = this.preferences.get(userId)?.timezone ?? "UTC";
     const futureUpdates: Array<{ cycle: Cycle; startsAt: number; endsAt: number }> = [];
     let cursor = nextEndsAt;
     for (const future of this.listCycles(userId)
@@ -2280,8 +2381,10 @@ export class OrbitStore {
         cursor = future.endsAt;
         continue;
       }
-      futureUpdates.push({ cycle: future, startsAt: cursor, endsAt: cursor + duration });
-      cursor += duration;
+      const startsAt = nextCycleStartAt(cursor, settings.startWeekday, timezone);
+      const endsAt = cycleEndAt(startsAt, settings.durationWeeks, timezone);
+      futureUpdates.push({ cycle: future, startsAt, endsAt });
+      cursor = endsAt;
     }
     if (active) this.closeCycle(userId, active.id, createId("cycle-start-close"));
 
@@ -2306,7 +2409,9 @@ export class OrbitStore {
 
   private createNextCycle(userId: string, previous: Cycle): Cycle {
     const settings = this.cycleSettings.get(userId)!;
+    const timezone = this.preferences.get(userId)?.timezone ?? "UTC";
     const id = createId("cycle");
+    const startsAt = nextCycleStartAt(previous.endsAt, settings.startWeekday, timezone);
     const cycle: Cycle = {
       id,
       userId,
@@ -2314,8 +2419,8 @@ export class OrbitStore {
       name: `Cycle ${previous.number + 1}`,
       nameOverride: null,
       description: "",
-      startsAt: previous.endsAt,
-      endsAt: previous.endsAt + settings.durationWeeks * 7 * DAY,
+      startsAt,
+      endsAt: cycleEndAt(startsAt, settings.durationWeeks, timezone),
       status: "upcoming",
       completedAt: null,
       scheduleOverridden: false,
@@ -2537,6 +2642,7 @@ export class OrbitStore {
     return {
       me: this.users.get(userId)!,
       preferences: this.preferences.get(userId)!,
+      cycleSettings: this.cycleSettings.get(userId)!,
       workflowStates: this.ownedWorkflowStates(userId),
       projectStatuses: this.ownedProjectStatuses(userId),
       issues: this.listIssues(userId),

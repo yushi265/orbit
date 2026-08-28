@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cycleMetadataMutationSchema } from "./contracts";
+import { cycleMetadataMutationSchema, cycleSettingsMutationSchema } from "./contracts";
 import { calculateCycleMetrics, cycleTabForStatus } from "./cycle-workspace";
 
 describe("Cycle workspace shared contract", () => {
@@ -51,6 +51,40 @@ describe("Cycle workspace shared contract", () => {
         nameOverride: "Cycle",
         status: "completed",
       }).success,
+    ).toBe(false);
+  });
+
+  it("[境界値] CycleSettingsは期間1..8週と曜日0..6だけを受け入れる", () => {
+    const base = { idempotencyKey: "cycle-settings-1" };
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, durationWeeks: 1, startWeekday: 0 }).success,
+    ).toBe(true);
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, durationWeeks: 8, startWeekday: 6 }).success,
+    ).toBe(true);
+    for (const durationWeeks of [0, 9, 1.5, "2"]) {
+      expect(
+        cycleSettingsMutationSchema.safeParse({ ...base, durationWeeks, startWeekday: 1 }).success,
+      ).toBe(false);
+    }
+    for (const startWeekday of [-1, 7, 1.5, "1"]) {
+      expect(
+        cycleSettingsMutationSchema.safeParse({ ...base, durationWeeks: 2, startWeekday }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("[デシジョンテーブル] CycleSettingsはunknown keyと不正idempotencyKeyを拒否する", () => {
+    const valid = { idempotencyKey: "cycle-settings-2", durationWeeks: 2, startWeekday: 1 };
+    expect(cycleSettingsMutationSchema.safeParse(valid).success).toBe(true);
+    expect(cycleSettingsMutationSchema.safeParse({ ...valid, lock_token: "secret" }).success).toBe(
+      false,
+    );
+    expect(cycleSettingsMutationSchema.safeParse({ ...valid, idempotencyKey: "" }).success).toBe(
+      false,
+    );
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...valid, idempotencyKey: "a".repeat(201) }).success,
     ).toBe(false);
   });
 

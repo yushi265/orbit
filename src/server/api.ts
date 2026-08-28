@@ -16,6 +16,7 @@ import {
   CreateLabelInput,
   UpdateLabelInput,
   UpdateCycleMetadataInput,
+  UpdateCycleSettingsInput,
   UpdateViewInput,
   WorkflowStateCreateInput,
   WorkflowStateUpdateInput,
@@ -25,6 +26,7 @@ import {
   continueRunInputSchema,
   createIssueInputSchema,
   cycleMetadataMutationSchema,
+  cycleSettingsMutationSchema,
   cycleStartMutationSchema,
   issueDetailResponseSchema,
   maintenanceRunCreateInputSchema,
@@ -397,6 +399,20 @@ export async function listCycles(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
     json({ items: owner.store.listCycles(owner.userId) }, 200, requestId),
   );
+}
+
+export async function updateCycleSettings(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(
+      cycleSettingsMutationSchema,
+      await parseBody(request),
+    ) as UpdateCycleSettingsInput;
+    return json(
+      { cycleSettings: owner.store.updateCycleSettings(owner.userId, input) },
+      200,
+      requestId,
+    );
+  });
 }
 
 export async function closeCycle(request: Request, cycleId: string): Promise<Response> {

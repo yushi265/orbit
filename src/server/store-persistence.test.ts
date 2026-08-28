@@ -77,6 +77,7 @@ describe("OrbitStore snapshot persistence", () => {
       movedAt: 1_700_000_000_000,
     });
     store.startRun("owner-1", { kind: "maintenance", idempotencyKey: "run-1" });
+    store.bootstrap("owner-1");
 
     const restored = OrbitStore.fromSnapshot(
       JSON.parse(JSON.stringify(store.toSnapshot())),

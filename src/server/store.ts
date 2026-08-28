@@ -2110,6 +2110,24 @@ export class OrbitStore {
     const settings = this.cycleSettings.get(userId);
     if (!settings || settings.futureCount <= 0) return;
     const ownedCycles = [...this.cycles.values()].filter((cycle) => cycle.userId === userId);
+    if (ownedCycles.length === 0) {
+      const startsAt = this.clock();
+      const initial: Cycle = {
+        id: createId("cycle"),
+        userId,
+        number: 1,
+        name: "Cycle 1",
+        nameOverride: null,
+        description: "",
+        startsAt,
+        endsAt: startsAt + settings.durationWeeks * 7 * DAY,
+        status: "active",
+        completedAt: null,
+        scheduleOverridden: false,
+      };
+      this.cycles.set(initial.id, initial);
+      ownedCycles.push(initial);
+    }
     const upcoming = ownedCycles
       .filter((cycle) => cycle.status === "upcoming")
       .sort((left, right) => left.number - right.number);

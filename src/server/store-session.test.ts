@@ -44,6 +44,33 @@ class FakeD1 {
 }
 
 describe("store session", () => {
+  it("[状態遷移] productionの空Snapshotを初回GETでActiveとUpcomingへ初期化し、再読込できる", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV: "production", DB: database };
+    const empty = new OrbitStore(() => 1_700_000_000_000);
+    empty.ensureOwner("owner-empty", "owner@example.com");
+    await writeStoreSnapshot(database, "owner-empty", 0, empty.toSnapshot(), 1_700_000_000_000);
+
+    const first = await openStoreSession("owner-empty", "owner@example.com", environment);
+    expect(first.store.listCycles("owner-empty")).toHaveLength(4);
+    expect(first.store.listCycles("owner-empty").map((cycle) => cycle.number)).toEqual([
+      1, 2, 3, 4,
+    ]);
+    await first.persist();
+
+    const persisted = (await readStoreSnapshot(database, "owner-empty"))?.snapshot as
+      | { cycles: Array<{ number: number; status: string }> }
+      | undefined;
+    expect(persisted?.cycles).toHaveLength(4);
+    expect(persisted?.cycles.filter((cycle) => cycle.status === "active")).toHaveLength(1);
+    expect(persisted?.cycles.filter((cycle) => cycle.status === "upcoming")).toHaveLength(3);
+
+    const second = await openStoreSession("owner-empty", "owner@example.com", environment);
+    expect(second.store.listCycles("owner-empty").map((cycle) => cycle.number)).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
   it("persists Upcoming cycles derived during a successful bootstrap GET", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const seed = new OrbitStore(() => 1_700_000_000_000);
@@ -103,19 +130,10 @@ describe("store session", () => {
     expect(second.store.listIssues("owner-1")[0].title).toBe("Persistent issue");
     second.store.updatePreferences("owner-1", { timezone: "UTC" }, "preferences-1");
     second.store.cycleSettings.get("owner-1")!.durationWeeks = 3;
-    second.store.cycles.set("cycle-1", {
-      id: "cycle-1",
-      userId: "owner-1",
-      number: 1,
-      name: "Cycle 1",
-      nameOverride: null,
-      description: "Persisted cycle",
-      startsAt: 1_700_000_000_000,
-      endsAt: 1_700_100_000_000,
-      status: "active",
-      completedAt: null,
-      scheduleOverridden: false,
-    });
+    const cycle = second.store.listCycles("owner-1").find((item) => item.number === 1)!;
+    cycle.description = "Persisted cycle";
+    cycle.startsAt = 1_700_000_000_000;
+    cycle.endsAt = 1_700_100_000_000;
     await second.persist();
     expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(2);
     const third = await openStoreSession("owner-1", "owner@example.com", environment);

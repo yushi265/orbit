@@ -23,12 +23,48 @@ function setup() {
 }
 
 describe("Cycle workspace service", () => {
+  it("[代表値] Cycle 0件のBootstrapでActive Cycle 1とUpcomingを作成し、再実行で増やさない", () => {
+    const store = new OrbitStore(() => 1_700_000_000_000);
+
+    store.ensureOwner("owner", "owner@example.com");
+    const first = store.bootstrap("owner");
+    const active = first.cycles.find((cycle) => cycle.status === "active");
+    const upcoming = first.cycles.filter((cycle) => cycle.status === "upcoming");
+
+    expect(active).toMatchObject({
+      number: 1,
+      name: "Cycle 1",
+      status: "active",
+      startsAt: 1_700_000_000_000,
+      endsAt: 1_700_000_000_000 + 2 * 7 * 24 * 60 * 60 * 1000,
+    });
+    expect(upcoming.map((cycle) => cycle.number)).toEqual([2, 3, 4]);
+
+    const second = store.bootstrap("owner");
+    expect(second.cycles).toEqual(first.cycles);
+  });
+
+  it("[境界値] 初期Active Cycleの終了日時はdurationWeeks 1と8に追従する", () => {
+    for (const durationWeeks of [1, 8]) {
+      const store = new OrbitStore(() => 1_700_000_000_000);
+      store.ensureOwner("owner", "owner@example.com");
+      store.cycleSettings.get("owner")!.durationWeeks = durationWeeks;
+
+      const active = store.bootstrap("owner").cycles.find((cycle) => cycle.status === "active");
+
+      expect(active?.startsAt).toBe(1_700_000_000_000);
+      expect(active?.endsAt).toBe(1_700_000_000_000 + durationWeeks * 7 * 24 * 60 * 60 * 1000);
+    }
+  });
+
   it("[代表値] Bootstrap時にActiveの後続Upcoming Cycleを補充する", () => {
     const { store } = setup();
+    const existing = structuredClone(store.cycles.get("cycle-active"));
 
     const first = store.bootstrap("owner");
     const upcoming = first.cycles.filter((cycle) => cycle.status === "upcoming");
 
+    expect(store.cycles.get("cycle-active")).toEqual(existing);
     expect(upcoming).toHaveLength(3);
     expect(upcoming.map((cycle) => cycle.number)).toEqual([2, 3, 4]);
     expect(upcoming[0].startsAt).toBe(

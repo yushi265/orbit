@@ -10,7 +10,7 @@
 - ブランチ: `main`
 - 最新コミット: CYC-10反映済み（確定値は`git log`を参照）
 - 現在の重点: Phase 3 Cycleの残タスクを閉じる
-- 次に着手: `CYC-11` Issueの繰越回数・元CycleをIssue詳細とCycle履歴へ表示
+- 次に着手: `CYC-14` Cycle内Issueの並び替えをList / Boardへ追加
 
 ## 完了済み
 
@@ -34,12 +34,13 @@
 |---|---|---|---|
 | CYC-06 | Upcoming Cycleの開始日・終了日を個別調整し、期間重複を拒否。`scheduleOverridden`を後続自動計算のアンカーにする | Cycle設定・境界遷移 | 完了 |
 | CYC-10 | Started / Completedになった未所属Issueの現在Cycle自動追加と設定UI | Cycle設定UI | 完了 |
+| CYC-11 | Issueの繰越回数・元CycleをIssue詳細とCycle履歴へ表示 | 既存`cycleHistory` | 完了 |
 
 ### 次タスク
 
 | ID | 内容 | 依存 | 優先度 |
 |---|---|---|---|
-| CYC-11 | Issueの繰越回数・元CycleをIssue詳細とCycle履歴へ表示 | 既存`cycleHistory` | P1 |
+| CYC-14 | Cycle内Issueの並び替えをList / Boardへ追加 | 既存Issue position / reorder | P1 |
 
 ### 次の候補
 
@@ -66,7 +67,7 @@ Project / Viewの主要実装は既に完了しているため、Phase番号上�
 ## 運用ルール
 
 - `done`: 実装・テスト・必要な品質ゲート・コミットまで完了。
-- `next`: 次に実装する1チケット。CYC-10のコミット後はCYC-11。
+- `next`: 次に実装する1チケット。CYC-11のコミット後はCYC-14。
 - `backlog`: 要件は確定しているが、依存または優先順位待ち。
 - `release`: 実Access / 実D1 / 実ブラウザ / backup・性能など、機能実装後に検証する項目。
 - 各タスクの実装中は専用specの`progress.md`を使い、完了時に揮発ファイルをコミットへ残さない。

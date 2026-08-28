@@ -83,15 +83,43 @@ const publicRelationSchema = z.strictObject({
   createdAt: z.number().int(),
   target: publicIssueSummarySchema,
 });
-export const issueDetailResponseSchema = z.strictObject({
-  issue: publicIssueSchema,
-  parent: publicIssueSummarySchema.nullable(),
-  children: z.array(publicIssueSummarySchema),
-  childProgress: childProgressSchema,
-  notes: z.array(publicNoteSchema),
-  relations: z.array(publicRelationSchema),
-  activity: z.array(activityViewSchema),
+const cycleHistoryIssueSchema = z.strictObject({
+  id: z.string().min(1),
+  identifier: z.string().min(1),
+  title: z.string().min(1),
 });
+const cycleHistoryCycleSchema = z.strictObject({
+  id: z.string().min(1),
+  number: z.number().int().nonnegative(),
+  name: z.string().min(1),
+});
+export const cycleHistoryEntrySchema = z.strictObject({
+  id: z.string().min(1),
+  issue: cycleHistoryIssueSchema,
+  fromCycle: cycleHistoryCycleSchema,
+  toCycle: cycleHistoryCycleSchema,
+  movedAt: z.number().int().nonnegative(),
+});
+export const issueDetailResponseSchema = z
+  .strictObject({
+    issue: publicIssueSchema,
+    parent: publicIssueSummarySchema.nullable(),
+    children: z.array(publicIssueSummarySchema),
+    childProgress: childProgressSchema,
+    notes: z.array(publicNoteSchema),
+    relations: z.array(publicRelationSchema),
+    activity: z.array(activityViewSchema),
+    cycleHistory: z.array(cycleHistoryEntrySchema),
+    carryoverCount: z.number().int().nonnegative(),
+  })
+  .superRefine((value, context) => {
+    if (value.carryoverCount !== value.cycleHistory.length)
+      context.addIssue({
+        code: "custom",
+        path: ["carryoverCount"],
+        message: "carryoverCount must equal cycleHistory length",
+      });
+  });
 export type RelationType = z.infer<typeof relationTypeSchema>;
 export type NoteMutation = z.infer<typeof noteMutationSchema>;
 export type RelationMutation = z.infer<typeof relationMutationSchema>;

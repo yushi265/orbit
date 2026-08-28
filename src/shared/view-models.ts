@@ -104,6 +104,23 @@ export interface ActivityViewModel {
   after: Record<string, unknown> | null;
   createdAt: number;
 }
+export interface CycleHistoryIssueViewModel {
+  id: string;
+  identifier: string;
+  title: string;
+}
+export interface CycleHistoryCycleViewModel {
+  id: string;
+  number: number;
+  name: string;
+}
+export interface CycleHistoryViewModel {
+  id: string;
+  issue: CycleHistoryIssueViewModel;
+  fromCycle: CycleHistoryCycleViewModel;
+  toCycle: CycleHistoryCycleViewModel;
+  movedAt: number;
+}
 export interface IssueDetailViewModel {
   issue: IssueViewModel;
   parent: IssueSummaryViewModel | null;
@@ -112,6 +129,8 @@ export interface IssueDetailViewModel {
   notes: IssueNoteViewModel[];
   relations: IssueRelationViewModel[];
   activity: ActivityViewModel[];
+  cycleHistory: CycleHistoryViewModel[];
+  carryoverCount: number;
 }
 export interface IssueSummaryViewModel {
   id: string;
@@ -224,6 +243,7 @@ export interface BootstrapViewModel {
   labels: LabelViewModel[];
   projects: ProjectViewModel[];
   cycles: CycleViewModel[];
+  cycleHistory: CycleHistoryViewModel[];
   views: SavedViewViewModel[];
   notifications: NotificationViewModel[];
   background: { run: PublicRunViewModel | null };

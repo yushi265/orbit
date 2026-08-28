@@ -452,6 +452,333 @@ describe("OrbitStore issue mutations", () => {
 });
 
 describe("OrbitStore cycle and background runs", () => {
+  it("[代表値] Issue DetailはCycle繰越履歴と回数を新しい順で返す", () => {
+    const { store } = setup();
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "cycle-history-issue",
+      title: "繰越されるIssue",
+    });
+    const fromCycle = {
+      id: "cycle-history-from",
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed" as const,
+      completedAt: 2,
+      scheduleOverridden: false,
+    };
+    const middleCycle = {
+      id: "cycle-history-middle",
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "completed" as const,
+      completedAt: 4,
+      scheduleOverridden: false,
+    };
+    const toCycle = {
+      id: "cycle-history-to",
+      userId: "owner",
+      number: 3,
+      name: "Cycle 3",
+      nameOverride: null,
+      description: "",
+      startsAt: 5,
+      endsAt: 6,
+      status: "active" as const,
+      completedAt: null,
+      scheduleOverridden: false,
+    };
+    store.cycles.set(fromCycle.id, fromCycle);
+    store.cycles.set(middleCycle.id, middleCycle);
+    store.cycles.set(toCycle.id, toCycle);
+    store.cycleHistory.push(
+      {
+        id: "history-old",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: fromCycle.id,
+        toCycleId: middleCycle.id,
+        movedAt: 10,
+      },
+      {
+        id: "history-new",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: middleCycle.id,
+        toCycleId: toCycle.id,
+        movedAt: 20,
+      },
+      {
+        id: "history-tie",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: fromCycle.id,
+        toCycleId: middleCycle.id,
+        movedAt: 20,
+      },
+    );
+
+    const detail = store.getIssueDetail("owner", issue.id);
+
+    expect(detail.carryoverCount).toBe(3);
+    expect(detail.cycleHistory.map((entry) => entry.id)).toEqual([
+      "history-new",
+      "history-tie",
+      "history-old",
+    ]);
+    expect(detail.cycleHistory[0]).toMatchObject({
+      issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+      fromCycle: { id: middleCycle.id, number: 2, name: "Cycle 2" },
+      toCycle: { id: toCycle.id, number: 3, name: "Cycle 3" },
+      movedAt: 20,
+    });
+  });
+
+  it("[代表値] BootstrapはOwnerのCycle繰越履歴を返す", () => {
+    const { store } = setup();
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "cycle-history-bootstrap-issue",
+      title: "Bootstrap履歴対象",
+    });
+    store.cycles.set("cycle-history-bootstrap-from", {
+      id: "cycle-history-bootstrap-from",
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: "Foundation",
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    store.cycles.set("cycle-history-bootstrap-to", {
+      id: "cycle-history-bootstrap-to",
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.cycleHistory.push({
+      id: "history-bootstrap",
+      userId: "owner",
+      issueId: issue.id,
+      fromCycleId: "cycle-history-bootstrap-from",
+      toCycleId: "cycle-history-bootstrap-to",
+      movedAt: 30,
+    });
+
+    const payload = store.bootstrap("owner");
+
+    expect(payload.cycleHistory).toEqual([
+      {
+        id: "history-bootstrap",
+        issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+        fromCycle: { id: "cycle-history-bootstrap-from", number: 1, name: "Foundation" },
+        toCycle: { id: "cycle-history-bootstrap-to", number: 2, name: "Cycle 2" },
+        movedAt: 30,
+      },
+    ]);
+  });
+
+  it("[セキュリティ境界] Issue Detailは同一Ownerの別Issue履歴を混在させない", () => {
+    const { store } = setup();
+    const first = store.createIssue("owner", {
+      idempotencyKey: "cycle-history-isolation-first",
+      title: "最初のIssue",
+    });
+    const second = store.createIssue("owner", {
+      idempotencyKey: "cycle-history-isolation-second",
+      title: "別のIssue",
+    });
+    store.cycles.set("cycle-history-isolation-from", {
+      id: "cycle-history-isolation-from",
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    store.cycles.set("cycle-history-isolation-to", {
+      id: "cycle-history-isolation-to",
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.cycleHistory.push(
+      {
+        id: "history-isolation-first",
+        userId: "owner",
+        issueId: first.id,
+        fromCycleId: "cycle-history-isolation-from",
+        toCycleId: "cycle-history-isolation-to",
+        movedAt: 10,
+      },
+      {
+        id: "history-isolation-second",
+        userId: "owner",
+        issueId: second.id,
+        fromCycleId: "cycle-history-isolation-from",
+        toCycleId: "cycle-history-isolation-to",
+        movedAt: 20,
+      },
+    );
+
+    const detail = store.getIssueDetail("owner", first.id);
+
+    expect(detail.carryoverCount).toBe(1);
+    expect(detail.cycleHistory.map((entry) => entry.issue.id)).toEqual([first.id]);
+  });
+
+  it("[デシジョンテーブル/セキュリティ境界] 不正または他Ownerの履歴は公開投影から除外する", () => {
+    const { store } = setup();
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "cycle-history-invalid-issue",
+      title: "有効な履歴対象",
+    });
+    store.cycles.set("cycle-history-invalid-from", {
+      id: "cycle-history-invalid-from",
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    store.cycles.set("cycle-history-invalid-to", {
+      id: "cycle-history-invalid-to",
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.ensureOwner("other-owner", "other@example.com");
+    const foreignIssue = store.createIssue("other-owner", {
+      idempotencyKey: "cycle-history-foreign-issue",
+      title: "他OwnerのIssue",
+    });
+    store.cycles.set("cycle-history-foreign-from", {
+      id: "cycle-history-foreign-from",
+      userId: "other-owner",
+      number: 1,
+      name: "Other Cycle 1",
+      nameOverride: null,
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    store.cycleHistory.push(
+      {
+        id: "history-valid",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 10,
+      },
+      {
+        id: "history-foreign-owner",
+        userId: "other-owner",
+        issueId: issue.id,
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 20,
+      },
+      {
+        id: "history-missing-cycle",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: "missing-cycle",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 30,
+      },
+      {
+        id: "history-foreign-issue",
+        userId: "owner",
+        issueId: foreignIssue.id,
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 40,
+      },
+      {
+        id: "history-foreign-cycle",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: "cycle-history-foreign-from",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 50,
+      },
+      {
+        id: "history-foreign-to-cycle",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "cycle-history-foreign-from",
+        movedAt: 60,
+      },
+      {
+        id: "history-missing-to-cycle",
+        userId: "owner",
+        issueId: issue.id,
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "missing-cycle",
+        movedAt: 70,
+      },
+      {
+        id: "history-missing-issue",
+        userId: "owner",
+        issueId: "missing-issue",
+        fromCycleId: "cycle-history-invalid-from",
+        toCycleId: "cycle-history-invalid-to",
+        movedAt: 80,
+      },
+    );
+
+    expect(store.listCycleHistory("owner").map((entry) => entry.id)).toEqual(["history-valid"]);
+    expect(store.getIssueDetail("owner", issue.id).carryoverCount).toBe(1);
+  });
+
   it("[デシジョンテーブル] Cycle繰越はUnstarted / Startedだけを移動する", () => {
     const { store } = setup();
     const states = store.ownedWorkflowStates("owner");

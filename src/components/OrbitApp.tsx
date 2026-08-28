@@ -22,6 +22,7 @@ import type {
   IssueDetailViewModel,
   IssueNoteViewModel,
   IssueRelationTypeViewModel,
+  CycleHistoryViewModel,
   LabelViewModel as Label,
   RecentIssueViewModel,
   RecentSearchViewModel,
@@ -1217,6 +1218,7 @@ function OrbitAppInner(props: Props) {
           {section === "cycles" && (
             <CyclesView
               cycles={cycles}
+              cycleHistory={data.cycleHistory}
               issues={issues}
               timezone={data.preferences.timezone}
               cycleId={props.cycleId}
@@ -2471,6 +2473,7 @@ function IssueCard({
 export function CyclesView({
   cycles,
   cycleId,
+  cycleHistory = [],
   issues,
   timezone,
   workflowStates,
@@ -2486,6 +2489,7 @@ export function CyclesView({
 }: {
   cycles: Cycle[];
   cycleId?: string;
+  cycleHistory?: CycleHistoryViewModel[];
   issues: Issue[];
   timezone?: string;
   workflowStates: WorkflowState[];
@@ -2536,6 +2540,9 @@ export function CyclesView({
       .sort((left, right) => left.number - right.number)[0] ?? null;
   const cycleIssues = selectedCycle
     ? issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt)
+    : [];
+  const incomingCycleHistory = selectedCycle
+    ? cycleHistory.filter((entry) => entry.toCycle.id === selectedCycle.id)
     : [];
   const availableIssues = issues.filter((issue) => !issue.cycleId && !issue.deletedAt);
   const metrics = calculateCycleMetrics(cycleIssues, workflowStates);
@@ -2706,6 +2713,11 @@ export function CyclesView({
     if (!issue) return;
     onUpdateIssue(issue, { cycleId: selectedCycle.id });
     setAssignmentTargetId("");
+  }
+
+  function selectCycle(cycle: Cycle) {
+    setTab(cycleTabForStatus(cycle.status));
+    setSelectedCycleId(cycle.id);
   }
 
   return (
@@ -2953,6 +2965,30 @@ export function CyclesView({
               <span>{metrics.canceled} canceled</span>
             </div>
           </div>
+          <section
+            className="detail-section cycle-carryover-section"
+            aria-label="このCycleへ繰り越されたIssue"
+          >
+            <div className="detail-section-heading">
+              <div>
+                <span className="eyebrow">CARRYOVER</span>
+                <h3>繰越Issue</h3>
+              </div>
+              <span className="detail-count">{incomingCycleHistory.length}</span>
+            </div>
+            <div className="cycle-carryover-list">
+              {incomingCycleHistory.map((entry) => (
+                <div className="mini-issue cycle-carryover-row" key={entry.id}>
+                  <span className="issue-id">{entry.issue.identifier}</span>
+                  <strong>{entry.issue.title}</strong>
+                  <span className="cycle-carryover-origin">元Cycle: {entry.fromCycle.name}</span>
+                </div>
+              ))}
+              {incomingCycleHistory.length === 0 && (
+                <p className="detail-empty">このCycleへ繰り越されたIssueはありません。</p>
+              )}
+            </div>
+          </section>
           {selectedCycle.status !== "completed" && (
             <div className="cycle-assignment">
               <label className="field-label" htmlFor="cycle-issue-target">
@@ -3047,14 +3083,21 @@ export function CyclesView({
             key={cycle.id}
             disabled={closeBusy || scheduleEditing}
             onClick={() => {
-              setTab(cycleTabForStatus(cycle.status));
-              setSelectedCycleId(cycle.id);
+              selectCycle(cycle);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              selectCycle(cycle);
             }}
           >
             <span className={`timeline-dot ${cycle.status}`} />
             <div>
               <strong>{cycle.nameOverride ?? cycle.name}</strong>
               <span>{formatRange(cycle.startsAt, cycle.endsAt)}</span>
+              <span className="cycle-carryover-count">
+                繰越 {cycleHistory.filter((entry) => entry.toCycle.id === cycle.id).length}件
+              </span>
             </div>
             <span className={`status-pill ${cycle.status}`}>{cycle.status}</span>
           </button>
@@ -5366,7 +5409,43 @@ function textDocument(value: string) {
   };
 }
 
-function IssueDetailPanel({
+export function IssueCycleHistorySection({
+  cycleHistory,
+  carryoverCount,
+}: {
+  cycleHistory: CycleHistoryViewModel[];
+  carryoverCount: number;
+}) {
+  return (
+    <section className="detail-section cycle-history-section" aria-label="IssueのCycle履歴">
+      <div className="detail-section-heading">
+        <div>
+          <span className="eyebrow">CYCLE HISTORY</span>
+          <h3>Cycle履歴</h3>
+        </div>
+        <span className="detail-count">繰越 {carryoverCount}回</span>
+      </div>
+      <div className="cycle-history-list">
+        {cycleHistory.map((entry) => (
+          <div className="cycle-history-row" key={entry.id}>
+            <span className="timeline-dot completed" />
+            <div className="cycle-history-route">
+              <strong>
+                {entry.fromCycle.name} → {entry.toCycle.name}
+              </strong>
+              <span>{formatDate(entry.movedAt)}</span>
+            </div>
+          </div>
+        ))}
+        {cycleHistory.length === 0 && (
+          <p className="detail-empty">このIssueの繰越履歴はありません。</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function IssueDetailPanel({
   issueId,
   fallbackIssue,
   knownIssues,
@@ -5837,6 +5916,12 @@ function IssueDetailPanel({
                     )}
                   </div>
                 </section>
+              )}
+              {detail && (
+                <IssueCycleHistorySection
+                  cycleHistory={detail.cycleHistory}
+                  carryoverCount={detail.carryoverCount}
+                />
               )}
               <label className="detail-label" htmlFor="issue-description">
                 Description

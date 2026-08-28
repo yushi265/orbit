@@ -56,6 +56,7 @@ import {
   workflowStateNameSchema,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
+import type { CycleHistoryViewModel } from "../shared/view-models";
 import { cycleEndAt, localDateAtMidnight, nextCycleStartAt } from "./cycle-schedule";
 
 export type OrbitStoreLock = {
@@ -1399,8 +1400,47 @@ export class OrbitStore {
     );
   }
 
+  listCycleHistory(userId: string): CycleHistoryViewModel[] {
+    return this.cycleHistory
+      .filter((record) => record.userId === userId)
+      .map((record) => {
+        const issue = this.issues.get(record.issueId);
+        const fromCycle = this.cycles.get(record.fromCycleId);
+        const toCycle = this.cycles.get(record.toCycleId);
+        if (
+          !issue ||
+          issue.userId !== userId ||
+          !fromCycle ||
+          fromCycle.userId !== userId ||
+          !toCycle ||
+          toCycle.userId !== userId
+        )
+          return null;
+        return {
+          id: record.id,
+          issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+          fromCycle: {
+            id: fromCycle.id,
+            number: fromCycle.number,
+            name: fromCycle.nameOverride ?? fromCycle.name,
+          },
+          toCycle: {
+            id: toCycle.id,
+            number: toCycle.number,
+            name: toCycle.nameOverride ?? toCycle.name,
+          },
+          movedAt: record.movedAt,
+        } satisfies CycleHistoryViewModel;
+      })
+      .filter((entry): entry is CycleHistoryViewModel => entry !== null)
+      .sort((left, right) => right.movedAt - left.movedAt || left.id.localeCompare(right.id));
+  }
+
   getIssueDetail(userId: string, issueId: string): IssueDetail {
     const issue = this.getIssue(userId, issueId);
+    const cycleHistory = this.listCycleHistory(userId).filter(
+      (entry) => entry.issue.id === issueId,
+    );
     const parentIssue = issue.parentId ? this.issues.get(issue.parentId) : undefined;
     const parent =
       parentIssue && parentIssue.userId === userId && parentIssue.deletedAt === null
@@ -1464,6 +1504,8 @@ export class OrbitStore {
       notes,
       relations,
       activity: activity.map(({ mutationKey: _mutationKey, ...publicEvent }) => publicEvent),
+      cycleHistory,
+      carryoverCount: cycleHistory.length,
     };
   }
 
@@ -2918,6 +2960,7 @@ export class OrbitStore {
       labels: this.listLabels(userId),
       projects: this.listProjects(userId),
       cycles: this.listCycles(userId),
+      cycleHistory: this.listCycleHistory(userId),
       views: this.listViews(userId),
       notifications: this.listNotifications(userId),
       background: { run: active ? this.publicRun(active) : null },

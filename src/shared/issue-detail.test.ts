@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activityViewSchema,
+  cycleHistoryEntrySchema,
   issueDetailResponseSchema,
   noteMutationSchema,
   relationMutationSchema,
@@ -8,6 +9,61 @@ import {
 } from "./contracts";
 
 describe("Issue detail shared contract", () => {
+  it("[代表値] Cycle履歴公開entryはIssueと元/移行先Cycleを受け入れる", () => {
+    expect(
+      cycleHistoryEntrySchema.safeParse({
+        id: "history-1",
+        issue: { id: "issue-1", identifier: "TASK-1", title: "繰越対象" },
+        fromCycle: { id: "cycle-1", number: 1, name: "Cycle 1" },
+        toCycle: { id: "cycle-2", number: 2, name: "Cycle 2" },
+        movedAt: 1_700_000_000_000,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("[境界値] Cycle履歴公開entryは整数時刻とstrictなsummaryだけを受け入れる", () => {
+    const base = {
+      id: "history-1",
+      issue: { id: "issue-1", identifier: "TASK-1", title: "繰越対象" },
+      fromCycle: { id: "cycle-1", number: 0, name: "Cycle 1" },
+      toCycle: { id: "cycle-2", number: 2, name: "Cycle 2" },
+      movedAt: 0,
+    };
+    expect(cycleHistoryEntrySchema.safeParse(base).success).toBe(true);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, movedAt: -1 }).success).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({
+        ...base,
+        fromCycle: { ...base.fromCycle, number: 1.5 },
+      }).success,
+    ).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({ ...base, fromCycle: { ...base.fromCycle, number: -1 } })
+        .success,
+    ).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({ ...base, fromCycle: { ...base.fromCycle, number: "" } })
+        .success,
+    ).toBe(false);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, movedAt: 1.5 }).success).toBe(false);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, movedAt: "" }).success).toBe(false);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, issue: null }).success).toBe(false);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, fromCycle: [] }).success).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({ ...base, issue: { ...base.issue, identifier: "" } })
+        .success,
+    ).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({ ...base, toCycle: { ...base.toCycle, id: undefined } })
+        .success,
+    ).toBe(false);
+    expect(
+      cycleHistoryEntrySchema.safeParse({ ...base, toCycle: { ...base.toCycle, name: "" } })
+        .success,
+    ).toBe(false);
+    expect(cycleHistoryEntrySchema.safeParse({ ...base, unknown: true }).success).toBe(false);
+  });
+
   it("[境界値] note bodyは1..10000 Unicode code pointsを受け入れる", () => {
     const base = { idempotencyKey: "note-key", body: "a" };
     expect(noteMutationSchema.safeParse({ ...base, body: "" }).success).toBe(false);
@@ -149,8 +205,26 @@ describe("Issue detail shared contract", () => {
           createdAt: 1,
         },
       ],
+      cycleHistory: [],
+      carryoverCount: 0,
     };
     expect(issueDetailResponseSchema.safeParse(response).success).toBe(true);
+    expect(issueDetailResponseSchema.safeParse({ ...response, unknown: true }).success).toBe(false);
+    expect(
+      issueDetailResponseSchema.safeParse({
+        ...response,
+        cycleHistory: [
+          {
+            id: "history-1",
+            issue: { id: "issue-1", identifier: "TASK-1", title: "Issue" },
+            fromCycle: { id: "cycle-1", number: 1, name: "Cycle 1" },
+            toCycle: { id: "cycle-2", number: 2, name: "Cycle 2" },
+            movedAt: 1,
+          },
+        ],
+        carryoverCount: 0,
+      }).success,
+    ).toBe(false);
     expect(
       issueDetailResponseSchema.safeParse({
         ...response,

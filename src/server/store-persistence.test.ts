@@ -2,6 +2,65 @@ import { describe, expect, it } from "vitest";
 import { OrbitStore } from "./store";
 
 describe("OrbitStore snapshot persistence", () => {
+  it("[レイヤー内結合] Cycle繰越履歴の公開投影をSnapshot再読込後も保持する", () => {
+    const store = new OrbitStore(() => 1_700_000_000_000);
+    store.ensureOwner("owner-history", "owner-history@example.com");
+    const issue = store.createIssue("owner-history", {
+      idempotencyKey: "history-persist-issue",
+      title: "履歴を保持するIssue",
+    });
+    store.cycles.set("history-persist-from", {
+      id: "history-persist-from",
+      userId: "owner-history",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    store.cycles.set("history-persist-to", {
+      id: "history-persist-to",
+      userId: "owner-history",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: "Current",
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.cycleHistory.push({
+      id: "history-persist-entry",
+      userId: "owner-history",
+      issueId: issue.id,
+      fromCycleId: "history-persist-from",
+      toCycleId: "history-persist-to",
+      movedAt: 30,
+    });
+
+    const restored = OrbitStore.fromSnapshot(
+      JSON.parse(JSON.stringify(store.toSnapshot())),
+      undefined,
+      "owner-history",
+    );
+
+    expect(restored.bootstrap("owner-history").cycleHistory).toEqual([
+      {
+        id: "history-persist-entry",
+        issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+        fromCycle: { id: "history-persist-from", number: 1, name: "Cycle 1" },
+        toCycle: { id: "history-persist-to", number: 2, name: "Current" },
+        movedAt: 30,
+      },
+    ]);
+  });
+
   it("round-trips bootstrap data and background state", () => {
     const store = new OrbitStore(() => 1_700_000_000_000);
     store.ensureOwner("owner-1", "owner@example.com");

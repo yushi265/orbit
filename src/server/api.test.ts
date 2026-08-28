@@ -717,6 +717,118 @@ describe("HTTP service boundary", () => {
     expect(missingDeleteKey.status).toBe(400);
   });
 
+  it("[レイヤー内結合] Issue DetailとBootstrap APIがCycle繰越履歴を公開する", async () => {
+    const ownerStore = getOrbitStore("dev-owner");
+    const issue = ownerStore.createIssue("dev-owner", {
+      idempotencyKey: "api-cycle-history-issue",
+      title: "API繰越履歴対象",
+    });
+    ownerStore.cycles.set("api-cycle-history-from", {
+      id: "api-cycle-history-from",
+      userId: "dev-owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: "元Cycle",
+      description: "",
+      startsAt: 1,
+      endsAt: 2,
+      status: "completed",
+      completedAt: 2,
+      scheduleOverridden: false,
+    });
+    ownerStore.cycles.set("api-cycle-history-to", {
+      id: "api-cycle-history-to",
+      userId: "dev-owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "",
+      startsAt: 3,
+      endsAt: 4,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    ownerStore.cycleHistory.push({
+      id: "api-cycle-history-record",
+      userId: "dev-owner",
+      issueId: issue.id,
+      fromCycleId: "api-cycle-history-from",
+      toCycleId: "api-cycle-history-to",
+      movedAt: 30,
+    });
+
+    const detail = await getIssue(new Request("http://orbit.local/api/v1/issues/detail"), issue.id);
+    expect(detail.status).toBe(200);
+    const detailBody = await body<{
+      carryoverCount: number;
+      cycleHistory: Array<{
+        id: string;
+        issue: { id: string; identifier: string; title: string };
+        fromCycle: { id: string; number: number; name: string };
+        toCycle: { id: string; number: number; name: string };
+        movedAt: number;
+      }>;
+    }>(detail);
+    expect(detailBody.carryoverCount).toBe(1);
+    expect(detailBody.cycleHistory).toEqual([
+      {
+        id: "api-cycle-history-record",
+        issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+        fromCycle: { id: "api-cycle-history-from", number: 1, name: "元Cycle" },
+        toCycle: { id: "api-cycle-history-to", number: 2, name: "Cycle 2" },
+        movedAt: 30,
+      },
+    ]);
+
+    const bootstrapResponse = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(bootstrapResponse.status).toBe(200);
+    const bootstrapBody = await body<{
+      cycleHistory: Array<{
+        id: string;
+        issue: { id: string; identifier: string; title: string };
+        fromCycle: { id: string; number: number; name: string };
+        toCycle: { id: string; number: number; name: string };
+        movedAt: number;
+      }>;
+    }>(bootstrapResponse);
+    expect(bootstrapBody.cycleHistory).toEqual([
+      {
+        id: "api-cycle-history-record",
+        issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+        fromCycle: { id: "api-cycle-history-from", number: 1, name: "元Cycle" },
+        toCycle: { id: "api-cycle-history-to", number: 2, name: "Cycle 2" },
+        movedAt: 30,
+      },
+    ]);
+
+    const emptyIssue = await createIssue(
+      mutation("http://orbit.local/api/v1/issues", "POST", {
+        idempotencyKey: "api-cycle-history-empty-issue",
+        title: "履歴なしIssue",
+      }),
+    );
+    const emptyIssueId = (await body<{ issue: { id: string } }>(emptyIssue)).issue.id;
+    const emptyDetail = await getIssue(
+      new Request("http://orbit.local/api/v1/issues/detail"),
+      emptyIssueId,
+    );
+    expect(emptyDetail.status).toBe(200);
+    expect(await body<{ cycleHistory: unknown[]; carryoverCount: number }>(emptyDetail)).toEqual(
+      expect.objectContaining({ cycleHistory: [], carryoverCount: 0 }),
+    );
+
+    const foreignIssue = getOrbitStore("foreign-owner").createIssue("foreign-owner", {
+      idempotencyKey: "api-cycle-history-foreign-issue",
+      title: "別OwnerのIssue",
+    });
+    const foreignDetail = await getIssue(
+      new Request("http://orbit.local/api/v1/issues/detail"),
+      foreignIssue.id,
+    );
+    expect(foreignDetail.status).toBe(404);
+  });
+
   it("[代表値] Cycle metadata APIは再表示可能なCycleを返す", async () => {
     const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
     const cycleId = (await body<{ cycles: Array<{ id: string }> }>(initial)).cycles[0].id;

@@ -17,6 +17,7 @@ import {
   type IssueSearchQuery,
   type IssueSummary,
 } from "../shared/contracts";
+import type { CycleHistoryViewModel } from "../shared/view-models";
 
 export const workflowCategories = WORKFLOW_CATEGORY_VALUES;
 export const priorities = PRIORITY_VALUES;
@@ -173,6 +174,8 @@ export interface IssueDetail {
   notes: IssueNote[];
   relations: IssueRelationView[];
   activity: ActivityView[];
+  cycleHistory: CycleHistoryViewModel[];
+  carryoverCount: number;
 }
 
 export interface RecentIssueViewRecord {
@@ -318,6 +321,7 @@ export interface BootstrapPayload {
   labels: Label[];
   projects: Project[];
   cycles: Cycle[];
+  cycleHistory: CycleHistoryViewModel[];
   views: SavedView[];
   notifications: Notification[];
   background: { run: PublicRunSummary | null };

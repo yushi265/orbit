@@ -44,6 +44,57 @@ class FakeD1 {
 }
 
 describe("store session", () => {
+  it("[レイヤー内結合] production Sessionの再読込後もCycle繰越履歴を投影する", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV: "production", DB: database };
+    const first = await openStoreSession("owner-history-session", "owner@example.com", environment);
+    const active = first.store
+      .listCycles("owner-history-session")
+      .find((cycle) => cycle.status === "active")!;
+    const upcoming = first.store
+      .listCycles("owner-history-session")
+      .find((cycle) => cycle.status === "upcoming")!;
+    const issue = first.store.createIssue("owner-history-session", {
+      idempotencyKey: "production-history-issue",
+      title: "Production履歴対象",
+      cycleId: active.id,
+    });
+    first.store.cycleHistory.push({
+      id: "production-history-entry",
+      userId: "owner-history-session",
+      issueId: issue.id,
+      fromCycleId: active.id,
+      toCycleId: upcoming.id,
+      movedAt: 1_700_000_000_001,
+    });
+    await first.persist();
+
+    const second = await openStoreSession(
+      "owner-history-session",
+      "owner@example.com",
+      environment,
+    );
+
+    expect(second.store.bootstrap("owner-history-session").cycleHistory).toEqual([
+      {
+        id: "production-history-entry",
+        issue: { id: issue.id, identifier: issue.identifier, title: issue.title },
+        fromCycle: {
+          id: active.id,
+          number: active.number,
+          name: active.nameOverride ?? active.name,
+        },
+        toCycle: {
+          id: upcoming.id,
+          number: upcoming.number,
+          name: upcoming.nameOverride ?? upcoming.name,
+        },
+        movedAt: 1_700_000_000_001,
+      },
+    ]);
+    expect(second.store.getIssueDetail("owner-history-session", issue.id).carryoverCount).toBe(1);
+  });
+
   it("[状態遷移] productionのCycleSettingsを保存し、次回Sessionで再読込できる", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const environment = { APP_ENV: "production", DB: database };

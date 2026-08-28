@@ -21,6 +21,33 @@ function statusId(store: OrbitStore, category: "unstarted" | "started" | "comple
 }
 
 describe("Cycle auto-add service", () => {
+  it("[状態遷移] 手動Cycle割当と自動追加は繰越履歴を作成しない", () => {
+    const store = setup();
+    const active = store.listCycles("owner").find((cycle) => cycle.status === "active")!;
+    const manual = store.createIssue("owner", {
+      idempotencyKey: "auto-add-history-manual-create",
+      title: "手動割当",
+      statusId: statusId(store, "unstarted"),
+    });
+    store.updateIssue("owner", {
+      id: manual.id,
+      version: manual.version,
+      idempotencyKey: "auto-add-history-manual-update",
+      patch: { cycleId: active.id },
+    });
+
+    const automatic = store.createIssue("owner", {
+      idempotencyKey: "auto-add-history-automatic-create",
+      title: "自動追加",
+      statusId: statusId(store, "started"),
+    });
+
+    expect(automatic.cycleId).toBe(active.id);
+    expect(store.cycleHistory).toHaveLength(0);
+    expect(store.getIssueDetail("owner", manual.id).carryoverCount).toBe(0);
+    expect(store.getIssueDetail("owner", automatic.id).carryoverCount).toBe(0);
+  });
+
   it("[状態遷移] 未所属IssueをStartedへ変更するとCurrent Cycleへ一度だけ自動追加する", () => {
     const store = setup();
     const active = store.listCycles("owner").find((cycle) => cycle.status === "active")!;
@@ -62,6 +89,7 @@ describe("Cycle auto-add service", () => {
     expect(replay).toEqual(updated);
     expect(store.activities).toHaveLength(activityCount);
     expect(store.outbox).toHaveLength(outboxCount);
+    expect(store.cycleHistory).toHaveLength(0);
   });
 
   it("[状態遷移] Started / Completedでの作成とbulk status変更も未所属Issueだけを自動追加する", () => {
@@ -111,6 +139,7 @@ describe("Cycle auto-add service", () => {
     expect(store.activities.filter((event) => event.action === "cycle.auto_assigned")).toHaveLength(
       3,
     );
+    expect(store.cycleHistory).toHaveLength(0);
   });
 
   it("[デシジョンテーブル] 設定・Current Cycle・所属・明示cycleId・status遷移条件を守る", () => {

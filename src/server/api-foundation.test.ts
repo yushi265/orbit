@@ -352,6 +352,46 @@ describe("Phase 1 foundation HTTP service", () => {
     expect(await body(terminal)).toEqual({ run: null });
   });
 
+  it("[状態遷移] APIのcycle_transitionは期限到来Cycleを完了し、次Cycleを予定日時のまま開始する", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(initial.status).toBe(200);
+    const store = getOrbitStore("dev-owner");
+    const active = store.listCycles("dev-owner").find((cycle) => cycle.status === "active")!;
+    const upcoming = store
+      .listCycles("dev-owner")
+      .filter((cycle) => cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number)[0];
+    const now = Date.now();
+    active.endsAt = now - 2;
+    upcoming.startsAt = now - 1;
+    upcoming.endsAt = now + 7 * 24 * 60 * 60 * 1000;
+
+    const started = await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "api-cycle-transition-run",
+      }),
+    );
+    const run = (
+      await body<{ run: { run_id: string; progress: { cursor: string | null } } }>(started)
+    ).run;
+    const continued = await continueBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs/continue", "POST", {
+        idempotencyKey: "api-cycle-transition-step",
+        expected_cursor: run.progress.cursor,
+      }),
+      run.run_id,
+    );
+
+    expect(continued.status).toBe(200);
+    expect(store.cycles.get(active.id)?.status).toBe("completed");
+    expect(store.cycles.get(upcoming.id)).toMatchObject({
+      status: "active",
+      startsAt: now - 1,
+      endsAt: now + 7 * 24 * 60 * 60 * 1000,
+    });
+  });
+
   it("[デシジョンテーブル] Background Run中のPreferences / Workflow APIは423で副作用なし", async () => {
     const started = await startBackgroundRun(
       mutation("http://orbit.local/api/v1/background-runs", "POST", {

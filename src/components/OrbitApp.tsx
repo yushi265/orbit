@@ -153,6 +153,17 @@ function formatRange(start: number, end: number): string {
   return `${formatDate(start)} — ${formatDate(end)}`;
 }
 
+function formatDateTime(value: number, timeZone?: string): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).format(new Date(value));
+}
+
 function dateInputToUnix(value: string): number | null {
   if (!value) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -1185,6 +1196,7 @@ function OrbitAppInner(props: Props) {
             <CyclesView
               cycles={cycles}
               issues={issues}
+              timezone={data.preferences.timezone}
               cycleId={props.cycleId}
               workflowStates={workflowStates}
               pendingIssueId={pendingIssueId}
@@ -2434,10 +2446,11 @@ function IssueCard({
   );
 }
 
-function CyclesView({
+export function CyclesView({
   cycles,
   cycleId,
   issues,
+  timezone,
   workflowStates,
   pendingIssueId,
   onUpdateIssue,
@@ -2452,6 +2465,7 @@ function CyclesView({
   cycles: Cycle[];
   cycleId?: string;
   issues: Issue[];
+  timezone?: string;
   workflowStates: WorkflowState[];
   pendingIssueId: string | null;
   onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
@@ -2481,6 +2495,10 @@ function CyclesView({
           (cycle) => cycle.status === "upcoming" && cycle.number === selectedCycle.number + 1,
         )
       : null;
+  const nextUpcomingCycle =
+    cycles
+      .filter((cycle) => cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number)[0] ?? null;
   const cycleIssues = selectedCycle
     ? issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt)
     : [];
@@ -2615,28 +2633,27 @@ function CyclesView({
               {startBusy ? "開始中…" : "次のCycleを開始"}
             </button>
           )}
-          <button
-            className="button secondary"
-            onClick={() => {
-              if (!selectedCycle) return;
-              if (selectedCycle.status === "active") onClose(selectedCycle);
-              if (selectedCycle.status === "upcoming")
-                void onStart(selectedCycle).then((started) => {
-                  if (started) setTab("current");
-                });
-            }}
-            disabled={
-              closeBusy || startBusy || !selectedCycle || selectedCycle.status === "completed"
-            }
-          >
-            {closeBusy
-              ? "完了処理中…"
-              : startBusy
-                ? "開始中…"
-                : selectedCycle?.status === "upcoming"
-                  ? "Cycleを開始"
-                  : "Cycleを完了"}
-          </button>
+          {selectedCycle && (
+            <button
+              className="button secondary"
+              onClick={() => {
+                if (selectedCycle.status === "active") onClose(selectedCycle);
+                if (selectedCycle.status === "upcoming")
+                  void onStart(selectedCycle).then((started) => {
+                    if (started) setTab("current");
+                  });
+              }}
+              disabled={closeBusy || startBusy || selectedCycle.status === "completed"}
+            >
+              {closeBusy
+                ? "完了処理中…"
+                : startBusy
+                  ? "開始中…"
+                  : selectedCycle.status === "upcoming"
+                    ? "Cycleを開始"
+                    : "Cycleを完了"}
+            </button>
+          )}
         </div>
       </div>
       <div className="cycle-tabs">
@@ -2792,6 +2809,22 @@ function CyclesView({
               <p className="detail-empty">このCycleにIssueはありません。</p>
             )}
           </div>
+        </section>
+      ) : tab === "current" && nextUpcomingCycle ? (
+        <section className="detail-card cycle-detail cycle-cooldown-state" aria-live="polite">
+          <span className="eyebrow coral">COOLDOWN</span>
+          <h2>Active Cycleはありません</h2>
+          <p>Cooldown中です。次回開始: {formatDateTime(nextUpcomingCycle.startsAt, timezone)}</p>
+          <button
+            className="button secondary"
+            onClick={() => {
+              setTab("upcoming");
+              setSelectedCycleId(nextUpcomingCycle.id);
+            }}
+            disabled={closeBusy || startBusy}
+          >
+            Upcomingを確認
+          </button>
         </section>
       ) : (
         <EmptyState

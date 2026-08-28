@@ -518,6 +518,135 @@ describe("OrbitStore cycle and background runs", () => {
     expect(store.cycles.size).toBe(cycleCount);
   });
 
+  it("[状態遷移] Maintenance Runは期限到来Activeを繰り越し、開始日時到来UpcomingをActive化する", () => {
+    const { store } = setup();
+    const states = store.ownedWorkflowStates("owner");
+    const activeId = "cycle-transition-active";
+    const upcomingId = "cycle-transition-upcoming";
+    store.cycles.set(activeId, {
+      id: activeId,
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "期限到来",
+      startsAt: 1_699_000_000_000,
+      endsAt: 1_699_900_000_000,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.cycles.set(upcomingId, {
+      id: upcomingId,
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: "次の集中",
+      description: "予定を保持",
+      startsAt: 1_699_900_000_000,
+      endsAt: 1_700_100_000_000,
+      status: "upcoming",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    const startedState = states.find((state) => state.category === "started")!;
+    const completedState = states.find((state) => state.category === "completed")!;
+    const issue = store.createIssue("owner", {
+      idempotencyKey: "cycle-transition-issue",
+      title: "繰越対象",
+      statusId: startedState.id,
+      cycleId: activeId,
+    });
+    store.createIssue("owner", {
+      idempotencyKey: "cycle-transition-completed-issue",
+      title: "元Cycleに残る完了Issue",
+      statusId: completedState.id,
+      cycleId: activeId,
+    });
+
+    const run = store.startRun("owner", {
+      kind: "maintenance",
+      idempotencyKey: "cycle-transition-run",
+    });
+    const result = store.continueRun("owner", run.run_id, {
+      idempotencyKey: "cycle-transition-continue",
+      expected_cursor: null,
+    });
+
+    expect(result.processed_count).toBe(2);
+    expect(store.cycles.get(activeId)).toMatchObject({ status: "completed" });
+    expect(store.cycles.get(upcomingId)).toMatchObject({
+      status: "active",
+      startsAt: 1_699_900_000_000,
+      endsAt: 1_700_100_000_000,
+      nameOverride: "次の集中",
+    });
+    expect(store.issues.get(issue.id)?.cycleId).toBe(upcomingId);
+    expect(store.cycleHistory).toHaveLength(1);
+    expect(store.outbox.filter((event) => event.type === "cycle.started")).toHaveLength(1);
+
+    const historyCount = store.cycleHistory.length;
+    const cycleStartedOutboxCount = store.outbox.filter(
+      (event) => event.type === "cycle.started",
+    ).length;
+    const replay = store.continueRun("owner", run.run_id, {
+      idempotencyKey: "cycle-transition-replay",
+      expected_cursor: null,
+    });
+    expect(replay.processed_count).toBe(0);
+    expect(store.cycleHistory).toHaveLength(historyCount);
+    expect(store.outbox.filter((event) => event.type === "cycle.started")).toHaveLength(
+      cycleStartedOutboxCount,
+    );
+  });
+
+  it("[状態遷移] Cooldown中のCycle境界RunはActiveを作らずUpcomingを変更しない", () => {
+    const { store } = setup();
+    const activeId = "cycle-transition-cooldown-active";
+    const upcomingId = "cycle-transition-cooldown-upcoming";
+    store.cycles.set(activeId, {
+      id: activeId,
+      userId: "owner",
+      number: 1,
+      name: "Cycle 1",
+      nameOverride: null,
+      description: "期限到来",
+      startsAt: 1_699_000_000_000,
+      endsAt: 1_699_900_000_000,
+      status: "active",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    store.cycles.set(upcomingId, {
+      id: upcomingId,
+      userId: "owner",
+      number: 2,
+      name: "Cycle 2",
+      nameOverride: null,
+      description: "Cooldown後",
+      startsAt: 1_700_000_000_001,
+      endsAt: 1_700_100_000_001,
+      status: "upcoming",
+      completedAt: null,
+      scheduleOverridden: false,
+    });
+    const upcomingBefore = structuredClone(store.cycles.get(upcomingId));
+
+    const run = store.startRun("owner", {
+      kind: "maintenance",
+      idempotencyKey: "cycle-transition-cooldown-run",
+    });
+    const result = store.continueRun("owner", run.run_id, {
+      idempotencyKey: "cycle-transition-cooldown-continue",
+      expected_cursor: null,
+    });
+
+    expect(result.processed_count).toBe(1);
+    expect(store.cycles.get(activeId)?.status).toBe("completed");
+    expect(store.cycles.get(upcomingId)).toEqual(upcomingBefore);
+    expect(store.listCycles("owner").filter((cycle) => cycle.status === "active")).toHaveLength(0);
+  });
+
   it("[状態遷移] Background Runはlock中の業務Mutationを423で拒否し、3 Stepを順序実行する", () => {
     const { store } = setup();
     const run = store.startRun("owner", { kind: "maintenance", idempotencyKey: "run-key-001" });

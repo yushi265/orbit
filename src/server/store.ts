@@ -3033,14 +3033,52 @@ export class OrbitStore {
   private runCycleTransition(userId: string, runId: string): number {
     const now = this.clock();
     let processed = 0;
-    for (const cycle of this.listCycles(userId)) {
-      if (processed >= CHUNK_SIZE) break;
-      if (cycle.status === "active" && cycle.endsAt <= now) {
-        this.closeCycle(userId, cycle.id, `run-${runId}-${cycle.id}`, runId);
+    while (processed < CHUNK_SIZE) {
+      const active = this.listCycles(userId).find((cycle) => cycle.status === "active");
+      if (active) {
+        if (active.endsAt > now) break;
+        this.closeCycle(userId, active.id, `run-${runId}-${active.id}`, runId);
         processed += 1;
+        continue;
       }
+      const next = this.listCycles(userId)
+        .filter((cycle) => cycle.status === "upcoming")
+        .sort((left, right) => left.number - right.number)[0];
+      if (!next || next.startsAt > now) break;
+      if (!this.activateScheduledCycle(userId, next, runId)) break;
+      processed += 1;
     }
     return processed;
+  }
+
+  private activateScheduledCycle(userId: string, cycle: Cycle, runId: string): boolean {
+    this.assertUnlocked(userId, runId);
+    if (
+      cycle.userId !== userId ||
+      cycle.status !== "upcoming" ||
+      cycle.startsAt > this.clock() ||
+      this.listCycles(userId).some((item) => item.status === "active")
+    )
+      return false;
+    cycle.status = "active";
+    cycle.completedAt = null;
+    const mutationKey = `run-${runId}-${cycle.id}-start`;
+    this.recordActivity(
+      userId,
+      "cycle",
+      cycle.id,
+      "started",
+      mutationKey,
+      null,
+      { startsAt: cycle.startsAt, endsAt: cycle.endsAt },
+      "system:manual-run",
+    );
+    this.recordOutbox(userId, "cycle.started", `cycle.started:${cycle.id}`, {
+      cycleId: cycle.id,
+      startsAt: cycle.startsAt,
+      endsAt: cycle.endsAt,
+    });
+    return true;
   }
 
   private runPurge(userId: string): number {

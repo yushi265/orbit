@@ -75,4 +75,17 @@ describe("初期 Drizzle migration", () => {
     expect(migration).toContain("'coral', \"issue_counter\"");
     expect(migration).toContain("user_preferences_color_theme_check");
   });
+
+  it("Automation Activity actor type migrationは既存actorを維持してsystem:automationを許可する", () => {
+    const migrationDirectory = resolve(process.cwd(), "drizzle");
+    const migrationFile = readdirSync(migrationDirectory)
+      .filter((name) => /^0003_.*\.sql$/.test(name))
+      .sort()[0];
+
+    expect(migrationFile).toBeDefined();
+    const migration = readFileSync(resolve(migrationDirectory, migrationFile), "utf8");
+    expect(migration).toContain("activity_events");
+    expect(migration).toContain("system:manual-run");
+    expect(migration).toContain("system:automation");
+  });
 });

@@ -33,6 +33,7 @@ const cycleSettings = {
   cooldownWeeks: 0,
   startWeekday: 1,
   futureCount: 3,
+  autoAddToCurrentCycle: false,
 };
 
 const settingsProps = {

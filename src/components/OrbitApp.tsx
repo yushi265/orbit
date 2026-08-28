@@ -64,7 +64,7 @@ type PreferencePatch = Partial<
 >;
 type CycleSettingsPatch = Pick<
   BootstrapPayload["cycleSettings"],
-  "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount"
+  "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount" | "autoAddToCurrentCycle"
 >;
 type CycleSchedulePatch = { startDate: string; endDate: string };
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
@@ -74,6 +74,10 @@ type IssueReorderVariables = {
   beforeIssueId: string | null;
   idempotencyKey: string;
 };
+
+export function activityTitle(event: { action: string; actorType: string }): string {
+  return event.actorType === "system:automation" ? "Automation" : event.action;
+}
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
 };
@@ -4193,6 +4197,7 @@ export function SettingsView({
   } | null>(null);
   const [cycleCooldownDraft, setCycleCooldownDraft] = useState(cycleSettings.cooldownWeeks);
   const [cycleFutureCountDraft, setCycleFutureCountDraft] = useState(cycleSettings.futureCount);
+  const [cycleAutoAddDraft, setCycleAutoAddDraft] = useState(cycleSettings.autoAddToCurrentCycle);
   const [colorThemeSaving, setColorThemeSaving] = useState(false);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
@@ -4222,6 +4227,10 @@ export function SettingsView({
     [cycleSettings.cooldownWeeks],
   );
   useEffect(() => setCycleFutureCountDraft(cycleSettings.futureCount), [cycleSettings.futureCount]);
+  useEffect(
+    () => setCycleAutoAddDraft(cycleSettings.autoAddToCurrentCycle),
+    [cycleSettings.autoAddToCurrentCycle],
+  );
 
   async function restoreTrashIssue(issue: Issue): Promise<void> {
     if (!onRestoreIssue || trashSavingId) return;
@@ -4273,6 +4282,7 @@ export function SettingsView({
       startWeekday: cycleStartWeekdayDraft,
       cooldownWeeks: cycleCooldownDraft,
       futureCount: cycleFutureCountDraft,
+      autoAddToCurrentCycle: cycleAutoAddDraft,
     };
     setCycleSettingsSaving(true);
     setCycleSettingsError(null);
@@ -4690,6 +4700,25 @@ export function SettingsView({
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="setting-row cycle-auto-add-row">
+              <div>
+                <strong>自動追加</strong>
+                <span>Started / CompletedのIssueをCurrent Cycleへ追加</span>
+              </div>
+              <label className="setting-checkbox">
+                <input
+                  type="checkbox"
+                  aria-label="Started・CompletedをCurrent Cycleへ自動追加"
+                  checked={cycleAutoAddDraft}
+                  disabled={cycleSettingsSaving}
+                  onChange={(event) => {
+                    setCycleAutoAddDraft(event.target.checked);
+                    setCycleSettingsSaved(null);
+                  }}
+                />
+                <span>{cycleAutoAddDraft ? "ON" : "OFF"}</span>
+              </label>
             </div>
             <div className="cycle-settings-actions">
               <span className="setting-value">{preferences.timezone}</span>
@@ -6006,7 +6035,7 @@ function IssueDetailPanel({
                   <div className="activity-item" key={event.id}>
                     <span className="activity-dot" />
                     <div>
-                      <strong>{event.action}</strong>
+                      <strong>{activityTitle(event)}</strong>
                       <span>{formatDate(event.createdAt)}</span>
                     </div>
                   </div>

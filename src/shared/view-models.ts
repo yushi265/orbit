@@ -164,6 +164,7 @@ export interface CycleSettingsViewModel {
   cooldownWeeks: number;
   startWeekday: number;
   futureCount: number;
+  autoAddToCurrentCycle: boolean;
 }
 export interface SavedViewViewModel {
   id: string;

@@ -345,6 +345,18 @@ export class OrbitStore {
         return preference;
       });
     }
+    if (Array.isArray(normalized.cycleSettings)) {
+      normalized.cycleSettings = normalized.cycleSettings.map((setting) => {
+        if (
+          setting &&
+          typeof setting === "object" &&
+          !Array.isArray(setting) &&
+          !("autoAddToCurrentCycle" in setting)
+        )
+          return { ...setting, autoAddToCurrentCycle: false };
+        return setting;
+      });
+    }
     if (!OrbitStore.isSnapshot(normalized, ownerUserId))
       throw new Error("Invalid OrbitStore snapshot");
     const source = structuredClone(normalized);
@@ -515,7 +527,7 @@ export class OrbitStore {
       hasTypes("cycleSettings", {
         strings: ["userId"],
         numbers: ["durationWeeks", "cooldownWeeks", "startWeekday", "futureCount"],
-        booleans: ["enabled"],
+        booleans: ["enabled", "autoAddToCurrentCycle"],
       }) &&
       hasTypes("issues", {
         strings: ["id", "userId", "title", "statusId", "priority"],
@@ -528,6 +540,11 @@ export class OrbitStore {
         strings: ["id", "userId", "entityType", "entityId", "action", "actorType", "mutationKey"],
         numbers: ["createdAt"],
       }) &&
+      items("activities").every(
+        (entry) =>
+          isRecord(entry) &&
+          ["user", "system:manual-run", "system:automation"].includes(entry.actorType as string),
+      ) &&
       hasTypes("outbox", {
         strings: ["id", "userId", "type", "dedupeKey", "status"],
         numbers: ["attemptCount", "createdAt"],
@@ -654,6 +671,7 @@ export class OrbitStore {
       cooldownWeeks: 0,
       startWeekday: 1,
       futureCount: 3,
+      autoAddToCurrentCycle: false,
     });
     this.locks.set(userId, {
       userId,
@@ -1308,6 +1326,14 @@ export class OrbitStore {
       createdAt: now,
       updatedAt: now,
     };
+    const automaticCycle = this.cycleForAutomaticIssueAssignment(
+      userId,
+      status.id,
+      null,
+      input.cycleId ?? null,
+      input.cycleId !== undefined,
+    );
+    if (automaticCycle) issue.cycleId = automaticCycle.id;
     preferences.issueCounter = number;
     this.issues.set(issue.id, issue);
     this.recordActivity(userId, "issue", issue.id, "created", input.idempotencyKey, null, {
@@ -1315,6 +1341,14 @@ export class OrbitStore {
       title: issue.title,
     });
     this.recordOutbox(userId, "issue.created", `issue.created:${issue.id}`, { issueId: issue.id });
+    if (automaticCycle)
+      this.recordAutomaticCycleAssignment(
+        userId,
+        issue,
+        status.id,
+        automaticCycle,
+        input.idempotencyKey,
+      );
     this.recordReceipt(userId, "issue.create", input.idempotencyKey, input, issue);
     return issue;
   }
@@ -1323,6 +1357,46 @@ export class OrbitStore {
     const issue = this.issues.get(issueId);
     if (!issue || issue.userId !== userId || issue.deletedAt) throw notFound();
     return issue;
+  }
+
+  private cycleForAutomaticIssueAssignment(
+    userId: string,
+    statusId: string,
+    previousStatusId: string | null,
+    issueCycleId: string | null,
+    cycleIdSpecified: boolean,
+  ): Cycle | null {
+    const settings = this.cycleSettings.get(userId);
+    if (!settings?.autoAddToCurrentCycle || cycleIdSpecified || issueCycleId !== null) return null;
+    if (previousStatusId !== null && previousStatusId === statusId) return null;
+    const status = this.workflowStates.get(statusId);
+    if (!status || (status.category !== "started" && status.category !== "completed")) return null;
+    return this.listCycles(userId).find((cycle) => cycle.status === "active") ?? null;
+  }
+
+  private recordAutomaticCycleAssignment(
+    userId: string,
+    issue: Issue,
+    beforeStatusId: string,
+    cycle: Cycle,
+    mutationKey: string,
+  ): void {
+    this.recordActivity(
+      userId,
+      "issue",
+      issue.id,
+      "cycle.auto_assigned",
+      `${mutationKey}:cycle-auto-add`,
+      { cycleId: null, statusId: beforeStatusId },
+      { cycleId: cycle.id, statusId: issue.statusId },
+      "system:automation",
+    );
+    this.recordOutbox(
+      userId,
+      "issue.cycle.auto_assigned",
+      `issue.cycle.auto_assigned:${issue.id}:${issue.version}`,
+      { issueId: issue.id, cycleId: cycle.id, version: issue.version },
+    );
   }
 
   getIssueDetail(userId: string, issueId: string): IssueDetail {
@@ -1725,7 +1799,21 @@ export class OrbitStore {
     const labelIds =
       patch.labelIds === undefined ? undefined : this.ownedLabelIds(userId, patch.labelIds);
     const before = { ...issue };
-    Object.assign(issue, { ...patch, ...(labelIds === undefined ? {} : { labelIds }) });
+    const automaticCycle =
+      patch.statusId === undefined
+        ? null
+        : this.cycleForAutomaticIssueAssignment(
+            userId,
+            patch.statusId,
+            issue.statusId,
+            issue.cycleId,
+            "cycleId" in patch,
+          );
+    Object.assign(issue, {
+      ...patch,
+      ...(labelIds === undefined ? {} : { labelIds }),
+      ...(automaticCycle ? { cycleId: automaticCycle.id } : {}),
+    });
     issue.version += 1;
     issue.updatedAt = this.clock();
     this.recordActivity(
@@ -1735,12 +1823,26 @@ export class OrbitStore {
       "updated",
       input.idempotencyKey,
       { version: before.version, statusId: before.statusId, priority: before.priority },
-      { version: issue.version, statusId: issue.statusId, priority: issue.priority },
+      {
+        version: issue.version,
+        statusId: issue.statusId,
+        priority: issue.priority,
+        cycleId: issue.cycleId,
+      },
     );
     this.recordOutbox(userId, "issue.updated", `issue.updated:${issue.id}:${issue.version}`, {
       issueId: issue.id,
       version: issue.version,
+      cycleId: issue.cycleId,
     });
+    if (automaticCycle)
+      this.recordAutomaticCycleAssignment(
+        userId,
+        issue,
+        before.statusId,
+        automaticCycle,
+        input.idempotencyKey,
+      );
     this.recordReceipt(userId, "issue.update", input.idempotencyKey, input, issue);
     return issue;
   }
@@ -1872,9 +1974,20 @@ export class OrbitStore {
           projectId: issue.projectId,
           labelIds: [...issue.labelIds],
         };
+        const automaticCycle =
+          patch.statusId === undefined
+            ? null
+            : this.cycleForAutomaticIssueAssignment(
+                userId,
+                patch.statusId,
+                issue.statusId,
+                issue.cycleId,
+                "cycleId" in patch,
+              );
         Object.assign(issue, {
           ...patch,
           ...(labelIds === undefined ? {} : { labelIds }),
+          ...(automaticCycle ? { cycleId: automaticCycle.id } : {}),
           version: issue.version + 1,
           updatedAt: this.clock(),
         });
@@ -1900,6 +2013,14 @@ export class OrbitStore {
           `issue.bulk_updated:${issue.id}:${input.idempotencyKey}`,
           { issueId: issue.id, version: issue.version },
         );
+        if (automaticCycle)
+          this.recordAutomaticCycleAssignment(
+            userId,
+            issue,
+            before.statusId,
+            automaticCycle,
+            `${input.idempotencyKey}:${issue.id}`,
+          );
         return issue;
       });
       this.recordReceipt(userId, "issue.bulk", input.idempotencyKey, input, updated);
@@ -2176,6 +2297,8 @@ export class OrbitStore {
     const futureCount = input.futureCount ?? settings.futureCount;
     if (!Number.isInteger(futureCount) || futureCount < 1 || futureCount > 15)
       throw validationError({ futureCount: ["将来Cycle数は1〜15件で指定してください。"] });
+    const autoAddToCurrentCycle =
+      input.autoAddToCurrentCycle ?? settings.autoAddToCurrentCycle ?? false;
     const timezone = this.preferences.get(userId)?.timezone;
     if (!timezone || !isValidTimeZone(timezone))
       throw validationError({ timezone: ["IANA timezoneを指定してください。"] });
@@ -2186,6 +2309,7 @@ export class OrbitStore {
       startWeekday: input.startWeekday,
       cooldownWeeks,
       futureCount,
+      autoAddToCurrentCycle,
     };
     const updates = this.upcomingScheduleUpdates(userId, nextSettings, timezone);
     const before = {
@@ -2193,11 +2317,13 @@ export class OrbitStore {
       startWeekday: settings.startWeekday,
       cooldownWeeks: settings.cooldownWeeks,
       futureCount: settings.futureCount,
+      autoAddToCurrentCycle: settings.autoAddToCurrentCycle,
     };
     settings.durationWeeks = input.durationWeeks;
     settings.startWeekday = input.startWeekday;
     settings.cooldownWeeks = cooldownWeeks;
     settings.futureCount = futureCount;
+    settings.autoAddToCurrentCycle = autoAddToCurrentCycle;
     updates.forEach(({ cycle, startsAt, endsAt }) => {
       cycle.startsAt = startsAt;
       cycle.endsAt = endsAt;
@@ -2207,6 +2333,7 @@ export class OrbitStore {
       startWeekday: settings.startWeekday,
       cooldownWeeks: settings.cooldownWeeks,
       futureCount: settings.futureCount,
+      autoAddToCurrentCycle: settings.autoAddToCurrentCycle,
     };
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       this.recordActivity(
@@ -2227,6 +2354,7 @@ export class OrbitStore {
           startWeekday: settings.startWeekday,
           cooldownWeeks: settings.cooldownWeeks,
           futureCount: settings.futureCount,
+          autoAddToCurrentCycle: settings.autoAddToCurrentCycle,
         },
       );
     }

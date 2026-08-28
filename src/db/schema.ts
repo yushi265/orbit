@@ -451,7 +451,7 @@ export const activityEvents = sqliteTable(
     ),
     check(
       "activity_events_actor_type_check",
-      sql`${table.actorType} IN ('user', 'system:manual-run')`,
+      sql`${table.actorType} IN ('user', 'system:manual-run', 'system:automation')`,
     ),
   ],
 );

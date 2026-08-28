@@ -107,6 +107,7 @@ export interface CycleSettings {
   cooldownWeeks: number;
   startWeekday: number;
   futureCount: number;
+  autoAddToCurrentCycle: boolean;
 }
 
 export interface Issue {
@@ -219,7 +220,7 @@ export interface ActivityEvent {
   entityType: string;
   entityId: string;
   action: string;
-  actorType: "user" | "system:manual-run";
+  actorType: "user" | "system:manual-run" | "system:automation";
   mutationKey: string;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;

@@ -21,6 +21,7 @@ const cycleSettings = {
   cooldownWeeks: 0,
   startWeekday: 1,
   futureCount: 3,
+  autoAddToCurrentCycle: false,
 };
 const baseProps = {
   preferences,
@@ -60,6 +61,11 @@ describe("Cycle settings UI", () => {
     expect(dom.window.document.querySelector('select[aria-label="Cycle開始曜日"]')).not.toBeNull();
     expect(dom.window.document.querySelector('select[aria-label="CycleCooldown"]')).not.toBeNull();
     expect(dom.window.document.querySelector('select[aria-label="将来Cycle数"]')).not.toBeNull();
+    expect(
+      dom.window.document.querySelector(
+        'input[aria-label="Started・CompletedをCurrent Cycleへ自動追加"]',
+      ),
+    ).not.toBeNull();
     expect(dom.window.document.body.textContent).toContain("Asia/Tokyo");
     expect(dom.window.document.body.textContent).toContain("Cycle設定を保存");
     await act(async () => {
@@ -94,6 +100,9 @@ describe("Cycle settings UI", () => {
     const futureCount = dom.window.document.querySelector(
       'select[aria-label="将来Cycle数"]',
     ) as HTMLSelectElement;
+    const autoAdd = dom.window.document.querySelector(
+      'input[aria-label="Started・CompletedをCurrent Cycleへ自動追加"]',
+    ) as HTMLInputElement;
     await act(async () => {
       duration.value = "4";
       duration.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
@@ -107,6 +116,7 @@ describe("Cycle settings UI", () => {
       cooldown.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
       futureCount.value = "7";
       futureCount.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      autoAdd.click();
     });
     await act(async () => {
       (dom.window.document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
@@ -114,7 +124,13 @@ describe("Cycle settings UI", () => {
     });
 
     expect(onCycleSettings).toHaveBeenCalledWith(
-      { durationWeeks: 4, startWeekday: 5, cooldownWeeks: 2, futureCount: 7 },
+      {
+        durationWeeks: 4,
+        startWeekday: 5,
+        cooldownWeeks: 2,
+        futureCount: 7,
+        autoAddToCurrentCycle: true,
+      },
       expect.any(String),
     );
     await act(async () => {
@@ -175,9 +191,57 @@ describe("Cycle settings UI", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(onCycleSettings).toHaveBeenLastCalledWith(
-      { durationWeeks: 4, startWeekday: 1, cooldownWeeks: 4, futureCount: 15 },
+      {
+        durationWeeks: 4,
+        startWeekday: 1,
+        cooldownWeeks: 4,
+        futureCount: 15,
+        autoAddToCurrentCycle: false,
+      },
       expect.any(String),
     );
+    await act(async () => {
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it("[状態遷移] Cycle設定の保存中は全設定操作を無効化する", async () => {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>");
+    vi.stubGlobal("window", dom.window);
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal("navigator", dom.window.navigator);
+    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+    vi.stubGlobal("Node", dom.window.Node);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let resolveSave!: () => void;
+    const save = new Promise<void>((resolve) => {
+      resolveSave = resolve;
+    });
+    const onCycleSettings = vi.fn().mockReturnValue(save);
+    const root = createRoot(dom.window.document.getElementById("root")!);
+
+    await act(async () => {
+      root.render(createElement(SettingsView, { ...baseProps, onCycleSettings }));
+    });
+    await act(async () => {
+      (dom.window.document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(
+      [
+        ...dom.window.document.querySelectorAll(
+          ".cycle-settings-form select, .cycle-settings-form input[type='checkbox'], .cycle-settings-form button[type='submit']",
+        ),
+      ].every(
+        (element) => (element as HTMLSelectElement | HTMLInputElement | HTMLButtonElement).disabled,
+      ),
+    ).toBe(true);
+    await act(async () => {
+      resolveSave();
+      await save;
+    });
     await act(async () => {
       root.unmount();
       await new Promise((resolve) => setTimeout(resolve, 0));

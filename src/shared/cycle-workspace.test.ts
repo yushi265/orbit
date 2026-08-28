@@ -99,6 +99,21 @@ describe("Cycle workspace shared contract", () => {
     }
   });
 
+  it("[同値分割] CycleSettingsは自動追加booleanを受け入れ、boolean以外を拒否する", () => {
+    const base = { idempotencyKey: "cycle-settings-auto-add", durationWeeks: 2, startWeekday: 1 };
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, autoAddToCurrentCycle: false }).success,
+    ).toBe(true);
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, autoAddToCurrentCycle: true }).success,
+    ).toBe(true);
+    for (const autoAddToCurrentCycle of ["true", 1, 0, null]) {
+      expect(
+        cycleSettingsMutationSchema.safeParse({ ...base, autoAddToCurrentCycle }).success,
+      ).toBe(false);
+    }
+  });
+
   it("[境界値] Cycle scheduleはYYYY-MM-DDだけを受け入れ、未知フィールドを拒否する", () => {
     const base = {
       idempotencyKey: "cycle-schedule-contract-1",

@@ -63,6 +63,7 @@ export const cycleSettingsMutationSchema = z.strictObject({
   startWeekday: cycleStartWeekdaySchema,
   cooldownWeeks: cycleCooldownWeeksSchema.optional(),
   futureCount: cycleFutureCountSchema.optional(),
+  autoAddToCurrentCycle: z.boolean().optional(),
 });
 
 export const cycleScheduleMutationSchema = z.strictObject({

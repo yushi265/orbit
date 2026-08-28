@@ -5,7 +5,7 @@
 - `/api/v1/bootstrap`、`/api/v1/issues`、`/api/v1/projects`、`/api/v1/cycles`、`/api/v1/search`、`/api/v1/views`、`/api/v1/notifications`、`/api/v1/preferences`、`/api/v1/background-runs/*` をTanStack Start Server Routeで公開する（参照: `src/server/api.ts`、`src/routes/api/v1/`）。
 - Issue detailは `GET /api/v1/issues/:issueId` で `issue / notes / relations / activity` を返し、Notes / RelationsのMutationはIssue配下のnested Routeを使う（参照: `src/server/api.ts`、`src/routes/api/v1/issues/$issueId/`）。
 - Cycle workspaceは既存BootstrapのCycle / Issueを使い、`PATCH /api/v1/cycles/:cycleId` でmetadataを更新する。Cycle closeのPOSTとIssue PATCHのCycle割当は既存Routeを再利用する（参照: `src/server/api.ts`、`src/routes/api/v1/cycles/`）。
-- Cycle設定はBootstrapの`cycleSettings`で取得し、`PATCH /api/v1/cycle-settings`で`durationWeeks`（1..8）と`startWeekday`（0=日曜..6=土曜）を更新する。更新時は未調整UpcomingだけをOwnerのIANA timezoneの00:00へ再計算する（参照: `src/shared/contracts/cycles.ts`、`src/server/cycle-schedule.ts`、`src/server/api.ts`、`src/components/OrbitApp.tsx`）。
+- Cycle設定はBootstrapの`cycleSettings`で取得し、`PATCH /api/v1/cycle-settings`で`durationWeeks`（1..8）、`startWeekday`（0=日曜..6=土曜）、`cooldownWeeks`（0..4）、`futureCount`（1..15）を更新する。更新時は未調整UpcomingだけをOwnerのIANA timezoneの00:00へ再計算し、CooldownはDSTをまたぐ暦週として次の指定曜日境界へ適用する（参照: `src/shared/contracts/cycles.ts`、`src/server/cycle-schedule.ts`、`src/server/api.ts`、`src/components/OrbitApp.tsx`）。
 - Cycle start schedule: `OrbitStore.ensureUpcomingCycles`がBootstrap / production session開始時に`CycleSettings.futureCount`件の後続Upcomingを補充し、成功GETのSnapshot persistで既存Ownerへ保存する。Current画面の「次のCycleを開始」は既存`POST /api/v1/cycles/:cycleId/start`を呼ぶ（参照: `src/server/store.ts`、`src/server/store-session.ts`、`src/components/OrbitApp.tsx`）。
 - Upcoming Cycleの即時開始は`POST /api/v1/cycles/:cycleId/start`へJSONの`idempotencyKey`を渡し、Storeが現在Cycleのclose・次Cycleのactive化・後続日付再計算を行う（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/cycles/$cycleId/start.ts`）。
 - Project workspaceはBootstrapのProject / Issueを使い、既存`PATCH /api/v1/projects/:projectId`をmetadata更新に再利用する。Saved Viewは`POST/PATCH/DELETE /api/v1/views*`でOwner scopedに管理する（参照: `src/server/api.ts`、`src/routes/api/v1/projects/`、`src/routes/api/v1/views/`）。
@@ -46,6 +46,7 @@
 - `pnpm` はnode_modulesの再構成を非TTYで確認すると停止するため、CI / 自動実行では `.npmrc` の `confirmModulesPurge=false` を使う（参照: `.npmrc`）。
 - Productionの初回Owner SnapshotはCycle 0件で保存され得るため、`ensureUpcomingCycles`は既存Active / Upcomingがない初回状態も初期Active Cycle 1へ収束させる。初回生成後はproduction Sessionの成功GET保存でバックフィルされる（参照: `src/server/store.ts`、`src/server/store-session.ts`）。
 - Cycle開始曜日の計算は固定UTCオフセットではなく`Intl.DateTimeFormat`でIANA timezoneの現地00:00へ変換し、DST境界では暦日加算を使う（参照: `src/server/cycle-schedule.ts`）。
+- CycleのCooldownはUTCミリ秒を単純加算せず、Timezoneのローカル暦日へ週数を加えてから指定曜日00:00へ正規化する。これによりDST境界で開始日を1週余計に飛ばさない（参照: `src/server/cycle-schedule.ts`）。
 - Bulkはpatchを1属性に限定し、参照先を全件検証してから適用する。Activity mutation keyはIssueごとにsuffixを付け、全体Receiptとは分離する（参照: `src/shared/contracts/bulk.ts`、`src/server/store.ts`）。
 - SnapshotのVersion CASは既存Snapshotの読み取りではVersionを進めず、成功したMutationまたはSnapshot未作成時の初回成功GETだけがD1行を初期化・更新する。既存Versionとの不一致は`D1_WRITE_CONFLICT`になる（参照: `src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 - Drizzleの既存`user_preferences`へ列を追加する再作成migrationでは、旧テーブルに存在しない新列をSELECTせず、固定default（今回の`color_theme`は`'coral'`）をSELECTする（参照: `drizzle/0002_known_scarlet_spider.sql`）。

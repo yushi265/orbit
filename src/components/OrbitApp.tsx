@@ -62,7 +62,10 @@ type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
   Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
 >;
-type CycleSettingsPatch = Pick<BootstrapPayload["cycleSettings"], "durationWeeks" | "startWeekday">;
+type CycleSettingsPatch = Pick<
+  BootstrapPayload["cycleSettings"],
+  "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount"
+>;
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
 type IssueReorderVariables = {
@@ -3958,6 +3961,8 @@ export function SettingsView({
     key: string;
     patch: CycleSettingsPatch;
   } | null>(null);
+  const [cycleCooldownDraft, setCycleCooldownDraft] = useState(cycleSettings.cooldownWeeks);
+  const [cycleFutureCountDraft, setCycleFutureCountDraft] = useState(cycleSettings.futureCount);
   const [colorThemeSaving, setColorThemeSaving] = useState(false);
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("#E05252");
@@ -3982,6 +3987,11 @@ export function SettingsView({
     () => setCycleStartWeekdayDraft(cycleSettings.startWeekday),
     [cycleSettings.startWeekday],
   );
+  useEffect(
+    () => setCycleCooldownDraft(cycleSettings.cooldownWeeks),
+    [cycleSettings.cooldownWeeks],
+  );
+  useEffect(() => setCycleFutureCountDraft(cycleSettings.futureCount), [cycleSettings.futureCount]);
 
   async function restoreTrashIssue(issue: Issue): Promise<void> {
     if (!onRestoreIssue || trashSavingId) return;
@@ -4031,6 +4041,8 @@ export function SettingsView({
     const patch: CycleSettingsPatch = retryPatch ?? {
       durationWeeks: cycleDurationDraft,
       startWeekday: cycleStartWeekdayDraft,
+      cooldownWeeks: cycleCooldownDraft,
+      futureCount: cycleFutureCountDraft,
     };
     setCycleSettingsSaving(true);
     setCycleSettingsError(null);
@@ -4385,6 +4397,66 @@ export function SettingsView({
                 {cycleWeekdayOptions.map(([value, label]) => (
                   <option value={value} key={value}>
                     {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Cooldown</strong>
+                <span>Cycle終了後の休止期間（0〜4週間）</span>
+                {cycleSettingsFieldErrors?.cooldownWeeks && (
+                  <span id="cycle-cooldown-error" className="setting-field-error" role="alert">
+                    {cycleSettingsFieldErrors.cooldownWeeks.join(" ")}
+                  </span>
+                )}
+              </div>
+              <select
+                aria-label="CycleCooldown"
+                aria-invalid={Boolean(cycleSettingsFieldErrors?.cooldownWeeks)}
+                aria-describedby={
+                  cycleSettingsFieldErrors?.cooldownWeeks ? "cycle-cooldown-error" : undefined
+                }
+                value={String(cycleCooldownDraft)}
+                disabled={cycleSettingsSaving}
+                onChange={(event) => {
+                  setCycleCooldownDraft(Number(event.target.value));
+                  setCycleSettingsSaved(null);
+                }}
+              >
+                {Array.from({ length: 5 }, (_, weeks) => (
+                  <option value={weeks} key={weeks}>
+                    {weeks}週間
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>将来Cycle数</strong>
+                <span>先に表示しておくUpcoming Cycle（1〜15件）</span>
+                {cycleSettingsFieldErrors?.futureCount && (
+                  <span id="cycle-future-count-error" className="setting-field-error" role="alert">
+                    {cycleSettingsFieldErrors.futureCount.join(" ")}
+                  </span>
+                )}
+              </div>
+              <select
+                aria-label="将来Cycle数"
+                aria-invalid={Boolean(cycleSettingsFieldErrors?.futureCount)}
+                aria-describedby={
+                  cycleSettingsFieldErrors?.futureCount ? "cycle-future-count-error" : undefined
+                }
+                value={String(cycleFutureCountDraft)}
+                disabled={cycleSettingsSaving}
+                onChange={(event) => {
+                  setCycleFutureCountDraft(Number(event.target.value));
+                  setCycleSettingsSaved(null);
+                }}
+              >
+                {Array.from({ length: 15 }, (_, index) => index + 1).map((count) => (
+                  <option value={count} key={count}>
+                    {count}件
                   </option>
                 ))}
               </select>

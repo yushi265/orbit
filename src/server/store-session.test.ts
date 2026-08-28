@@ -53,14 +53,23 @@ describe("store session", () => {
       idempotencyKey: "production-cycle-settings",
       durationWeeks: 6,
       startWeekday: 4,
+      cooldownWeeks: 3,
+      futureCount: 8,
     });
-    expect(updated).toMatchObject({ durationWeeks: 6, startWeekday: 4 });
+    expect(updated).toMatchObject({
+      durationWeeks: 6,
+      startWeekday: 4,
+      cooldownWeeks: 3,
+      futureCount: 8,
+    });
     await first.persist();
 
     const second = await openStoreSession("owner-cycle-settings", "owner@example.com", environment);
     expect(second.store.cycleSettings.get("owner-cycle-settings")).toMatchObject({
       durationWeeks: 6,
       startWeekday: 4,
+      cooldownWeeks: 3,
+      futureCount: 8,
     });
   });
 

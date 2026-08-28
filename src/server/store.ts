@@ -2168,6 +2168,12 @@ export class OrbitStore {
       throw validationError({ durationWeeks: ["Cycle期間は1〜8週間で指定してください。"] });
     if (!Number.isInteger(input.startWeekday) || input.startWeekday < 0 || input.startWeekday > 6)
       throw validationError({ startWeekday: ["開始曜日は0〜6で指定してください。"] });
+    const cooldownWeeks = input.cooldownWeeks ?? settings.cooldownWeeks;
+    if (!Number.isInteger(cooldownWeeks) || cooldownWeeks < 0 || cooldownWeeks > 4)
+      throw validationError({ cooldownWeeks: ["Cooldownは0〜4週間で指定してください。"] });
+    const futureCount = input.futureCount ?? settings.futureCount;
+    if (!Number.isInteger(futureCount) || futureCount < 1 || futureCount > 15)
+      throw validationError({ futureCount: ["将来Cycle数は1〜15件で指定してください。"] });
     const timezone = this.preferences.get(userId)?.timezone;
     if (!timezone || !isValidTimeZone(timezone))
       throw validationError({ timezone: ["IANA timezoneを指定してください。"] });
@@ -2176,14 +2182,20 @@ export class OrbitStore {
       ...settings,
       durationWeeks: input.durationWeeks,
       startWeekday: input.startWeekday,
+      cooldownWeeks,
+      futureCount,
     };
     const updates = this.upcomingScheduleUpdates(userId, nextSettings, timezone);
     const before = {
       durationWeeks: settings.durationWeeks,
       startWeekday: settings.startWeekday,
+      cooldownWeeks: settings.cooldownWeeks,
+      futureCount: settings.futureCount,
     };
     settings.durationWeeks = input.durationWeeks;
     settings.startWeekday = input.startWeekday;
+    settings.cooldownWeeks = cooldownWeeks;
+    settings.futureCount = futureCount;
     updates.forEach(({ cycle, startsAt, endsAt }) => {
       cycle.startsAt = startsAt;
       cycle.endsAt = endsAt;
@@ -2191,6 +2203,8 @@ export class OrbitStore {
     const after = {
       durationWeeks: settings.durationWeeks,
       startWeekday: settings.startWeekday,
+      cooldownWeeks: settings.cooldownWeeks,
+      futureCount: settings.futureCount,
     };
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       this.recordActivity(
@@ -2206,7 +2220,12 @@ export class OrbitStore {
         userId,
         "cycle_settings.updated",
         `cycle_settings.updated:${userId}:${input.idempotencyKey}`,
-        { durationWeeks: settings.durationWeeks, startWeekday: settings.startWeekday },
+        {
+          durationWeeks: settings.durationWeeks,
+          startWeekday: settings.startWeekday,
+          cooldownWeeks: settings.cooldownWeeks,
+          futureCount: settings.futureCount,
+        },
       );
     }
     this.recordReceipt(userId, "cycle.settings.update", input.idempotencyKey, input, settings);
@@ -2237,7 +2256,12 @@ export class OrbitStore {
         cursor = Math.max(cursor, cycle.endsAt);
         continue;
       }
-      const startsAt = nextCycleStartAt(cursor, settings.startWeekday, timezone);
+      const startsAt = nextCycleStartAt(
+        cursor,
+        settings.startWeekday,
+        timezone,
+        settings.cooldownWeeks,
+      );
       const endsAt = cycleEndAt(startsAt, settings.durationWeeks, timezone);
       updates.push({ cycle, startsAt, endsAt });
       cursor = endsAt;
@@ -2381,7 +2405,12 @@ export class OrbitStore {
         cursor = future.endsAt;
         continue;
       }
-      const startsAt = nextCycleStartAt(cursor, settings.startWeekday, timezone);
+      const startsAt = nextCycleStartAt(
+        cursor,
+        settings.startWeekday,
+        timezone,
+        settings.cooldownWeeks,
+      );
       const endsAt = cycleEndAt(startsAt, settings.durationWeeks, timezone);
       futureUpdates.push({ cycle: future, startsAt, endsAt });
       cursor = endsAt;
@@ -2411,7 +2440,12 @@ export class OrbitStore {
     const settings = this.cycleSettings.get(userId)!;
     const timezone = this.preferences.get(userId)?.timezone ?? "UTC";
     const id = createId("cycle");
-    const startsAt = nextCycleStartAt(previous.endsAt, settings.startWeekday, timezone);
+    const startsAt = nextCycleStartAt(
+      previous.endsAt,
+      settings.startWeekday,
+      timezone,
+      settings.cooldownWeeks,
+    );
     const cycle: Cycle = {
       id,
       userId,

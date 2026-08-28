@@ -74,6 +74,27 @@ describe("Cycle workspace shared contract", () => {
     }
   });
 
+  it("[境界値] CycleSettingsはCooldown 0..4週と将来Cycle数1..15件を受け入れる", () => {
+    const base = { idempotencyKey: "cycle-settings-advanced-1", durationWeeks: 2, startWeekday: 1 };
+
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, cooldownWeeks: 0, futureCount: 1 }).success,
+    ).toBe(true);
+    expect(
+      cycleSettingsMutationSchema.safeParse({ ...base, cooldownWeeks: 4, futureCount: 15 }).success,
+    ).toBe(true);
+    for (const cooldownWeeks of [-1, 5, 1.5, "2"]) {
+      expect(
+        cycleSettingsMutationSchema.safeParse({ ...base, cooldownWeeks, futureCount: 3 }).success,
+      ).toBe(false);
+    }
+    for (const futureCount of [0, 16, 1.5, "3"]) {
+      expect(
+        cycleSettingsMutationSchema.safeParse({ ...base, cooldownWeeks: 1, futureCount }).success,
+      ).toBe(false);
+    }
+  });
+
   it("[デシジョンテーブル] CycleSettingsはunknown keyと不正idempotencyKeyを拒否する", () => {
     const valid = { idempotencyKey: "cycle-settings-2", durationWeeks: 2, startWeekday: 1 };
     expect(cycleSettingsMutationSchema.safeParse(valid).success).toBe(true);

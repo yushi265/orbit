@@ -58,6 +58,8 @@ describe("Cycle settings UI", () => {
 
     expect(dom.window.document.querySelector('select[aria-label="Cycle期間"]')).not.toBeNull();
     expect(dom.window.document.querySelector('select[aria-label="Cycle開始曜日"]')).not.toBeNull();
+    expect(dom.window.document.querySelector('select[aria-label="CycleCooldown"]')).not.toBeNull();
+    expect(dom.window.document.querySelector('select[aria-label="将来Cycle数"]')).not.toBeNull();
     expect(dom.window.document.body.textContent).toContain("Asia/Tokyo");
     expect(dom.window.document.body.textContent).toContain("Cycle設定を保存");
     await act(async () => {
@@ -86,6 +88,12 @@ describe("Cycle settings UI", () => {
     const weekday = dom.window.document.querySelector(
       'select[aria-label="Cycle開始曜日"]',
     ) as HTMLSelectElement;
+    const cooldown = dom.window.document.querySelector(
+      'select[aria-label="CycleCooldown"]',
+    ) as HTMLSelectElement;
+    const futureCount = dom.window.document.querySelector(
+      'select[aria-label="将来Cycle数"]',
+    ) as HTMLSelectElement;
     await act(async () => {
       duration.value = "4";
       duration.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
@@ -95,12 +103,18 @@ describe("Cycle settings UI", () => {
       weekday.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     });
     await act(async () => {
+      cooldown.value = "2";
+      cooldown.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      futureCount.value = "7";
+      futureCount.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await act(async () => {
       (dom.window.document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(onCycleSettings).toHaveBeenCalledWith(
-      { durationWeeks: 4, startWeekday: 5 },
+      { durationWeeks: 4, startWeekday: 5, cooldownWeeks: 2, futureCount: 7 },
       expect.any(String),
     );
     await act(async () => {
@@ -130,14 +144,26 @@ describe("Cycle settings UI", () => {
     const duration = dom.window.document.querySelector(
       'select[aria-label="Cycle期間"]',
     ) as HTMLSelectElement;
+    const cooldown = dom.window.document.querySelector(
+      'select[aria-label="CycleCooldown"]',
+    ) as HTMLSelectElement;
+    const futureCount = dom.window.document.querySelector(
+      'select[aria-label="将来Cycle数"]',
+    ) as HTMLSelectElement;
     duration.value = "4";
     await act(async () => {
       duration.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      cooldown.value = "4";
+      cooldown.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      futureCount.value = "15";
+      futureCount.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
       (dom.window.document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(duration.value).toBe("4");
+    expect(cooldown.value).toBe("4");
+    expect(futureCount.value).toBe("15");
     expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
       "Cycle期間が不正です。",
     );
@@ -149,7 +175,7 @@ describe("Cycle settings UI", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(onCycleSettings).toHaveBeenLastCalledWith(
-      { durationWeeks: 4, startWeekday: 1 },
+      { durationWeeks: 4, startWeekday: 1, cooldownWeeks: 4, futureCount: 15 },
       expect.any(String),
     );
     await act(async () => {

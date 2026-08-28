@@ -27,4 +27,12 @@ describe("Cycle schedule helper", () => {
       "2024-03-18T04:00:00.000Z",
     );
   });
+
+  it("[状態遷移] CooldownはDST境界でも暦週として指定曜日の00:00へ加算する", () => {
+    const cycleEndBeforeDst = Date.parse("2024-03-04T05:00:00.000Z");
+
+    expect(
+      new Date(nextCycleStartAt(cycleEndBeforeDst, 1, "America/New_York", 1)).toISOString(),
+    ).toBe("2024-03-11T04:00:00.000Z");
+  });
 });

@@ -150,6 +150,71 @@ describe("Cycle workspace service", () => {
     });
   });
 
+  it("[状態遷移] 保存したCooldownをUpcomingの再計算へ適用し、保護対象を変更しない", () => {
+    const { store, cycle } = setup();
+    const past = {
+      ...cycle,
+      id: "cycle-past-cooldown",
+      number: 0,
+      status: "completed" as const,
+      startsAt: 1,
+      endsAt: 2,
+      completedAt: 2,
+    };
+    store.cycles.set(past.id, past);
+    const first = store.bootstrap("owner");
+    const upcoming = first.cycles
+      .filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    upcoming[1].scheduleOverridden = true;
+    upcoming[1].startsAt = 1_702_000_000_000;
+    upcoming[1].endsAt = 1_702_604_800_000;
+    const activeBefore = structuredClone(cycle);
+    const pastBefore = structuredClone(past);
+    const overrideBefore = structuredClone(upcoming[1]);
+
+    const updated = store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-cooldown",
+      durationWeeks: 2,
+      startWeekday: 1,
+      cooldownWeeks: 1,
+      futureCount: 3,
+    });
+
+    expect(updated).toMatchObject({ cooldownWeeks: 1, futureCount: 3 });
+    expect(store.cycles.get(cycle.id)).toEqual(activeBefore);
+    expect(store.cycles.get(past.id)).toEqual(pastBefore);
+    expect(store.cycles.get(upcoming[1].id)).toEqual(overrideBefore);
+    expect(store.cycles.get(upcoming[0].id)).toMatchObject({
+      startsAt: 1_701_615_600_000,
+      endsAt: 1_702_825_200_000,
+    });
+    expect(store.outbox.at(-1)?.payload).toMatchObject({
+      durationWeeks: 2,
+      startWeekday: 1,
+      cooldownWeeks: 1,
+      futureCount: 3,
+    });
+  });
+
+  it("[状態遷移] Cycle完了後に生成するUpcomingへ保存したCooldownを適用する", () => {
+    const { store, cycle } = setup();
+    store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-close-cooldown",
+      durationWeeks: 2,
+      startWeekday: 1,
+      cooldownWeeks: 1,
+      futureCount: 3,
+    });
+
+    store.closeCycle("owner", cycle.id, "cycle-close-cooldown");
+    const next = store.listCycles("owner").find((item) => item.number === 2)!;
+
+    expect(next).toMatchObject({ status: "upcoming", number: 2 });
+    expect(next.startsAt).toBe(1_701_615_600_000);
+    expect(next.endsAt).toBe(1_702_825_200_000);
+  });
+
   it("[代表値] Cycle 0件のBootstrapでActive Cycle 1とUpcomingを作成し、再実行で増やさない", () => {
     const store = new OrbitStore(() => 1_700_000_000_000);
 
@@ -199,6 +264,40 @@ describe("Cycle workspace service", () => {
     expect(
       store.bootstrap("owner").cycles.filter((cycle) => cycle.status === "upcoming"),
     ).toHaveLength(3);
+  });
+
+  it("[状態遷移] futureCount増加時は不足分だけ補充し、減少時も既存Upcomingを保持する", () => {
+    const { store, cycle } = setup();
+    const first = store.bootstrap("owner");
+    const existingCycles = first.cycles.map((item) => structuredClone(item));
+
+    store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-future-count-up",
+      durationWeeks: 2,
+      startWeekday: 1,
+      cooldownWeeks: 0,
+      futureCount: 6,
+    });
+    const expanded = store.bootstrap("owner");
+    const expandedUpcoming = expanded.cycles
+      .filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+
+    expect(expandedUpcoming).toHaveLength(6);
+    expect(expandedUpcoming.map((item) => item.number)).toEqual([2, 3, 4, 5, 6, 7]);
+    existingCycles.forEach((existing) => expect(store.cycles.get(existing.id)).toEqual(existing));
+
+    store.updateCycleSettings("owner", {
+      idempotencyKey: "cycle-settings-future-count-down",
+      durationWeeks: 2,
+      startWeekday: 1,
+      cooldownWeeks: 0,
+      futureCount: 1,
+    });
+    expect(
+      store.bootstrap("owner").cycles.filter((item) => item.status === "upcoming"),
+    ).toHaveLength(6);
+    expect(store.cycles.get(cycle.id)).toEqual(existingCycles[0]);
   });
 
   it("[状態遷移] Cycle metadataを更新し、同じKeyは再利用、異なるRequestは409にする", () => {

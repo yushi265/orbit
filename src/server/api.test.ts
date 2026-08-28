@@ -81,19 +81,33 @@ describe("HTTP service boundary", () => {
         idempotencyKey: "api-cycle-settings-1",
         durationWeeks: 4,
         startWeekday: 5,
+        cooldownWeeks: 2,
+        futureCount: 7,
       }),
     );
 
     expect(response.status).toBe(200);
     const responseBody = await body<{
-      cycleSettings: { durationWeeks: number; startWeekday: number };
+      cycleSettings: {
+        durationWeeks: number;
+        startWeekday: number;
+        cooldownWeeks: number;
+        futureCount: number;
+      };
     }>(response);
     expect(responseBody).toMatchObject({
-      cycleSettings: { durationWeeks: 4, startWeekday: 5 },
+      cycleSettings: { durationWeeks: 4, startWeekday: 5, cooldownWeeks: 2, futureCount: 7 },
     });
     const reloaded = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
     expect(
-      await body<{ cycleSettings: { durationWeeks: number; startWeekday: number } }>(reloaded),
+      await body<{
+        cycleSettings: {
+          durationWeeks: number;
+          startWeekday: number;
+          cooldownWeeks: number;
+          futureCount: number;
+        };
+      }>(reloaded),
     ).toMatchObject({
       cycleSettings: { durationWeeks: 4, startWeekday: 5 },
     });
@@ -103,6 +117,8 @@ describe("HTTP service boundary", () => {
         idempotencyKey: "api-cycle-settings-1",
         durationWeeks: 4,
         startWeekday: 5,
+        cooldownWeeks: 2,
+        futureCount: 7,
       }),
     );
     expect(await body(replay)).toEqual(responseBody);
@@ -111,6 +127,8 @@ describe("HTTP service boundary", () => {
         idempotencyKey: "api-cycle-settings-1",
         durationWeeks: 3,
         startWeekday: 5,
+        cooldownWeeks: 2,
+        futureCount: 7,
       }),
     );
     expect(conflict.status).toBe(409);
@@ -131,6 +149,26 @@ describe("HTTP service boundary", () => {
       }),
     );
     expect(invalidWeekday.status).toBe(400);
+    const invalidCooldown = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-invalid-cooldown",
+        durationWeeks: 4,
+        startWeekday: 5,
+        cooldownWeeks: 5,
+        futureCount: 7,
+      }),
+    );
+    expect(invalidCooldown.status).toBe(400);
+    const invalidFutureCount = await updateCycleSettings(
+      mutation("http://orbit.local/api/v1/cycle-settings", "PATCH", {
+        idempotencyKey: "api-cycle-settings-invalid-future-count",
+        durationWeeks: 4,
+        startWeekday: 5,
+        cooldownWeeks: 2,
+        futureCount: 16,
+      }),
+    );
+    expect(invalidFutureCount.status).toBe(400);
 
     getOrbitStore("dev-owner").startRun("dev-owner", {
       kind: "maintenance",
@@ -141,6 +179,8 @@ describe("HTTP service boundary", () => {
         idempotencyKey: "api-cycle-settings-locked",
         durationWeeks: 2,
         startWeekday: 1,
+        cooldownWeeks: 0,
+        futureCount: 3,
       }),
     );
     expect(locked.status).toBe(423);

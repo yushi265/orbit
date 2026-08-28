@@ -68,27 +68,42 @@ function assertDuration(durationWeeks: number): void {
     throw new RangeError("durationWeeks must be a positive integer");
 }
 
-export function nextCycleStartAt(anchor: number, startWeekday: number, timeZone: string): number {
+function assertCooldown(cooldownWeeks: number): void {
+  if (!Number.isInteger(cooldownWeeks) || cooldownWeeks < 0 || cooldownWeeks > 4)
+    throw new RangeError("cooldownWeeks must be an integer between 0 and 4");
+}
+
+export function nextCycleStartAt(
+  anchor: number,
+  startWeekday: number,
+  timeZone: string,
+  cooldownWeeks = 0,
+): number {
   assertWeekday(startWeekday);
+  assertCooldown(cooldownWeeks);
   const local = localDateTimeParts(anchor, timeZone);
-  const currentDate = Date.UTC(local.year, local.month - 1, local.day);
-  const currentWeekday = new Date(currentDate).getUTCDay();
+  const cooldownDate = new Date(
+    Date.UTC(local.year, local.month - 1, local.day + cooldownWeeks * 7),
+  );
+  const currentWeekday = cooldownDate.getUTCDay();
   let daysUntilStart = (startWeekday - currentWeekday + 7) % 7;
+  const candidateDate = new Date(cooldownDate);
+  candidateDate.setUTCDate(candidateDate.getUTCDate() + daysUntilStart);
   let candidate = localDateTimeToUtc(
-    local.year,
-    local.month,
-    local.day + daysUntilStart,
+    candidateDate.getUTCFullYear(),
+    candidateDate.getUTCMonth() + 1,
+    candidateDate.getUTCDate(),
     0,
     0,
     0,
     timeZone,
   );
   if (candidate < anchor) {
-    daysUntilStart += 7;
+    candidateDate.setUTCDate(candidateDate.getUTCDate() + 7);
     candidate = localDateTimeToUtc(
-      local.year,
-      local.month,
-      local.day + daysUntilStart,
+      candidateDate.getUTCFullYear(),
+      candidateDate.getUTCMonth() + 1,
+      candidateDate.getUTCDate(),
       0,
       0,
       0,

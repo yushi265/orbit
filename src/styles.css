@@ -150,6 +150,8 @@ kbd { padding: 2px 5px; border: 1px solid #e1e5eb; border-bottom-width: 2px; bor
 @media (max-width: 767px) { .cycle-settings-actions { align-items: stretch; flex-direction: column; }.cycle-settings-actions .button { width: 100%; }.cycle-settings-actions .setting-value { margin-right: auto; } }
 @media (max-width: 767px) { .completed-toggle { width: 100%; margin-top: 4px; } }
 @media (max-width: 767px) { .cycle-page-actions { width: 100%; flex-direction: column; align-items: stretch; }.cycle-page-actions .button { width: 100%; } }
+.cycle-schedule-editor { max-width: 700px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #edf0f3; }.cycle-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.cycle-schedule-fields .field-label { margin-top: 0; }.cycle-schedule-editor > .button { margin-top: 10px; }.cycle-schedule-editor .detail-live-error { margin-top: 10px; }
+@media (max-width: 767px) { .cycle-schedule-fields { grid-template-columns: minmax(0, 1fr); } }
 
 :root {
   --orbit-accent: #ff725e;

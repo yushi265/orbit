@@ -2,6 +2,21 @@ import { z } from "zod";
 import { mutationMetaSchema } from "./issues";
 import { boundedUnicodeString } from "./text";
 
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
+export const cycleDateSchema = z
+  .string()
+  .refine(isCalendarDate, "date must be a valid YYYY-MM-DD calendar date");
+
 export const cycleNameOverrideSchema = boundedUnicodeString(
   1,
   100,
@@ -50,10 +65,18 @@ export const cycleSettingsMutationSchema = z.strictObject({
   futureCount: cycleFutureCountSchema.optional(),
 });
 
+export const cycleScheduleMutationSchema = z.strictObject({
+  idempotencyKey: mutationMetaSchema.shape.idempotencyKey.max(200),
+  startDate: cycleDateSchema,
+  endDate: cycleDateSchema,
+});
+
 export type CycleMetadataMutation = z.infer<typeof cycleMetadataMutationSchema>;
 export type CycleStartMutation = z.infer<typeof cycleStartMutationSchema>;
 export type CycleSettingsMutation = z.infer<typeof cycleSettingsMutationSchema>;
+export type CycleScheduleMutation = z.infer<typeof cycleScheduleMutationSchema>;
 
 export const CycleMetadataMutationSchema = cycleMetadataMutationSchema;
 export const CycleStartMutationSchema = cycleStartMutationSchema;
 export const CycleSettingsMutationSchema = cycleSettingsMutationSchema;
+export const CycleScheduleMutationSchema = cycleScheduleMutationSchema;

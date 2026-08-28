@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { cycleMetadataMutationSchema, cycleSettingsMutationSchema } from "./contracts";
+import {
+  cycleMetadataMutationSchema,
+  cycleScheduleMutationSchema,
+  cycleSettingsMutationSchema,
+} from "./contracts";
 import { calculateCycleMetrics, cycleTabForStatus } from "./cycle-workspace";
 
 describe("Cycle workspace shared contract", () => {
@@ -93,6 +97,38 @@ describe("Cycle workspace shared contract", () => {
         cycleSettingsMutationSchema.safeParse({ ...base, cooldownWeeks: 1, futureCount }).success,
       ).toBe(false);
     }
+  });
+
+  it("[境界値] Cycle scheduleはYYYY-MM-DDだけを受け入れ、未知フィールドを拒否する", () => {
+    const base = {
+      idempotencyKey: "cycle-schedule-contract-1",
+      startDate: "2026-01-01",
+      endDate: "2026-01-08",
+    };
+
+    expect(cycleScheduleMutationSchema.safeParse(base).success).toBe(true);
+    expect(
+      cycleScheduleMutationSchema.safeParse({
+        ...base,
+        startDate: "2026-12-31",
+        endDate: "2027-01-01",
+      }).success,
+    ).toBe(true);
+    for (const [startDate, endDate] of [
+      ["2026-1-1", "2026-01-08"],
+      ["2026-02-30", "2026-03-01"],
+      ["2026-01-01", "2026-1-8"],
+    ]) {
+      expect(cycleScheduleMutationSchema.safeParse({ ...base, startDate, endDate }).success).toBe(
+        false,
+      );
+    }
+    for (const field of ["scheduleOverridden", "startsAt", "lock_token"]) {
+      expect(cycleScheduleMutationSchema.safeParse({ ...base, [field]: true }).success).toBe(false);
+    }
+    expect(
+      cycleScheduleMutationSchema.safeParse({ ...base, idempotencyKey: "a".repeat(201) }).success,
+    ).toBe(false);
   });
 
   it("[デシジョンテーブル] CycleSettingsはunknown keyと不正idempotencyKeyを拒否する", () => {

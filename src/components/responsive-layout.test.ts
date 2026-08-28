@@ -41,4 +41,16 @@ describe("responsive issue layout contract", () => {
       ".detail-actions .button { padding: 0 6px; font-size: 10px; white-space: nowrap; }",
     );
   });
+
+  it("[境界値] Cycle日付編集はmobileで1列へ縮退し固定幅を持たない", () => {
+    expect(styles).toContain(
+      ".cycle-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));",
+    );
+    expect(styles).toContain(
+      "@media (max-width: 767px) { .cycle-schedule-fields { grid-template-columns: minmax(0, 1fr); } }",
+    );
+    expect(orbitApp).toContain('type="date"');
+    expect(orbitApp).toContain('aria-label="Cycle開始日"');
+    expect(orbitApp).toContain('aria-label="Cycle終了日"');
+  });
 });

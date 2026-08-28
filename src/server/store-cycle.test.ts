@@ -215,6 +215,148 @@ describe("Cycle workspace service", () => {
     expect(next.endsAt).toBe(1_702_825_200_000);
   });
 
+  it("[状態遷移] Upcomingの日付調整はoverride化し、後続automaticだけを再計算する", () => {
+    const { store, cycle } = setup();
+    const past = {
+      ...cycle,
+      id: "cycle-past-schedule",
+      number: 0,
+      status: "completed" as const,
+      startsAt: 1,
+      endsAt: 2,
+      completedAt: 2,
+    };
+    store.cycles.set(past.id, past);
+    const first = store.bootstrap("owner");
+    const upcoming = first.cycles
+      .filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    const overridden = upcoming[2];
+    overridden.scheduleOverridden = true;
+    overridden.startsAt = 1_705_363_200_000;
+    overridden.endsAt = 1_706_572_800_000;
+    const activeBefore = structuredClone(cycle);
+    const pastBefore = structuredClone(past);
+    const overriddenBefore = structuredClone(overridden);
+
+    const updated = store.updateCycleSchedule("owner", upcoming[0].id, {
+      idempotencyKey: "cycle-schedule-update-1",
+      startDate: "2023-12-04",
+      endDate: "2023-12-18",
+    });
+
+    expect(updated).toMatchObject({
+      id: upcoming[0].id,
+      startsAt: 1_701_615_600_000,
+      endsAt: 1_702_825_200_000,
+      scheduleOverridden: true,
+    });
+    expect(store.cycles.get(cycle.id)).toEqual(activeBefore);
+    expect(store.cycles.get(past.id)).toEqual(pastBefore);
+    expect(store.cycles.get(overridden.id)).toEqual(overriddenBefore);
+    expect(store.cycles.get(upcoming[1].id)).toMatchObject({
+      startsAt: 1_702_825_200_000,
+      endsAt: 1_704_034_800_000,
+      scheduleOverridden: false,
+    });
+  });
+
+  it("[デシジョンテーブル] Cycle日付調整は不正期間・重複・状態・lockを副作用なしで拒否する", () => {
+    const { store } = setup();
+    const upcoming = store
+      .bootstrap("owner")
+      .cycles.filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number)[0];
+    const valid = {
+      idempotencyKey: "cycle-schedule-boundary-valid",
+      startDate: "2023-12-04",
+      endDate: "2023-12-18",
+    };
+
+    for (const [key, patch] of [
+      ["same-day", { startDate: "2023-12-04", endDate: "2023-12-04" }],
+      ["reversed", { startDate: "2023-12-18", endDate: "2023-12-04" }],
+      ["overlap-active", { startDate: "2023-11-20", endDate: "2023-12-04" }],
+    ] as const) {
+      const before = store.toSnapshot();
+      expect(() =>
+        store.updateCycleSchedule("owner", upcoming.id, {
+          idempotencyKey: `cycle-schedule-boundary-${key}`,
+          ...patch,
+        }),
+      ).toThrowError(expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }));
+      expect(store.toSnapshot()).toEqual(before);
+    }
+
+    const overlapStore = setup().store;
+    const overlapCycles = overlapStore
+      .bootstrap("owner")
+      .cycles.filter((item) => item.status === "upcoming")
+      .sort((left, right) => left.number - right.number);
+    overlapCycles[1].scheduleOverridden = true;
+    overlapCycles[1].startsAt = 1_702_306_800_000;
+    overlapCycles[1].endsAt = 1_703_516_400_000;
+    const beforeFollowingOverlap = overlapStore.toSnapshot();
+    expect(() =>
+      overlapStore.updateCycleSchedule("owner", overlapCycles[0].id, {
+        idempotencyKey: "cycle-schedule-following-overlap",
+        startDate: "2023-12-04",
+        endDate: "2023-12-18",
+      }),
+    ).toThrowError(expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }));
+    expect(overlapStore.toSnapshot()).toEqual(beforeFollowingOverlap);
+
+    const active = store.cycles.get("cycle-active")!;
+    const beforeActive = store.toSnapshot();
+    expect(() => store.updateCycleSchedule("owner", active.id, valid)).toThrowError(
+      expect.objectContaining({ code: "VALIDATION_ERROR", status: 400 }),
+    );
+    expect(store.toSnapshot()).toEqual(beforeActive);
+
+    store.ensureOwner("other-owner", "other@example.com");
+    const beforeOwnerBoundary = store.toSnapshot();
+    expect(() => store.updateCycleSchedule("other-owner", upcoming.id, valid)).toThrowError(
+      expect.objectContaining({ code: "RESOURCE_NOT_FOUND", status: 404 }),
+    );
+    expect(store.toSnapshot()).toEqual(beforeOwnerBoundary);
+
+    const updated = store.updateCycleSchedule("owner", upcoming.id, valid);
+    const afterUpdate = store.toSnapshot();
+    expect(store.updateCycleSchedule("owner", upcoming.id, valid)).toEqual(updated);
+    expect(store.toSnapshot()).toEqual(afterUpdate);
+    expect(() =>
+      store.updateCycleSchedule("owner", upcoming.id, {
+        ...valid,
+        startDate: "2023-12-11",
+      }),
+    ).toThrowError(expect.objectContaining({ code: "IDEMPOTENCY_KEY_REUSED", status: 409 }));
+
+    const locked = setup().store;
+    const lockedUpcoming = locked
+      .bootstrap("owner")
+      .cycles.filter((item) => item.status === "upcoming")[0];
+    const beforeLocked = locked.toSnapshot();
+    const beforeLockedSideEffects = {
+      activities: locked.activities.length,
+      outbox: locked.outbox.length,
+      receipts: locked.receipts.size,
+    };
+    locked.startRun("owner", { kind: "maintenance", idempotencyKey: "cycle-schedule-lock" });
+    expect(() =>
+      locked.updateCycleSchedule("owner", lockedUpcoming.id, {
+        ...valid,
+        idempotencyKey: "cycle-schedule-locked",
+      }),
+    ).toThrowError(expect.objectContaining({ code: "OPERATION_IN_PROGRESS", status: 423 }));
+    expect(locked.toSnapshot()).toMatchObject({
+      cycles: beforeLocked.cycles,
+      cycleSettings: beforeLocked.cycleSettings,
+    });
+    expect(locked.activities).toHaveLength(beforeLockedSideEffects.activities);
+    expect(locked.outbox).toHaveLength(beforeLockedSideEffects.outbox);
+    expect(locked.receipts.size).toBe(beforeLockedSideEffects.receipts);
+  });
+
   it("[代表値] Cycle 0件のBootstrapでActive Cycle 1とUpcomingを作成し、再実行で増やさない", () => {
     const store = new OrbitStore(() => 1_700_000_000_000);
 

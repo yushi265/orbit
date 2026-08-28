@@ -49,6 +49,7 @@ import { Route as ApiV1WorkflowStatesIndexRouteImport } from './routes/api/v1/wo
 import { Route as ApiV1WorkflowStatesWorkflowStateIdRouteImport } from './routes/api/v1/workflow-states/$workflowStateId'
 import { Route as ApiV1BackgroundRunsRunIdContinueRouteImport } from './routes/api/v1/background-runs/$runId/continue'
 import { Route as ApiV1BackgroundRunsRunIdResumeRouteImport } from './routes/api/v1/background-runs/$runId/resume'
+import { Route as ApiV1CyclesCycleIdScheduleRouteImport } from './routes/api/v1/cycles/$cycleId/schedule'
 import { Route as ApiV1CyclesCycleIdStartRouteImport } from './routes/api/v1/cycles/$cycleId/start'
 import { Route as ApiV1IssuesIssueIdNotesRouteImport } from './routes/api/v1/issues/$issueId/notes'
 import { Route as ApiV1IssuesIssueIdRelationsRouteImport } from './routes/api/v1/issues/$issueId/relations'
@@ -263,6 +264,12 @@ const ApiV1BackgroundRunsRunIdResumeRoute =
     path: '/resume',
     getParentRoute: () => ApiV1BackgroundRunsRunIdRoute,
   } as any)
+const ApiV1CyclesCycleIdScheduleRoute =
+  ApiV1CyclesCycleIdScheduleRouteImport.update({
+    id: '/schedule',
+    path: '/schedule',
+    getParentRoute: () => ApiV1CyclesCycleIdRoute,
+  } as any)
 const ApiV1CyclesCycleIdStartRoute = ApiV1CyclesCycleIdStartRouteImport.update({
   id: '/start',
   path: '/start',
@@ -333,6 +340,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/workflow-states/': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/cycles/$cycleId/schedule': typeof ApiV1CyclesCycleIdScheduleRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
   '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
   '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
@@ -380,6 +388,7 @@ export interface FileRoutesByTo {
   '/api/v1/workflow-states': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/cycles/$cycleId/schedule': typeof ApiV1CyclesCycleIdScheduleRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
   '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
   '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
@@ -428,6 +437,7 @@ export interface FileRoutesById {
   '/api/v1/workflow-states/': typeof ApiV1WorkflowStatesIndexRoute
   '/api/v1/background-runs/$runId/continue': typeof ApiV1BackgroundRunsRunIdContinueRoute
   '/api/v1/background-runs/$runId/resume': typeof ApiV1BackgroundRunsRunIdResumeRoute
+  '/api/v1/cycles/$cycleId/schedule': typeof ApiV1CyclesCycleIdScheduleRoute
   '/api/v1/cycles/$cycleId/start': typeof ApiV1CyclesCycleIdStartRoute
   '/api/v1/issues/$issueId/notes': typeof ApiV1IssuesIssueIdNotesRouteWithChildren
   '/api/v1/issues/$issueId/relations': typeof ApiV1IssuesIssueIdRelationsRouteWithChildren
@@ -477,6 +487,7 @@ export interface FileRouteTypes {
     | '/api/v1/workflow-states/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/cycles/$cycleId/schedule'
     | '/api/v1/cycles/$cycleId/start'
     | '/api/v1/issues/$issueId/notes'
     | '/api/v1/issues/$issueId/relations'
@@ -524,6 +535,7 @@ export interface FileRouteTypes {
     | '/api/v1/workflow-states'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/cycles/$cycleId/schedule'
     | '/api/v1/cycles/$cycleId/start'
     | '/api/v1/issues/$issueId/notes'
     | '/api/v1/issues/$issueId/relations'
@@ -571,6 +583,7 @@ export interface FileRouteTypes {
     | '/api/v1/workflow-states/'
     | '/api/v1/background-runs/$runId/continue'
     | '/api/v1/background-runs/$runId/resume'
+    | '/api/v1/cycles/$cycleId/schedule'
     | '/api/v1/cycles/$cycleId/start'
     | '/api/v1/issues/$issueId/notes'
     | '/api/v1/issues/$issueId/relations'
@@ -901,6 +914,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1BackgroundRunsRunIdResumeRouteImport
       parentRoute: typeof ApiV1BackgroundRunsRunIdRoute
     }
+    '/api/v1/cycles/$cycleId/schedule': {
+      id: '/api/v1/cycles/$cycleId/schedule'
+      path: '/schedule'
+      fullPath: '/api/v1/cycles/$cycleId/schedule'
+      preLoaderRoute: typeof ApiV1CyclesCycleIdScheduleRouteImport
+      parentRoute: typeof ApiV1CyclesCycleIdRoute
+    }
     '/api/v1/cycles/$cycleId/start': {
       id: '/api/v1/cycles/$cycleId/start'
       path: '/start'
@@ -957,10 +977,12 @@ const ApiV1BackgroundRunsRunIdRouteWithChildren =
   )
 
 interface ApiV1CyclesCycleIdRouteChildren {
+  ApiV1CyclesCycleIdScheduleRoute: typeof ApiV1CyclesCycleIdScheduleRoute
   ApiV1CyclesCycleIdStartRoute: typeof ApiV1CyclesCycleIdStartRoute
 }
 
 const ApiV1CyclesCycleIdRouteChildren: ApiV1CyclesCycleIdRouteChildren = {
+  ApiV1CyclesCycleIdScheduleRoute: ApiV1CyclesCycleIdScheduleRoute,
   ApiV1CyclesCycleIdStartRoute: ApiV1CyclesCycleIdStartRoute,
 }
 

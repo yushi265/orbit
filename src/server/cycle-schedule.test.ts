@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cycleEndAt, nextCycleStartAt } from "./cycle-schedule";
+import { cycleEndAt, localDateAtMidnight, nextCycleStartAt } from "./cycle-schedule";
 
 describe("Cycle schedule helper", () => {
   it("[代表値] UTCの指定曜日00:00以降へ開始日を揃え、期間を暦週で加算する", () => {
@@ -34,5 +34,32 @@ describe("Cycle schedule helper", () => {
     expect(
       new Date(nextCycleStartAt(cycleEndBeforeDst, 1, "America/New_York", 1)).toISOString(),
     ).toBe("2024-03-11T04:00:00.000Z");
+  });
+
+  it("[代表値] YYYY-MM-DDを指定Timezoneの00:00へ変換する", () => {
+    expect(new Date(localDateAtMidnight("2026-01-01", "Asia/Tokyo")).toISOString()).toBe(
+      "2025-12-31T15:00:00.000Z",
+    );
+    expect(new Date(localDateAtMidnight("2024-07-01", "America/New_York")).toISOString()).toBe(
+      "2024-07-01T04:00:00.000Z",
+    );
+    expect(new Date(localDateAtMidnight("2024-03-11", "America/New_York")).toISOString()).toBe(
+      "2024-03-11T04:00:00.000Z",
+    );
+  });
+
+  it("[境界値] 存在しない日付はlocal midnightへ変換しない", () => {
+    expect(() => localDateAtMidnight("2026-02-30", "UTC")).toThrow(RangeError);
+    expect(() => localDateAtMidnight("2026-1-1", "UTC")).toThrow(RangeError);
+  });
+
+  it("[境界値] 0001年の日付を別の年へずらさず変換する", () => {
+    expect(new Date(localDateAtMidnight("0001-01-01", "UTC")).toISOString()).toBe(
+      "0001-01-01T00:00:00.000Z",
+    );
+  });
+
+  it("[境界値] DSTで存在しないTimezoneの00:00は拒否する", () => {
+    expect(() => localDateAtMidnight("2018-11-04", "America/Sao_Paulo")).toThrow(RangeError);
   });
 });

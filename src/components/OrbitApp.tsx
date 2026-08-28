@@ -66,6 +66,7 @@ type CycleSettingsPatch = Pick<
   BootstrapPayload["cycleSettings"],
   "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount"
 >;
+type CycleSchedulePatch = { startDate: string; endDate: string };
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
 type IssueReorderVariables = {
@@ -162,6 +163,23 @@ function formatDateTime(value: number, timeZone?: string): string {
     hourCycle: "h23",
     timeZone,
   }).format(new Date(value));
+}
+
+function dateInputValueInTimeZone(value: number, timeZone?: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      calendar: "gregory",
+      numberingSystem: "latn",
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(new Date(value))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function dateInputToUnix(value: string): number | null {
@@ -2482,6 +2500,19 @@ export function CyclesView({
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [scheduleEditing, setScheduleEditing] = useState(false);
+  const [startDateDraft, setStartDateDraft] = useState("");
+  const [endDateDraft, setEndDateDraft] = useState("");
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleFieldErrors, setScheduleFieldErrors] = useState<Record<string, string[]> | null>(
+    null,
+  );
+  const [scheduleRetry, setScheduleRetry] = useState<(() => void) | null>(null);
+  const scheduleMutationKeyRef = useRef<{
+    key: string;
+    patch: CycleSchedulePatch;
+  } | null>(null);
   const [assignmentTargetId, setAssignmentTargetId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2513,22 +2544,37 @@ export function CyclesView({
     setSelectedCycleId(routeCycle.id);
   }, [cycleId, cycles]);
 
+  useEffect(() => setScheduleEditing(false), [cycleId]);
+
   useEffect(() => {
     if (!selectedCycle) {
       setSelectedCycleId(tabCycles[0]?.id ?? null);
       return;
     }
     setSelectedCycleId((current) => (current === selectedCycle.id ? current : selectedCycle.id));
+    if (scheduleEditing) return;
     setNameDraft(selectedCycle.nameOverride ?? selectedCycle.name);
     setDescriptionDraft(selectedCycle.description);
+    setStartDateDraft(dateInputValueInTimeZone(selectedCycle.startsAt, timezone));
+    setEndDateDraft(dateInputValueInTimeZone(selectedCycle.endsAt, timezone));
     setAssignmentTargetId("");
     setEditing(false);
+    setScheduleEditing(false);
     setError(null);
+    setScheduleError(null);
+    setScheduleFieldErrors(null);
+    setScheduleRetry(null);
+    scheduleMutationKeyRef.current = null;
   }, [
+    scheduleEditing,
     selectedCycle?.id,
     selectedCycle?.name,
     selectedCycle?.nameOverride,
     selectedCycle?.description,
+    selectedCycle?.startsAt,
+    selectedCycle?.endsAt,
+    selectedCycle?.status,
+    timezone,
   ]);
 
   if (cycleId && !routeCycle) {
@@ -2552,10 +2598,29 @@ export function CyclesView({
     setError(null);
   }
 
+  function cancelScheduleEdit() {
+    if (selectedCycle) {
+      setStartDateDraft(dateInputValueInTimeZone(selectedCycle.startsAt, timezone));
+      setEndDateDraft(dateInputValueInTimeZone(selectedCycle.endsAt, timezone));
+    }
+    setScheduleEditing(false);
+    setScheduleError(null);
+    setScheduleFieldErrors(null);
+    setScheduleRetry(null);
+    scheduleMutationKeyRef.current = null;
+  }
+
   function handleMetadataKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       cancelMetadataEdit();
+    }
+  }
+
+  function handleScheduleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelScheduleEdit();
     }
   }
 
@@ -2582,6 +2647,52 @@ export function CyclesView({
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveSchedule(retryPatch?: CycleSchedulePatch): Promise<void> {
+    if (!selectedCycle || selectedCycle.status !== "upcoming" || scheduleSaving) return;
+    const patch: CycleSchedulePatch = retryPatch ?? {
+      startDate: startDateDraft,
+      endDate: endDateDraft,
+    };
+    setScheduleSaving(true);
+    setScheduleError(null);
+    setScheduleFieldErrors(null);
+    const previous = scheduleMutationKeyRef.current;
+    const mutationKey =
+      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
+        ? previous.key
+        : idempotencyKey();
+    try {
+      await apiPatch(`/api/v1/cycles/${selectedCycle.id}/schedule`, {
+        idempotencyKey: mutationKey,
+        ...patch,
+      });
+      scheduleMutationKeyRef.current = null;
+      setScheduleRetry(null);
+      setScheduleEditing(false);
+      await onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        scheduleMutationKeyRef.current = null;
+        try {
+          await onRefresh();
+        } catch {
+          // Keep the conflict message visible when refresh itself fails.
+        }
+      } else if (caught instanceof ApiError && caught.status === 423) {
+        scheduleMutationKeyRef.current = { key: mutationKey, patch };
+      } else {
+        scheduleMutationKeyRef.current = null;
+      }
+      setScheduleError(
+        caught instanceof ApiError ? caught.message : "Cycle日付の保存に失敗しました。",
+      );
+      setScheduleFieldErrors(caught instanceof ApiError ? (caught.fieldErrors ?? null) : null);
+      setScheduleRetry(() => () => void saveSchedule(patch));
+    } finally {
+      setScheduleSaving(false);
     }
   }
 
@@ -2661,7 +2772,7 @@ export function CyclesView({
           <button
             className={tab === value ? "selected" : ""}
             aria-selected={tab === value}
-            disabled={closeBusy || startBusy}
+            disabled={closeBusy || startBusy || scheduleEditing}
             key={value}
             onClick={() => setTab(value)}
           >
@@ -2694,6 +2805,17 @@ export function CyclesView({
             </div>
             <div className="cycle-head-actions">
               <span className="large-orbit">◒</span>
+              {selectedCycle.status === "upcoming" && (
+                <button
+                  className="button ghost"
+                  onClick={() =>
+                    scheduleEditing ? cancelScheduleEdit() : setScheduleEditing(true)
+                  }
+                  disabled={scheduleSaving || closeBusy || startBusy}
+                >
+                  {scheduleEditing ? "日付編集を取消" : "日付を調整"}
+                </button>
+              )}
               <button
                 className="button ghost"
                 onClick={() => (editing ? cancelMetadataEdit() : setEditing(true))}
@@ -2722,6 +2844,81 @@ export function CyclesView({
               >
                 {saving ? "保存中…" : "Cycleを保存"}
               </button>
+            </div>
+          )}
+          {scheduleEditing && selectedCycle.status === "upcoming" && (
+            <div className="cycle-schedule-editor" onKeyDown={handleScheduleKeyDown}>
+              <div className="cycle-schedule-fields">
+                <div>
+                  <label className="field-label" htmlFor="cycle-start-date">
+                    開始日
+                  </label>
+                  <input
+                    id="cycle-start-date"
+                    className="text-input"
+                    type="date"
+                    aria-label="Cycle開始日"
+                    aria-invalid={Boolean(scheduleFieldErrors?.startDate)}
+                    aria-describedby={
+                      scheduleFieldErrors?.startDate ? "cycle-start-date-error" : undefined
+                    }
+                    value={startDateDraft}
+                    disabled={scheduleSaving}
+                    onChange={(event) => setStartDateDraft(event.target.value)}
+                    onInput={(event) => setStartDateDraft(event.currentTarget.value)}
+                  />
+                  {scheduleFieldErrors?.startDate && (
+                    <span id="cycle-start-date-error" className="setting-field-error" role="alert">
+                      {scheduleFieldErrors.startDate.join(" ")}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="cycle-end-date">
+                    終了日
+                  </label>
+                  <input
+                    id="cycle-end-date"
+                    className="text-input"
+                    type="date"
+                    aria-label="Cycle終了日"
+                    aria-invalid={Boolean(scheduleFieldErrors?.endDate)}
+                    aria-describedby={
+                      scheduleFieldErrors?.endDate ? "cycle-end-date-error" : undefined
+                    }
+                    value={endDateDraft}
+                    disabled={scheduleSaving}
+                    onChange={(event) => setEndDateDraft(event.target.value)}
+                    onInput={(event) => setEndDateDraft(event.currentTarget.value)}
+                  />
+                  {scheduleFieldErrors?.endDate && (
+                    <span id="cycle-end-date-error" className="setting-field-error" role="alert">
+                      {scheduleFieldErrors.endDate.join(" ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                className="button primary"
+                onClick={() => void saveSchedule()}
+                disabled={scheduleSaving}
+              >
+                {scheduleSaving ? "保存中…" : "日付を保存"}
+              </button>
+              {scheduleError && (
+                <div className="detail-live-error" role="alert">
+                  {scheduleError}
+                  {scheduleRetry && (
+                    <button
+                      className="text-button"
+                      onClick={scheduleRetry}
+                      disabled={scheduleSaving}
+                    >
+                      再試行
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {!editing && selectedCycle.description && (
@@ -2844,7 +3041,7 @@ export function CyclesView({
           <button
             className={`timeline-row cycle-row-button ${selectedCycleId === cycle.id ? "selected" : ""}`}
             key={cycle.id}
-            disabled={closeBusy}
+            disabled={closeBusy || scheduleEditing}
             onClick={() => {
               setTab(cycleTabForStatus(cycle.status));
               setSelectedCycleId(cycle.id);

@@ -1,3 +1,5 @@
+import { cycleDateSchema } from "../shared/contracts";
+
 type LocalDateTimeParts = {
   year: number;
   month: number;
@@ -36,7 +38,17 @@ function localDateTimeParts(timestamp: number, timeZone: string): LocalDateTimeP
 }
 
 function utcPartsTimestamp(parts: LocalDateTimeParts): number {
-  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  const date = new Date(0);
+  date.setUTCFullYear(parts.year, parts.month - 1, parts.day);
+  date.setUTCHours(parts.hour, parts.minute, parts.second, 0);
+  return date.getTime();
+}
+
+function utcDateAtMidnight(year: number, month: number, day: number): Date {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
 }
 
 function localDateTimeToUtc(
@@ -48,13 +60,27 @@ function localDateTimeToUtc(
   second: number,
   timeZone: string,
 ): number {
-  const localTimestamp = Date.UTC(year, month - 1, day, hour, minute, second);
+  const localDate = utcDateAtMidnight(year, month, day);
+  const normalizedYear = localDate.getUTCFullYear();
+  const normalizedMonth = localDate.getUTCMonth() + 1;
+  const normalizedDay = localDate.getUTCDate();
+  const localTimestamp = localDate.setUTCHours(hour, minute, second, 0);
   let candidate = localTimestamp;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const actual = utcPartsTimestamp(localDateTimeParts(candidate, timeZone));
     const candidateWithoutMilliseconds = Math.floor(candidate / SECOND) * SECOND;
     candidate = localTimestamp - (actual - candidateWithoutMilliseconds);
   }
+  const resolved = localDateTimeParts(candidate, timeZone);
+  if (
+    resolved.year !== normalizedYear ||
+    resolved.month !== normalizedMonth ||
+    resolved.day !== normalizedDay ||
+    resolved.hour !== hour ||
+    resolved.minute !== minute ||
+    resolved.second !== second
+  )
+    throw new RangeError("local date/time does not exist in the requested timezone");
   return candidate;
 }
 
@@ -73,6 +99,13 @@ function assertCooldown(cooldownWeeks: number): void {
     throw new RangeError("cooldownWeeks must be an integer between 0 and 4");
 }
 
+export function localDateAtMidnight(date: string, timeZone: string): number {
+  if (!cycleDateSchema.safeParse(date).success)
+    throw new RangeError("date must be a valid YYYY-MM-DD calendar date");
+  const [year, month, day] = date.split("-").map(Number);
+  return localDateTimeToUtc(year, month, day, 0, 0, 0, timeZone);
+}
+
 export function nextCycleStartAt(
   anchor: number,
   startWeekday: number,
@@ -82,9 +115,7 @@ export function nextCycleStartAt(
   assertWeekday(startWeekday);
   assertCooldown(cooldownWeeks);
   const local = localDateTimeParts(anchor, timeZone);
-  const cooldownDate = new Date(
-    Date.UTC(local.year, local.month - 1, local.day + cooldownWeeks * 7),
-  );
+  const cooldownDate = utcDateAtMidnight(local.year, local.month, local.day + cooldownWeeks * 7);
   const currentWeekday = cooldownDate.getUTCDay();
   let daysUntilStart = (startWeekday - currentWeekday + 7) % 7;
   const candidateDate = new Date(cooldownDate);

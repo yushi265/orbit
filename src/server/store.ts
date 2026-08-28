@@ -40,6 +40,7 @@ import {
   labelNameSchema,
   type BulkIssueMutation,
   type CycleMetadataMutation,
+  type CycleScheduleMutation,
   type CycleSettingsMutation,
   type LabelMutation,
   type LabelUpdate,
@@ -55,7 +56,7 @@ import {
   workflowStateNameSchema,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
-import { cycleEndAt, nextCycleStartAt } from "./cycle-schedule";
+import { cycleEndAt, localDateAtMidnight, nextCycleStartAt } from "./cycle-schedule";
 
 export type OrbitStoreLock = {
   userId: string;
@@ -146,6 +147,7 @@ export interface RelationMutationInput {
   type: IssueRelationType;
 }
 export type UpdateCycleMetadataInput = CycleMetadataMutation;
+export type UpdateCycleScheduleInput = CycleScheduleMutation;
 export type UpdateCycleSettingsInput = CycleSettingsMutation;
 
 export interface CreateProjectInput {
@@ -2267,6 +2269,111 @@ export class OrbitStore {
       cursor = endsAt;
     }
     return updates;
+  }
+
+  updateCycleSchedule(userId: string, cycleId: string, input: UpdateCycleScheduleInput): Cycle {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const request = { cycleId, ...input };
+    const existing = this.checkReceipt<Cycle>(
+      userId,
+      "cycle.schedule.update",
+      input.idempotencyKey,
+      request,
+    );
+    if (existing) return existing;
+    const cycle = this.cycles.get(cycleId);
+    if (!cycle || cycle.userId !== userId) throw notFound();
+    if (cycle.status !== "upcoming")
+      throw validationError({ cycleId: ["日付を調整できるのはUpcoming Cycleだけです。"] });
+    const timezone = this.preferences.get(userId)?.timezone;
+    if (!timezone || !isValidTimeZone(timezone))
+      throw validationError({ timezone: ["IANA timezoneを指定してください。"] });
+
+    let startsAt: number;
+    let endsAt: number;
+    try {
+      startsAt = localDateAtMidnight(input.startDate, timezone);
+    } catch {
+      throw validationError({ startDate: ["開始日は有効なYYYY-MM-DDで指定してください。"] });
+    }
+    try {
+      endsAt = localDateAtMidnight(input.endDate, timezone);
+    } catch {
+      throw validationError({ endDate: ["終了日は有効なYYYY-MM-DDで指定してください。"] });
+    }
+    if (endsAt <= startsAt)
+      throw validationError({ endDate: ["終了日は開始日より後にしてください。"] });
+
+    const previousCycles = this.listCycles(userId).filter(
+      (item) => item.id !== cycle.id && item.number < cycle.number,
+    );
+    if (previousCycles.some((item) => item.startsAt < endsAt && startsAt < item.endsAt))
+      throw validationError({ startDate: ["他のCycleと期間が重複しています。"] });
+
+    const settings = this.cycleSettings.get(userId);
+    if (!settings) throw notFound();
+    const following = this.listCycles(userId)
+      .filter((item) => item.status === "upcoming" && item.number > cycle.number)
+      .sort((left, right) => left.number - right.number);
+    const updates: Array<{ cycle: Cycle; startsAt: number; endsAt: number }> = [];
+    let cursor = endsAt;
+    for (const future of following) {
+      if (future.scheduleOverridden) {
+        if (future.startsAt < cursor)
+          throw validationError({ endDate: ["後続の個別調整済みCycleと期間が重複しています。"] });
+        cursor = Math.max(cursor, future.endsAt);
+        continue;
+      }
+      const nextStartsAt = nextCycleStartAt(
+        cursor,
+        settings.startWeekday,
+        timezone,
+        settings.cooldownWeeks,
+      );
+      const nextEndsAt = cycleEndAt(nextStartsAt, settings.durationWeeks, timezone);
+      updates.push({ cycle: future, startsAt: nextStartsAt, endsAt: nextEndsAt });
+      cursor = nextEndsAt;
+    }
+
+    const before = {
+      startsAt: cycle.startsAt,
+      endsAt: cycle.endsAt,
+      scheduleOverridden: cycle.scheduleOverridden,
+    };
+    cycle.startsAt = startsAt;
+    cycle.endsAt = endsAt;
+    cycle.scheduleOverridden = true;
+    updates.forEach((update) => {
+      update.cycle.startsAt = update.startsAt;
+      update.cycle.endsAt = update.endsAt;
+    });
+    this.recordActivity(
+      userId,
+      "cycle",
+      cycle.id,
+      "schedule_updated",
+      input.idempotencyKey,
+      before,
+      {
+        startsAt: cycle.startsAt,
+        endsAt: cycle.endsAt,
+        scheduleOverridden: cycle.scheduleOverridden,
+      },
+    );
+    this.recordOutbox(
+      userId,
+      "cycle.schedule.updated",
+      `cycle.schedule.updated:${cycle.id}:${input.idempotencyKey}`,
+      {
+        cycleId: cycle.id,
+        startsAt: cycle.startsAt,
+        endsAt: cycle.endsAt,
+        scheduleOverridden: cycle.scheduleOverridden,
+      },
+    );
+    this.recordReceipt(userId, "cycle.schedule.update", input.idempotencyKey, request, cycle);
+    return cycle;
   }
 
   updateCycleMetadata(userId: string, cycleId: string, input: UpdateCycleMetadataInput): Cycle {

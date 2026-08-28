@@ -73,6 +73,34 @@ describe("store session", () => {
     });
   });
 
+  it("[状態遷移] productionのCycle日付調整をSnapshotへ保存し、次回Sessionで再読込できる", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV: "production", DB: database };
+    const first = await openStoreSession("owner-cycle-schedule", "owner@example.com", environment);
+    const target = first.store
+      .bootstrap("owner-cycle-schedule")
+      .cycles.find((cycle) => cycle.status === "upcoming")!;
+
+    const updated = first.store.updateCycleSchedule("owner-cycle-schedule", target.id, {
+      idempotencyKey: "production-cycle-schedule",
+      startDate: "2030-01-07",
+      endDate: "2030-01-21",
+    });
+    expect(updated).toMatchObject({
+      startsAt: 1_893_942_000_000,
+      endsAt: 1_895_151_600_000,
+      scheduleOverridden: true,
+    });
+    await first.persist();
+
+    const second = await openStoreSession("owner-cycle-schedule", "owner@example.com", environment);
+    expect(second.store.cycles.get(target.id)).toMatchObject({
+      startsAt: 1_893_942_000_000,
+      endsAt: 1_895_151_600_000,
+      scheduleOverridden: true,
+    });
+  });
+
   it("[状態遷移] productionの空Snapshotを初回GETでActiveとUpcomingへ初期化し、再読込できる", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const environment = { APP_ENV: "production", DB: database };

@@ -16,6 +16,7 @@ import {
   startBackgroundRun,
   startCycle,
   updateCycleMetadata,
+  updateCycleSchedule,
   updateCycleSettings,
   updateIssueNote,
   updateIssue,
@@ -795,6 +796,214 @@ describe("HTTP service boundary", () => {
     expect((await body<{ error: { code: string } }>(locked)).error.code).toBe(
       "OPERATION_IN_PROGRESS",
     );
+  });
+
+  it("[状態遷移] Cycle schedule APIはUpcomingの日付を個別調整して再表示できる", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycles = (
+      await body<{ cycles: Array<{ id: string; status: string; number: number }> }>(initial)
+    ).cycles;
+    const target = cycles.find((cycle) => cycle.status === "upcoming")!;
+    const response = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "schedule-test",
+        startDate: "2030-01-07",
+        endDate: "2030-01-21",
+      }),
+      target.id,
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await body<{
+        cycle: { id: string; startsAt: number; endsAt: number; scheduleOverridden: boolean };
+      }>(response),
+    ).toMatchObject({
+      cycle: {
+        id: target.id,
+        startsAt: 1_893_942_000_000,
+        endsAt: 1_895_151_600_000,
+        scheduleOverridden: true,
+      },
+    });
+    const reloaded = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    expect(
+      (
+        await body<{
+          cycles: Array<{
+            id: string;
+            startsAt: number;
+            endsAt: number;
+            scheduleOverridden: boolean;
+          }>;
+        }>(reloaded)
+      ).cycles.find((cycle) => cycle.id === target.id),
+    ).toMatchObject({
+      startsAt: 1_893_942_000_000,
+      endsAt: 1_895_151_600_000,
+      scheduleOverridden: true,
+    });
+  });
+
+  it("[デシジョンテーブル] Cycle schedule APIは不正値・再送・lockを契約どおり処理する", async () => {
+    const initial = await bootstrap(new Request("http://orbit.local/api/v1/bootstrap"));
+    const cycles = (await body<{ cycles: Array<{ id: string; status: string }> }>(initial)).cycles;
+    const target = cycles.find((cycle) => cycle.status === "upcoming")!;
+    const base = {
+      startDate: "2030-01-07",
+      endDate: "2030-01-21",
+    };
+    for (const [key, dates] of [
+      ["same-day", { startDate: "2030-01-07", endDate: "2030-01-07" }],
+      ["reversed", { startDate: "2030-01-21", endDate: "2030-01-07" }],
+    ] as const) {
+      const invalidRange = await updateCycleSchedule(
+        mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+          idempotencyKey: `api-cycle-schedule-${key}`,
+          ...dates,
+        }),
+        target.id,
+      );
+      expect(invalidRange.status).toBe(400);
+    }
+    const invalidDate = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-invalid-date",
+        startDate: "2030-02-30",
+        endDate: base.endDate,
+      }),
+      target.id,
+    );
+    expect(invalidDate.status).toBe(400);
+    expect((await body<{ error: { code: string } }>(invalidDate)).error.code).toBe(
+      "VALIDATION_ERROR",
+    );
+
+    const active = cycles.find((cycle) => cycle.status === "active")!;
+    const activeUpdate = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-active",
+        ...base,
+      }),
+      active.id,
+    );
+    expect(activeUpdate.status).toBe(400);
+
+    await closeCycle(
+      new Request("http://orbit.local/api/v1/cycles", {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Idempotency-Key": "api-cycle-schedule-complete-active",
+        },
+      }),
+      active.id,
+    );
+    const completedUpdate = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-completed",
+        ...base,
+      }),
+      active.id,
+    );
+    expect(completedUpdate.status).toBe(400);
+
+    const unknown = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-unknown",
+        ...base,
+        scheduleOverridden: true,
+      }),
+      target.id,
+    );
+    expect(unknown.status).toBe(400);
+
+    const valid = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-replay",
+        ...base,
+      }),
+      target.id,
+    );
+    const replay = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-replay",
+        ...base,
+      }),
+      target.id,
+    );
+    expect(valid.status).toBe(200);
+    expect(await body(replay)).toEqual(await body(valid));
+    const conflict = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-replay",
+        startDate: "2030-01-14",
+        endDate: base.endDate,
+      }),
+      target.id,
+    );
+    expect(conflict.status).toBe(409);
+
+    const beforeOverlap = {
+      cycle: structuredClone(getOrbitStore("dev-owner").cycles.get(target.id)),
+      activities: getOrbitStore("dev-owner").activities.length,
+      outbox: getOrbitStore("dev-owner").outbox.length,
+      receipts: getOrbitStore("dev-owner").receipts.size,
+    };
+    const overlap = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-overlap",
+        startDate: "2000-01-01",
+        endDate: "2035-01-01",
+      }),
+      target.id,
+    );
+    expect(overlap.status).toBe(400);
+    const ownerStore = getOrbitStore("dev-owner");
+    expect(ownerStore.cycles.get(target.id)).toEqual(beforeOverlap.cycle);
+    expect(ownerStore.activities).toHaveLength(beforeOverlap.activities);
+    expect(ownerStore.outbox).toHaveLength(beforeOverlap.outbox);
+    expect(ownerStore.receipts.size).toBe(beforeOverlap.receipts);
+
+    const foreignTarget = getOrbitStore("foreign-owner")
+      .bootstrap("foreign-owner")
+      .cycles.find((cycle) => cycle.status === "upcoming")!;
+    const foreignUpdate = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-foreign",
+        ...base,
+      }),
+      foreignTarget.id,
+    );
+    expect(foreignUpdate.status).toBe(404);
+
+    const nextTarget = cycles.find(
+      (cycle) => cycle.id !== target.id && cycle.status === "upcoming",
+    )!;
+    const beforeLock = {
+      cycles: structuredClone(ownerStore.cycles),
+      activities: ownerStore.activities.length,
+      outbox: ownerStore.outbox.length,
+      receipts: ownerStore.receipts.size,
+    };
+    await startBackgroundRun(
+      mutation("http://orbit.local/api/v1/background-runs", "POST", {
+        kind: "maintenance",
+        idempotencyKey: "api-cycle-schedule-lock-run",
+      }),
+    );
+    const locked = await updateCycleSchedule(
+      mutation("http://orbit.local/api/v1/cycles/schedule", "PATCH", {
+        idempotencyKey: "api-cycle-schedule-locked",
+        ...base,
+      }),
+      nextTarget.id,
+    );
+    expect(locked.status).toBe(423);
+    expect(ownerStore.cycles).toEqual(beforeLock.cycles);
+    expect(ownerStore.activities).toHaveLength(beforeLock.activities);
+    expect(ownerStore.outbox).toHaveLength(beforeLock.outbox);
+    expect(ownerStore.receipts.size).toBe(beforeLock.receipts);
   });
 
   it("[状態遷移] Cycle close APIの同一Idempotency-Key再送は同じ結果に収束する", async () => {

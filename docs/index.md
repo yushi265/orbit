@@ -2,7 +2,8 @@
 
 このプロジェクトの実装の進め方・規約・実装仕様を管理する。実装判断がこのリポジトリのドキュメントだけで完結するように整備する。
 
-現在は要件定義と AI-DLC ハーネスの導入段階であり、アプリ本体の実装は未着手である。
+要件定義と AI-DLC ハーネスを基盤に、アプリ本体の実装を進めている。現在の優先順位は
+[`roadmap.md`](./roadmap.md)で管理する。
 
 ## 読み始めガイド（読者別の入口）
 
@@ -17,6 +18,7 @@
 | ドキュメント | 概要 |
 |------------|------|
 | [requirements/index.md](./requirements/index.md) | プロダクト要件・受入条件・技術選定 |
+| [roadmap.md](./roadmap.md) | 実装済み範囲と残タスクの優先順位 |
 | [architecture.md](./architecture.md) | `orbit` の実装予定アーキテクチャ（レイヤー責務・依存方向） |
 | [ai-dlc-flow-guide.md](./ai-dlc-flow-guide.md) | AI-DLC 開発フローの解説（チームメンバー・新規参入者向け。人間の承認ゲートの見方） |
 | [ai-dlc/codex-adapter.md](./ai-dlc/codex-adapter.md) | CodexでAI-DLCを実行するためのホスト差分・委譲・検証手順 |

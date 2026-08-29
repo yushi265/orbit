@@ -30,6 +30,7 @@ import type {
 import type { ColorTheme, IssueListScope } from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
+import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
 import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
@@ -1230,6 +1231,7 @@ function OrbitAppInner(props: Props) {
               cycles={cycles}
               cycleHistory={data.cycleHistory}
               issues={issues}
+              projects={projects}
               timezone={data.preferences.timezone}
               cycleId={props.cycleId}
               workflowStates={workflowStates}
@@ -2588,11 +2590,63 @@ function CycleIssueCard({
   );
 }
 
+export function CycleBreakdownSection({ breakdown }: { breakdown: CycleBreakdown }) {
+  return (
+    <section className="detail-section cycle-breakdown-section" aria-label="Cycleの内訳">
+      <div className="detail-section-heading">
+        <div>
+          <span className="eyebrow">BREAKDOWN</span>
+          <h3>内訳</h3>
+        </div>
+      </div>
+      <div className="cycle-breakdown-grid">
+        <section className="cycle-breakdown-card" aria-labelledby="cycle-status-breakdown-title">
+          <h4 id="cycle-status-breakdown-title">Status別内訳</h4>
+          <div className="cycle-breakdown-list">
+            {breakdown.statuses.map((entry) => (
+              <div className="cycle-breakdown-row" key={entry.id}>
+                <span>{entry.label}</span>
+                <strong>{entry.count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="cycle-breakdown-card" aria-labelledby="cycle-priority-breakdown-title">
+          <h4 id="cycle-priority-breakdown-title">Priority別内訳</h4>
+          <div className="cycle-breakdown-list">
+            {breakdown.priorities.map((entry) => (
+              <div className="cycle-breakdown-row" key={entry.value}>
+                <span>{priorityLabel[entry.value]}</span>
+                <strong>{entry.count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="cycle-breakdown-card" aria-labelledby="cycle-project-breakdown-title">
+          <h4 id="cycle-project-breakdown-title">Project別内訳</h4>
+          <div className="cycle-breakdown-list">
+            {breakdown.projects.map((entry) => (
+              <div className="cycle-breakdown-row" key={entry.id ?? "unassigned"}>
+                <span>{entry.label}</span>
+                <strong>{entry.count}</strong>
+              </div>
+            ))}
+            {breakdown.projects.length === 0 && (
+              <p className="detail-empty">Projectの内訳はありません。</p>
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export function CyclesView({
   cycles,
   cycleId,
   cycleHistory = [],
   issues,
+  projects = [],
   timezone,
   workflowStates,
   pendingIssueId,
@@ -2611,6 +2665,7 @@ export function CyclesView({
   cycleId?: string;
   cycleHistory?: CycleHistoryViewModel[];
   issues: Issue[];
+  projects?: Project[];
   timezone?: string;
   workflowStates: WorkflowState[];
   pendingIssueId: string | null;
@@ -2685,6 +2740,7 @@ export function CyclesView({
     }))
     .filter((group) => group.issues.length > 0);
   const metrics = calculateCycleMetrics(cycleIssues, workflowStates);
+  const breakdown = calculateCycleBreakdown(cycleIssues, workflowStates, projects);
 
   useEffect(() => {
     if (!cycleId) return;
@@ -3142,6 +3198,7 @@ export function CyclesView({
               <span>{metrics.canceled} canceled</span>
             </div>
           </div>
+          <CycleBreakdownSection breakdown={breakdown} />
           <section
             className="detail-section cycle-carryover-section"
             aria-label="このCycleへ繰り越されたIssue"

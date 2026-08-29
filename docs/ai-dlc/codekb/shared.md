@@ -50,6 +50,7 @@
 - Cloudflare Vite pluginのSSR buildはWranglerログをユーザープリファレンスへ書こうとするため、制限環境では `WRANGLER_LOG_PATH` を明示して検証する（出典: Stage 5実行ログ）。
 - TanStack Startのproduction配信用生成物は`CLOUDFLARE_ENV=production pnpm build`で作る。通常の`pnpm build`後にWrangler dry-runを実行すると、生成された`dist/server/wrangler.json`の`APP_ENV`が`development`になる（参照: `package.json`、`dist/server/wrangler.json`）。
 - `pnpm` はnode_modulesの再構成を非TTYで確認すると停止するため、CI / 自動実行では `.npmrc` の `confirmModulesPurge=false` を使う（参照: `.npmrc`）。
+- GitHub ActionsのGitleaks Action v3はイベント差分向けの`log-opts`を内部付与するため、`fetch-depth: 0`だけではGit履歴全体を検査しない。履歴全体のSecret検知が必要な場合は、Actionを補助スキャンとして使い、後段で`gitleaks git --no-banner --redact`を実行する（参照: `.github/workflows/ci.yml`）。
 - Productionの初回Owner SnapshotはCycle 0件で保存され得るため、`ensureUpcomingCycles`は既存Active / Upcomingがない初回状態も初期Active Cycle 1へ収束させる。初回生成後はproduction Sessionの成功GET保存でバックフィルされる（参照: `src/server/store.ts`、`src/server/store-session.ts`）。
 - Cycle開始曜日の計算は固定UTCオフセットではなく`Intl.DateTimeFormat`でIANA timezoneの現地00:00へ変換し、DST境界では暦日加算を使う（参照: `src/server/cycle-schedule.ts`）。
 - CycleのCooldownはUTCミリ秒を単純加算せず、Timezoneのローカル暦日へ週数を加えてから指定曜日00:00へ正規化する。これによりDST境界で開始日を1週余計に飛ばさない（参照: `src/server/cycle-schedule.ts`）。
@@ -63,4 +64,4 @@
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / 2026-08-29
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / 2026-08-29

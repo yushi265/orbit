@@ -85,6 +85,16 @@ pnpm deploy
 
 `pnpm deploy`はproduction build（`CLOUDFLARE_ENV=production`）→ preflight → production D1 migration → `wrangler deploy --keep-vars`の順で実行します。失敗した場合はWorkerを公開せず、エラー原因を解消して再実行してください。
 
+通常の`main`へのpushは、下記のWorkers Builds経路を使用します。`pnpm deploy`はWorkers Buildsを使えない場合の手動・緊急経路であり、D1 migrationを含むため、通常のCIからは呼び出しません。
+
+## 6.1 CI/CDの責務分担
+
+- GitHub ActionsはCI専用です。PRと`main`へのpushで、依存導入、品質ゲート、GitleaksによるSecret検知だけを実行します。
+- 本番CDの正本はCloudflare Workers Buildsです。`main`のpushを契機に`pnpm run build:production`と`npx wrangler deploy`をWorkers Buildsで実行します。
+- D1 migration（`pnpm run db:migrate:production`）は本番データへ副作用があるため、手動手順で実施します。GitHub Actionsからは実行しません。
+- staging用D1を準備するまで、非本番ブランチのPreview Buildは無効とします。本番D1を非本番Previewから参照させません。
+- Branch protectionは本ユニットでは変更していません。設定前は`main`への直接pushでCIとCDが独立して起動するため、保護ブランチ運用を導入する場合は別途GitHub側で設定してください。
+
 ## 7. ロールバック・確認
 
 デプロイ後はAccess経由で主要Routeを確認し、異常時はWranglerのVersions画面／`wrangler versions list`で直前Versionを特定してからロールバック方針を決めます。D1の復元期限・Time Travelはアプリの30日Trash期限とは別管理です。

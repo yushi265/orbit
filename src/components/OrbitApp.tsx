@@ -74,6 +74,8 @@ type IssueReorderVariables = {
   issue: Issue;
   beforeIssueId: string | null;
   idempotencyKey: string;
+  cycleId?: string;
+  statusId?: string;
 };
 
 export function activityTitle(event: { action: string; actorType: string }): string {
@@ -751,12 +753,20 @@ function OrbitAppInner(props: Props) {
   });
 
   const reorderIssueMutation = useMutation({
-    mutationFn: ({ issue, beforeIssueId, idempotencyKey: mutationKey }: IssueReorderVariables) =>
+    mutationFn: ({
+      issue,
+      beforeIssueId,
+      idempotencyKey: mutationKey,
+      cycleId,
+      statusId,
+    }: IssueReorderVariables) =>
       apiPost<{ issue: Issue }>("/api/v1/issues/reorder", {
         idempotencyKey: mutationKey,
         issueId: issue.id,
         version: issue.version,
         beforeIssueId,
+        ...(cycleId === undefined ? {} : { cycleId }),
+        ...(statusId === undefined ? {} : { statusId }),
       }),
     onSuccess: async ({ issue }) => {
       await refresh();
@@ -1224,7 +1234,17 @@ function OrbitAppInner(props: Props) {
               cycleId={props.cycleId}
               workflowStates={workflowStates}
               pendingIssueId={pendingIssueId}
+              reorderBusy={reorderIssueMutation.isPending}
               onUpdateIssue={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onReorder={(issue, beforeIssueId, scope) =>
+                reorderIssueMutation.mutate({
+                  issue,
+                  beforeIssueId,
+                  cycleId: scope.cycleId,
+                  ...(scope.statusId === undefined ? {} : { statusId: scope.statusId }),
+                  idempotencyKey: idempotencyKey(),
+                })
+              }
               onRefresh={refresh}
               onNavigateIssues={() => void navigate("issues")}
               onNavigateCycles={() => void navigate("cycles")}
@@ -2470,6 +2490,104 @@ function IssueCard({
   );
 }
 
+function CycleReorderControls({
+  issue,
+  canMoveUp,
+  canMoveDown,
+  disabled,
+  onMove,
+}: {
+  issue: Issue;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  disabled: boolean;
+  onMove: (direction: "up" | "down") => void;
+}) {
+  return (
+    <div className="cycle-reorder-controls" aria-label={`${issue.identifier}の並び替え`}>
+      <button
+        type="button"
+        className="reorder-button"
+        aria-label={`${issue.identifier}を上へ`}
+        disabled={disabled || !canMoveUp}
+        onClick={() => onMove("up")}
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        className="reorder-button"
+        aria-label={`${issue.identifier}を下へ`}
+        disabled={disabled || !canMoveDown}
+        onClick={() => onMove("down")}
+      >
+        ↓
+      </button>
+    </div>
+  );
+}
+
+function CycleIssueCard({
+  issue,
+  state,
+  dragging,
+  dropTarget,
+  disabled,
+  canMoveUp,
+  canMoveDown,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onMove,
+}: {
+  issue: Issue;
+  state: WorkflowState;
+  dragging: boolean;
+  dropTarget: boolean;
+  disabled: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onMove: (direction: "up" | "down") => void;
+}) {
+  return (
+    <div
+      className={`issue-card cycle-board-card ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
+      data-issue-id={issue.id}
+      draggable={!disabled}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", issue.id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+    >
+      <span className="issue-id">{issue.identifier}</span>
+      <strong>{issue.title}</strong>
+      <span className="cycle-issue-status">{state.name}</span>
+      <CycleReorderControls
+        issue={issue}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+        disabled={disabled}
+        onMove={onMove}
+      />
+    </div>
+  );
+}
+
 export function CyclesView({
   cycles,
   cycleId,
@@ -2478,7 +2596,9 @@ export function CyclesView({
   timezone,
   workflowStates,
   pendingIssueId,
+  reorderBusy = false,
   onUpdateIssue,
+  onReorder,
   onRefresh,
   onNavigateIssues,
   onNavigateCycles,
@@ -2494,7 +2614,13 @@ export function CyclesView({
   timezone?: string;
   workflowStates: WorkflowState[];
   pendingIssueId: string | null;
+  reorderBusy?: boolean;
   onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
+  onReorder?: (
+    issue: Issue,
+    beforeIssueId: string | null,
+    scope: { cycleId: string; statusId?: string },
+  ) => void;
   onRefresh: () => void;
   onNavigateIssues: () => void;
   onNavigateCycles: () => void;
@@ -2524,6 +2650,9 @@ export function CyclesView({
   const [assignmentTargetId, setAssignmentTargetId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [issueViewMode, setIssueViewMode] = useState<"list" | "board">("list");
+  const [draggedCycleIssueId, setDraggedCycleIssueId] = useState<string | null>(null);
+  const [dropTargetCycleIssueId, setDropTargetCycleIssueId] = useState<string | null>(null);
   const routeCycle = cycleId ? (cycles.find((cycle) => cycle.id === cycleId) ?? null) : null;
   const tabCycles = cycles.filter((cycle) => cycleTabForStatus(cycle.status) === tab);
   const selectedCycle =
@@ -2539,12 +2668,22 @@ export function CyclesView({
       .filter((cycle) => cycle.status === "upcoming")
       .sort((left, right) => left.number - right.number)[0] ?? null;
   const cycleIssues = selectedCycle
-    ? issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt)
+    ? sortIssues(
+        issues.filter((issue) => issue.cycleId === selectedCycle.id && !issue.deletedAt),
+        "manual",
+        workflowStates,
+      )
     : [];
   const incomingCycleHistory = selectedCycle
     ? cycleHistory.filter((entry) => entry.toCycle.id === selectedCycle.id)
     : [];
   const availableIssues = issues.filter((issue) => !issue.cycleId && !issue.deletedAt);
+  const cycleIssueGroups = workflowStates
+    .map((state) => ({
+      state,
+      issues: cycleIssues.filter((issue) => issue.statusId === state.id),
+    }))
+    .filter((group) => group.issues.length > 0);
   const metrics = calculateCycleMetrics(cycleIssues, workflowStates);
 
   useEffect(() => {
@@ -2713,6 +2852,44 @@ export function CyclesView({
     if (!issue) return;
     onUpdateIssue(issue, { cycleId: selectedCycle.id });
     setAssignmentTargetId("");
+  }
+
+  function cycleReorderIssues(statusId?: string): Issue[] {
+    return statusId ? cycleIssues.filter((issue) => issue.statusId === statusId) : cycleIssues;
+  }
+
+  function dropCycleIssue(dropTargetId: string, statusId?: string) {
+    const draggedId = draggedCycleIssueId;
+    setDraggedCycleIssueId(null);
+    setDropTargetCycleIssueId(null);
+    if (
+      selectedCycle?.status === "completed" ||
+      !selectedCycle ||
+      !draggedId ||
+      draggedId === dropTargetId ||
+      reorderBusy
+    )
+      return;
+    const scopeIssues = cycleReorderIssues(statusId);
+    const draggedIssue = scopeIssues.find((issue) => issue.id === draggedId);
+    if (!draggedIssue || !scopeIssues.some((issue) => issue.id === dropTargetId)) return;
+    onReorder?.(draggedIssue, beforeIssueIdForDrop(scopeIssues, draggedId, dropTargetId), {
+      cycleId: selectedCycle.id,
+      ...(statusId === undefined ? {} : { statusId }),
+    });
+  }
+
+  function moveCycleIssue(issue: Issue, direction: "up" | "down", statusId?: string) {
+    if (!selectedCycle || selectedCycle.status === "completed" || reorderBusy) return;
+    const scopeIssues = cycleReorderIssues(statusId);
+    const beforeIssueId = beforeIssueIdForMove(scopeIssues, issue.id, direction);
+    if (beforeIssueId === null && scopeIssues.at(-1)?.id === issue.id && direction === "down")
+      return;
+    if (beforeIssueId === null && direction === "up") return;
+    onReorder?.(issue, beforeIssueId, {
+      cycleId: selectedCycle.id,
+      ...(statusId === undefined ? {} : { statusId }),
+    });
   }
 
   function selectCycle(cycle: Cycle) {
@@ -3022,30 +3199,132 @@ export function CyclesView({
               {error}
             </div>
           )}
-          <div className="cycle-list">
-            {cycleIssues.map((issue) => (
-              <div className="mini-issue cycle-issue-row" key={issue.id}>
-                <span className={`priority-dot ${priorityTone[issue.priority]}`} />
-                <span className="issue-id">{issue.identifier}</span>
-                <strong>{issue.title}</strong>
-                <span className="cycle-issue-status">
-                  {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "—"}
-                </span>
-                {selectedCycle.status !== "completed" && (
-                  <button
-                    className="text-button danger"
-                    onClick={() => onUpdateIssue(issue, { cycleId: null })}
-                    disabled={closeBusy || pendingIssueId === issue.id}
-                  >
-                    解除
-                  </button>
-                )}
-              </div>
-            ))}
-            {cycleIssues.length === 0 && (
-              <p className="detail-empty">このCycleにIssueはありません。</p>
+          <div className="cycle-issue-toolbar" role="toolbar" aria-label="Cycle Issue表示">
+            <div className="view-toggle-group" role="group" aria-label="Cycle Issue表示形式">
+              <button
+                type="button"
+                className={`view-toggle ${issueViewMode === "list" ? "selected" : ""}`}
+                aria-pressed={issueViewMode === "list"}
+                onClick={() => setIssueViewMode("list")}
+              >
+                ☷ List
+              </button>
+              <button
+                type="button"
+                className={`view-toggle ${issueViewMode === "board" ? "selected" : ""}`}
+                aria-pressed={issueViewMode === "board"}
+                onClick={() => setIssueViewMode("board")}
+              >
+                ▦ Board
+              </button>
+            </div>
+            {selectedCycle.status !== "completed" && (
+              <span className="manual-order-hint">ドラッグまたは↑↓ボタンで並び替えます。</span>
             )}
           </div>
+          {issueViewMode === "board" ? (
+            <div className="board-grid cycle-board-grid">
+              {cycleIssueGroups.map(({ state, issues: groupIssues }) => (
+                <div className="board-column" key={state.id}>
+                  <div className="column-heading">
+                    <span className="status-dot" style={{ background: state.color }} />
+                    <strong>{state.name}</strong>
+                    <span className="count-pill">{groupIssues.length}</span>
+                  </div>
+                  {groupIssues.map((issue, index) => (
+                    <CycleIssueCard
+                      key={issue.id}
+                      issue={issue}
+                      state={state}
+                      dragging={draggedCycleIssueId === issue.id}
+                      dropTarget={dropTargetCycleIssueId === issue.id}
+                      disabled={
+                        selectedCycle.status === "completed" ||
+                        reorderBusy ||
+                        closeBusy ||
+                        pendingIssueId === issue.id
+                      }
+                      canMoveUp={index > 0}
+                      canMoveDown={index < groupIssues.length - 1}
+                      onDragStart={() => setDraggedCycleIssueId(issue.id)}
+                      onDragEnd={() => {
+                        setDraggedCycleIssueId(null);
+                        setDropTargetCycleIssueId(null);
+                      }}
+                      onDragOver={() => setDropTargetCycleIssueId(issue.id)}
+                      onDrop={() => dropCycleIssue(issue.id, state.id)}
+                      onMove={(direction) => moveCycleIssue(issue, direction, state.id)}
+                    />
+                  ))}
+                </div>
+              ))}
+              {cycleIssues.length === 0 && (
+                <p className="detail-empty">このCycleにIssueはありません。</p>
+              )}
+            </div>
+          ) : (
+            <div className="cycle-list">
+              {cycleIssues.map((issue, index) => (
+                <div
+                  className={`mini-issue cycle-issue-row ${draggedCycleIssueId === issue.id ? "dragging" : ""} ${dropTargetCycleIssueId === issue.id ? "drop-target" : ""}`}
+                  key={issue.id}
+                  data-issue-id={issue.id}
+                  draggable={
+                    selectedCycle.status !== "completed" &&
+                    !reorderBusy &&
+                    !closeBusy &&
+                    pendingIssueId !== issue.id
+                  }
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", issue.id);
+                    setDraggedCycleIssueId(issue.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedCycleIssueId(null);
+                    setDropTargetCycleIssueId(null);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDropTargetCycleIssueId(issue.id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    dropCycleIssue(issue.id);
+                  }}
+                >
+                  <span className={`priority-dot ${priorityTone[issue.priority]}`} />
+                  <span className="issue-id">{issue.identifier}</span>
+                  <strong>{issue.title}</strong>
+                  <span className="cycle-issue-status">
+                    {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "—"}
+                  </span>
+                  {selectedCycle.status !== "completed" && (
+                    <CycleReorderControls
+                      issue={issue}
+                      canMoveUp={index > 0}
+                      canMoveDown={index < cycleIssues.length - 1}
+                      disabled={reorderBusy || closeBusy || pendingIssueId === issue.id}
+                      onMove={(direction) => moveCycleIssue(issue, direction)}
+                    />
+                  )}
+                  {selectedCycle.status !== "completed" && (
+                    <button
+                      type="button"
+                      className="text-button danger"
+                      onClick={() => onUpdateIssue(issue, { cycleId: null })}
+                      disabled={closeBusy || pendingIssueId === issue.id || reorderBusy}
+                    >
+                      解除
+                    </button>
+                  )}
+                </div>
+              ))}
+              {cycleIssues.length === 0 && (
+                <p className="detail-empty">このCycleにIssueはありません。</p>
+              )}
+            </div>
+          )}
         </section>
       ) : tab === "current" && nextUpcomingCycle ? (
         <section className="detail-card cycle-detail cycle-cooldown-state" aria-live="polite">

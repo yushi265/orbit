@@ -269,6 +269,42 @@ describe("Issue 契約", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("[契約] ReorderはcycleId付きList要求を受理する", () => {
+    expect(
+      reorderIssueInputSchema.safeParse({
+        idempotencyKey: "reorder-cycle-1",
+        issueId: "issue-1",
+        version: 1,
+        beforeIssueId: null,
+        cycleId: "cycle-1",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("[デシジョンテーブル] Reorder scopeはList / Boardだけを受理し、statusId単独を拒否する", () => {
+    const base = {
+      idempotencyKey: "reorder-scope-1",
+      issueId: "issue-1",
+      version: 0,
+      beforeIssueId: null,
+    };
+    expect(reorderIssueInputSchema.safeParse(base).success).toBe(true);
+    expect(reorderIssueInputSchema.safeParse({ ...base, cycleId: "cycle-1" }).success).toBe(true);
+    expect(
+      reorderIssueInputSchema.safeParse({
+        ...base,
+        cycleId: "cycle-1",
+        statusId: "status-1",
+      }).success,
+    ).toBe(true);
+    expect(reorderIssueInputSchema.safeParse({ ...base, statusId: "status-1" }).success).toBe(
+      false,
+    );
+    expect(reorderIssueInputSchema.safeParse({ ...base, cycleId: "" }).success).toBe(false);
+    expect(reorderIssueInputSchema.safeParse({ ...base, statusId: "" }).success).toBe(false);
+    expect(reorderIssueInputSchema.safeParse({ ...base, unknown: true }).success).toBe(false);
+  });
 });
 
 describe("canonical filter / JSON", () => {

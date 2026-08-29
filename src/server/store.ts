@@ -1918,6 +1918,9 @@ export class OrbitStore {
     )
       throw notFound();
 
+    if (input.statusId !== undefined && input.cycleId === undefined)
+      throw validationError({ cycleId: ["statusIdを指定する場合はcycleIdが必要です。"] });
+
     const activeIssues = [...this.issues.values()]
       .filter(
         (issue) => issue.userId === userId && issue.deletedAt === null && issue.archivedAt === null,
@@ -1928,24 +1931,49 @@ export class OrbitStore {
           left.createdAt - right.createdAt ||
           left.identifier.localeCompare(right.identifier, "ja"),
       );
-    const remaining = activeIssues.filter((issue) => issue.id !== target.id);
+    if (input.cycleId !== undefined) {
+      const cycle = this.cycles.get(input.cycleId);
+      if (!cycle || cycle.userId !== userId || target.cycleId !== cycle.id) throw notFound();
+      if (cycle.status === "completed")
+        throw validationError({ cycleId: ["Completed Cycleは変更できません。"] });
+      if (input.statusId !== undefined) {
+        const status = this.workflowStates.get(input.statusId);
+        if (!status || status.userId !== userId || target.statusId !== status.id) throw notFound();
+      }
+    }
+    const scopeIssues =
+      input.cycleId === undefined
+        ? activeIssues
+        : activeIssues.filter(
+            (issue) =>
+              issue.cycleId === input.cycleId &&
+              (input.statusId === undefined || issue.statusId === input.statusId),
+          );
+    if (!scopeIssues.some((issue) => issue.id === target.id)) throw notFound();
+    if (before && !scopeIssues.some((issue) => issue.id === before.id)) throw notFound();
+
+    const remaining = scopeIssues.filter((issue) => issue.id !== target.id);
     const insertionIndex = input.beforeIssueId
       ? remaining.findIndex((issue) => issue.id === input.beforeIssueId)
       : remaining.length;
     if (insertionIndex < 0) throw notFound();
     remaining.splice(insertionIndex, 0, target);
 
-    const changed = remaining.filter((issue, index) => issue.position !== index);
+    const assignments = remaining.map((issue, index) => ({
+      issue,
+      position: input.cycleId === undefined ? index : scopeIssues[index].position,
+    }));
+    const changed = assignments.filter(({ issue, position }) => issue.position !== position);
     if (changed.length === 0) {
       this.recordReceipt(userId, "issue.reorder", input.idempotencyKey, input, target);
       return target;
     }
 
     const now = this.clock();
-    remaining.forEach((issue, index) => {
-      if (issue.position === index) return;
+    assignments.forEach(({ issue, position }) => {
+      if (issue.position === position) return;
       const beforeState = { version: issue.version, position: issue.position };
-      issue.position = index;
+      issue.position = position;
       issue.version += 1;
       issue.updatedAt = now;
       this.recordActivity(
@@ -1955,11 +1983,11 @@ export class OrbitStore {
         "reordered",
         `${input.idempotencyKey}:${issue.id}`,
         beforeState,
-        { version: issue.version, position: issue.position },
+        { version: issue.version, position },
       );
       this.recordOutbox(userId, "issue.reordered", `issue.reordered:${issue.id}:${issue.version}`, {
         issueId: issue.id,
-        position: issue.position,
+        position,
         version: issue.version,
       });
     });

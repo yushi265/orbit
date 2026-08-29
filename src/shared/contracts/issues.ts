@@ -53,8 +53,18 @@ export const reorderIssueInputSchema = z
     issueId: opaqueIdSchema,
     version: z.number().int().nonnegative(),
     beforeIssueId: opaqueIdSchema.nullable(),
+    cycleId: opaqueIdSchema.optional(),
+    statusId: opaqueIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.statusId !== undefined && value.cycleId === undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["cycleId"],
+        message: "statusIdを指定する場合はcycleIdが必要です。",
+      });
+  });
 
 const issueDueSchema = z.enum(["none", "overdue", "today", "upcoming"]);
 const issueGroupSchema = z.enum(["status", "priority", "project", "cycle", "label"]);

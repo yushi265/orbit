@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { IssueViewModel as Issue } from "../shared/view-models";
+import type { IssueViewModel as Issue, ProjectViewModel as Project } from "../shared/view-models";
 import { CommandPalette, IssueComposer, IssuesView, SearchView } from "./OrbitApp";
 import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
 
@@ -157,6 +157,22 @@ describe("Phase 2 Issue core UI helpers", () => {
       createdAt: 1,
       updatedAt: 2,
     } satisfies Issue;
+    const project = {
+      id: "project-1",
+      userId: "owner",
+      name: "Roadmap",
+      statusId: "project-status",
+      priority: "no_priority" as const,
+      color: "#ff725e",
+      icon: "◈",
+      description: "",
+      startAt: null,
+      targetAt: null,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: 1,
+      updatedAt: 1,
+    } satisfies Project;
     const markup = renderToStaticMarkup(
       createElement(IssuesView, {
         issues: [issue],
@@ -178,13 +194,15 @@ describe("Phase 2 Issue core UI helpers", () => {
         setFilterText: () => undefined,
         priorityFilter: "all",
         setPriorityFilter: () => undefined,
+        projectFilter: "all",
+        setProjectFilter: () => undefined,
         labelFilter: "all",
         setLabelFilter: () => undefined,
         showCompleted: true,
         setShowCompleted: () => undefined,
         issueSort: "updated_desc",
         setIssueSort: () => undefined,
-        projects: [],
+        projects: [project],
         allIssues: [issue],
         cycles: [],
         labels: [],
@@ -209,6 +227,9 @@ describe("Phase 2 Issue core UI helpers", () => {
       }),
     );
     expect(markup).toContain('aria-label="Issueの表示範囲"');
+    expect(markup).toContain('aria-label="Projectで絞り込む"');
+    expect(markup).toContain("Projectなし");
+    expect(markup).toContain('value="project-1">Roadmap</option>');
     expect(markup).toContain("復元");
     expect(markup).not.toContain('aria-label="TASK-2のEstimate"');
     expect(markup).toContain('class="view-toggle-group"');

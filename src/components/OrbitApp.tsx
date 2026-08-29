@@ -35,6 +35,7 @@ import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
   filterCompletedIssues,
+  filterIssuesByProject,
   issueSortOptions,
   type IssueSort,
   sortIssues,
@@ -239,6 +240,7 @@ function OrbitAppInner(props: Props) {
   const [filterText, setFilterText] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
   const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [labelFilter, setLabelFilter] = useState("all");
   const [showCompleted, setShowCompleted] = useState(true);
   const [showCompletedReady, setShowCompletedReady] = useState(false);
@@ -353,7 +355,7 @@ function OrbitAppInner(props: Props) {
     typeof navigator === "undefined" ? undefined : navigator.platform,
   );
   const visibleIssues = useMemo(() => {
-    const filtered = issueWorkspaceIssues.filter((issue) => {
+    const filtered = filterIssuesByProject(issueWorkspaceIssues, projectFilter).filter((issue) => {
       const matchesText =
         !filterText.trim() ||
         `${issue.identifier} ${issue.title} ${issue.description}`
@@ -372,6 +374,7 @@ function OrbitAppInner(props: Props) {
     issueWorkspaceIssues,
     filterText,
     priorityFilter,
+    projectFilter,
     labelFilter,
     workflowStates,
     showCompleted,
@@ -390,6 +393,16 @@ function OrbitAppInner(props: Props) {
     if (labelFilter !== "all" && !labels.some((label) => label.id === labelFilter))
       setLabelFilter("all");
   }, [labels, labelFilter]);
+
+  useEffect(() => {
+    if (
+      projectFilter !== "all" &&
+      projectFilter !== NO_PROJECT_OPTION &&
+      !projects.some((project) => project.id === projectFilter)
+    ) {
+      setProjectFilter("all");
+    }
+  }, [projects, projectFilter]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1183,6 +1196,8 @@ function OrbitAppInner(props: Props) {
               setFilterText={setFilterText}
               priorityFilter={priorityFilter}
               setPriorityFilter={setPriorityFilter}
+              projectFilter={projectFilter}
+              setProjectFilter={setProjectFilter}
               labelFilter={labelFilter}
               setLabelFilter={setLabelFilter}
               showCompleted={showCompleted}
@@ -1735,6 +1750,8 @@ export function IssuesView({
   setFilterText,
   priorityFilter,
   setPriorityFilter,
+  projectFilter,
+  setProjectFilter,
   labelFilter,
   setLabelFilter,
   showCompleted,
@@ -1773,6 +1790,8 @@ export function IssuesView({
   setFilterText: (value: string) => void;
   priorityFilter: Issue["priority"] | "all";
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
+  projectFilter: string;
+  setProjectFilter: (value: string) => void;
   labelFilter: string;
   setLabelFilter: (value: string) => void;
   showCompleted: boolean;
@@ -1817,11 +1836,13 @@ export function IssuesView({
   const hasIssueFilter =
     Boolean(filterText.trim()) ||
     priorityFilter !== "all" ||
+    projectFilter !== "all" ||
     labelFilter !== "all" ||
     !showCompleted;
   function clearIssueFilters() {
     setFilterText("");
     setPriorityFilter("all");
+    setProjectFilter("all");
     setLabelFilter("all");
     setShowCompleted(true);
   }
@@ -1883,6 +1904,21 @@ export function IssuesView({
           {Object.entries(priorityLabel).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="filter-select"
+          id="issues-project-filter"
+          aria-label="Projectで絞り込む"
+          value={projectFilter}
+          onChange={(event) => setProjectFilter(event.target.value)}
+        >
+          <option value="all">すべてのProject</option>
+          <option value={NO_PROJECT_OPTION}>Projectなし</option>
+          {projects.map((project) => (
+            <option value={project.id} key={project.id}>
+              {project.name}
             </option>
           ))}
         </select>

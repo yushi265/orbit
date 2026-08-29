@@ -3,6 +3,7 @@ import type {
   IssueViewModel as Issue,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
+import { NO_PROJECT_OPTION } from "./issue-project";
 
 export type IssueSort =
   | "manual"
@@ -41,6 +42,14 @@ export function filterCompletedIssues(
     workflowStates.filter((state) => state.category === "completed").map((state) => state.id),
   );
   return issues.filter((issue) => !completedStateIds.has(issue.statusId));
+}
+
+export function filterIssuesByProject(issues: readonly Issue[], projectFilter: string): Issue[] {
+  if (projectFilter === "all") return [...issues];
+  if (projectFilter === NO_PROJECT_OPTION) {
+    return issues.filter((issue) => issue.projectId === null);
+  }
+  return issues.filter((issue) => issue.projectId === projectFilter);
 }
 
 function tieBreak(left: Issue, right: Issue): number {

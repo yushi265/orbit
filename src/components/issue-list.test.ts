@@ -7,9 +7,11 @@ import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
   filterCompletedIssues,
+  filterIssuesByProject,
   issueSortOptions,
   sortIssues,
 } from "./issue-list";
+import { NO_PROJECT_OPTION } from "./issue-project";
 
 const workflowStates: WorkflowState[] = [
   {
@@ -68,6 +70,33 @@ function issue(overrides: Partial<Issue> = {}): Issue {
 }
 
 describe("Issue list controls", () => {
+  it("[代表値] 選択したProjectのIssueだけを表示する", () => {
+    const issues = [
+      issue({ id: "project-1", projectId: "project-a" }),
+      issue({ id: "project-2", projectId: "project-b" }),
+      issue({ id: "unassigned", projectId: null }),
+    ];
+
+    expect(filterIssuesByProject(issues, "project-a").map((item) => item.id)).toEqual([
+      "project-1",
+    ]);
+  });
+
+  it("[同値分割] Projectなしと全Projectをそれぞれ絞り込める", () => {
+    const issues = [
+      issue({ id: "project-1", projectId: "project-a" }),
+      issue({ id: "unassigned", projectId: null }),
+    ];
+
+    expect(filterIssuesByProject(issues, NO_PROJECT_OPTION).map((item) => item.id)).toEqual([
+      "unassigned",
+    ]);
+    expect(filterIssuesByProject(issues, "all").map((item) => item.id)).toEqual([
+      "project-1",
+      "unassigned",
+    ]);
+  });
+
   it("filters only completed workflow states and keeps canceled issues", () => {
     const issues = [
       issue({ id: "todo-1", statusId: "todo" }),

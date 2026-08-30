@@ -8,8 +8,8 @@
 
 - 対象レイヤー: shared / data / service / ui
 - 対象ドメイン: issues / notes / relations / audit
-- 対象画面: `/issues/$issueId` の詳細モーダル（URL正本、モバイルはフルスクリーン相当）
-- 対象外: 親子Issueの進捗集計、Label CRUD、Bulk操作、DnD、実D1接続、Rich TextのHTMLレンダリング、ファイル添付
+- 対象画面: `/issues/$issueId` の詳細モーダル（URL正本、モバイルはフルスクリーン相当）とIssues一覧の見出し
+- 対象外: 親子Issueの進捗集計、Label CRUD、Bulk操作、DnD、実D1接続、Rich TextのHTMLレンダリング、ファイル添付、Project選択と作業メモの保存操作変更
 
 ## ユニット計画
 
@@ -79,4 +79,6 @@ UIのAC-1 / AC-2 / AC-6は、既存プロジェクトの方針（E2E自動化は
 - Noteは保存形式を文字列に限定する。Tiptap導入やHTMLサニタイズは別機能に切り出し、今回のXSS境界を小さくする。
 - Relationは4種類をwire valueとして固定し、同じsource / target / typeを重複登録しない。Relation方向の高度な正規化は次の改善に残す。
 - Dataの実D1接続は前フェーズの残課題として後回しにし、今回の挙動は既存Memory Storeで契約テストを先に固定する。
-- 未決事項なし。Gate 1 / Gate 2はユーザーの自律実行指示に基づき要点提示後に委任扱いとする。
+- Issue詳細のタイトルとDescriptionは、編集欄からフォーカスが外れた時点で既存のIssue PATCHを使って自動保存する。「説明を保存」ボタンは廃止し、Project選択と作業メモ編集の明示保存は変更しない。これにより保存操作を減らしつつ、既存のversion CAS・rollback・再試行を維持する。
+- Issues一覧の見出しでは補足説明を表示せず、既存の「Issues」見出しと新規Issue導線を維持する。これは一覧の情報密度を下げるUI調整で、Issue更新APIやデータ契約には影響しない。
+- 未決事項なし。今回のUI補足は既存specの契約として確定し、Gate 2は委任せずに進める。

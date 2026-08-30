@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   type FormEvent as ReactFormEvent,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
   useEffect,
@@ -81,6 +82,7 @@ type CycleSettingsPatch = Pick<
 type CycleSchedulePatch = { startDate: string; endDate: string };
 type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
 type IssueMutationRetry = IssueMutationVariables;
+type IssueDescriptionDraft = { description: string; title: string };
 type IssueReorderVariables = {
   issue: Issue;
   beforeIssueId: string | null;
@@ -2204,7 +2206,6 @@ export function IssuesView({
           <div>
             <span className="eyebrow">WORKSPACE / ISSUES</span>
             <h1>Issues</h1>
-            <p className="subheading">すべての作業を、ここから見渡します。</p>
           </div>
           <button className="button primary" onClick={onCreate}>
             ＋ 新しいIssue <kbd>C</kbd>
@@ -6507,18 +6508,88 @@ export function IssueDetailPanel({
   const [relationTargetId, setRelationTargetId] = useState("");
   const [relationType, setRelationType] = useState<IssueRelationTypeViewModel>("related");
   const [saving, setSaving] = useState(false);
+  const [descriptionSaveStatus, setDescriptionSaveStatus] = useState<"idle" | "saving" | "saved">(
+    "idle",
+  );
   const [error, setError] = useState<string | null>(null);
+  const [descriptionFieldErrors, setDescriptionFieldErrors] = useState<Record<
+    string,
+    string[]
+  > | null>(null);
   const [descriptionRetry, setDescriptionRetry] = useState<{
     description: string;
     title: string;
   } | null>(null);
   const [projectRetry, setProjectRetry] = useState<string | null>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const issueRef = useRef(issue);
+  const draftIssueIdRef = useRef(issue?.id ?? null);
+  const descriptionDraftRef = useRef<IssueDescriptionDraft>({
+    description: description,
+    title: titleDraft,
+  });
+  const descriptionSaveDraftRef = useRef<IssueDescriptionDraft | null>(null);
+  const descriptionSavePromiseRef = useRef<Promise<void> | null>(null);
+  const descriptionSaveQueuedRef = useRef(false);
+  const descriptionSaveFailedRef = useRef(false);
+  const descriptionAutosaveTimerRef = useRef<number | null>(null);
+  const savingRef = useRef(saving);
+  const pendingRef = useRef(pending);
+  const pendingWaitersRef = useRef<Array<() => void>>([]);
+  const savingWaitersRef = useRef<Array<() => void>>([]);
+  const dirtyDescriptionDraftRef = useRef(false);
+  const dirtyProjectDraftRef = useRef(false);
+  const closePendingRef = useRef(false);
+  const closeAfterDescriptionSaveRef = useRef(false);
+
+  function setDetailSaving(nextSaving: boolean) {
+    savingRef.current = nextSaving;
+    setSaving(nextSaving);
+  }
+
+  function sameDescriptionDraft(left: IssueDescriptionDraft, right: IssueDescriptionDraft) {
+    return left.description === right.description && left.title === right.title;
+  }
+
+  function hasDescriptionChanges(draft: IssueDescriptionDraft, targetIssue: Issue) {
+    return draft.description !== targetIssue.description || draft.title !== targetIssue.title;
+  }
+
+  function syncDescriptionDraft(nextIssue: Issue) {
+    const nextDraft = { description: nextIssue.description, title: nextIssue.title };
+    issueRef.current = nextIssue;
+    draftIssueIdRef.current = nextIssue.id;
+    descriptionDraftRef.current = nextDraft;
+    dirtyDescriptionDraftRef.current = false;
+    setDescription(nextDraft.description);
+    setTitleDraft(nextDraft.title);
+  }
 
   useEffect(() => {
-    if (issue) setDescription(issue.description);
-    if (issue) setTitleDraft(issue.title);
-    if (issue) setProjectIdDraft(issue.projectId ?? "");
-  }, [issue?.id, issue?.description, issue?.title, issue?.projectId]);
+    issueRef.current = issue;
+    if (!issue) return;
+    const issueChanged = draftIssueIdRef.current !== issue.id;
+    if (issueChanged) dirtyProjectDraftRef.current = false;
+    if (issueChanged || (!dirtyDescriptionDraftRef.current && !descriptionSavePromiseRef.current)) {
+      syncDescriptionDraft(issue);
+    }
+    if (issue && !dirtyProjectDraftRef.current) setProjectIdDraft(issue.projectId ?? "");
+  }, [issue?.id, issue?.version, issue?.description, issue?.title, issue?.projectId]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+    pendingRef.current = pending;
+    if (!pending && pendingWaitersRef.current.length > 0) {
+      const waiters = pendingWaitersRef.current;
+      pendingWaitersRef.current = [];
+      waiters.forEach((resolve) => resolve());
+    }
+    if (!saving && !descriptionSavePromiseRef.current && savingWaitersRef.current.length > 0) {
+      const waiters = savingWaitersRef.current;
+      savingWaitersRef.current = [];
+      waiters.forEach((resolve) => resolve());
+    }
+  }, [pending, saving]);
 
   useEffect(() => {
     const input = titleInputRef.current;
@@ -6556,56 +6627,287 @@ export function IssueDetailPanel({
     );
   }
 
-  async function saveDescription(nextDescription = description, nextTitle = titleDraft) {
-    if (!issue || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
-        idempotencyKey: idempotencyKey(),
-        version: issue.version,
-        patch: { title: nextTitle, descriptionJson: textDocument(nextDescription) },
-      });
-      applyUpdatedIssue(result.issue);
-      await detailQuery.refetch();
-      setDescriptionRetry(null);
-    } catch (caught) {
-      setDescriptionRetry({ description: nextDescription, title: nextTitle });
-      if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
-        const latest = await detailQuery.refetch();
-        if (latest.data) {
-          setDescription(latest.data.issue.description);
-          setTitleDraft(latest.data.issue.title);
-        } else {
-          setDescription(issue.description);
-          setTitleDraft(issue.title);
-        }
-      } else {
-        setDescription(issue.description);
-        setTitleDraft(issue.title);
+  async function saveDescription(
+    nextDescription = descriptionDraftRef.current.description,
+    nextTitle = descriptionDraftRef.current.title,
+  ) {
+    const targetIssue = issueRef.current;
+    const targetDraft = { description: nextDescription, title: nextTitle };
+    if (!targetIssue) return;
+    if (descriptionSavePromiseRef.current) {
+      if (closePendingRef.current) closeAfterDescriptionSaveRef.current = true;
+      const inFlightDraft = descriptionSaveDraftRef.current;
+      if (
+        (inFlightDraft && !sameDescriptionDraft(targetDraft, inFlightDraft)) ||
+        (!inFlightDraft && hasDescriptionChanges(targetDraft, targetIssue))
+      ) {
+        descriptionSaveQueuedRef.current = true;
       }
-      setError(caught instanceof ApiError ? caught.message : "説明の保存に失敗しました。");
-    } finally {
-      setSaving(false);
+      return;
     }
+    if (savingRef.current || pendingRef.current) {
+      if (hasDescriptionChanges(targetDraft, targetIssue)) descriptionSaveQueuedRef.current = true;
+      return;
+    }
+    if (!hasDescriptionChanges(targetDraft, targetIssue)) {
+      dirtyDescriptionDraftRef.current = false;
+      setDescriptionRetry(null);
+      return;
+    }
+
+    let succeeded = false;
+    descriptionSaveDraftRef.current = targetDraft;
+    descriptionSaveFailedRef.current = false;
+    let savePromise!: Promise<void>;
+    savePromise = (async () => {
+      const request = (async () => {
+        setDetailSaving(true);
+        setDescriptionSaveStatus("saving");
+        setDescriptionFieldErrors(null);
+        setError(null);
+        try {
+          const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${targetIssue.id}`, {
+            idempotencyKey: idempotencyKey(),
+            version: targetIssue.version,
+            patch: { title: nextTitle, descriptionJson: textDocument(nextDescription) },
+          });
+          applyUpdatedIssue(result.issue);
+          issueRef.current = result.issue;
+          draftIssueIdRef.current = result.issue.id;
+          const draftWasUnchanged = sameDescriptionDraft(descriptionDraftRef.current, targetDraft);
+          if (draftWasUnchanged) {
+            syncDescriptionDraft(result.issue);
+          } else {
+            dirtyDescriptionDraftRef.current = true;
+          }
+          await detailQuery.refetch();
+          setDescriptionRetry(null);
+          setDescriptionFieldErrors(null);
+          setDescriptionSaveStatus(draftWasUnchanged ? "saved" : "idle");
+          succeeded = true;
+        } catch (caught) {
+          const retryDraft = { ...descriptionDraftRef.current };
+          const isValidationError = caught instanceof ApiError && caught.status === 400;
+          if (isValidationError) {
+            dirtyDescriptionDraftRef.current = hasDescriptionChanges(retryDraft, targetIssue);
+            setDescriptionRetry(null);
+            setDescriptionFieldErrors(caught.fieldErrors ?? {});
+          } else {
+            setDescriptionRetry(retryDraft);
+          }
+          if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+            const latest = await detailQuery.refetch();
+            if (latest.data) syncDescriptionDraft(latest.data.issue);
+            else syncDescriptionDraft(targetIssue);
+          } else if (!isValidationError) {
+            syncDescriptionDraft(targetIssue);
+          }
+          setDescriptionSaveStatus("idle");
+          descriptionSaveFailedRef.current = true;
+          setError(caught instanceof ApiError ? caught.message : "説明の保存に失敗しました。");
+        } finally {
+          setDetailSaving(false);
+        }
+      })();
+      await request;
+      if (descriptionSavePromiseRef.current === savePromise) {
+        descriptionSavePromiseRef.current = null;
+        descriptionSaveDraftRef.current = null;
+      }
+      if (succeeded && descriptionSaveQueuedRef.current) {
+        descriptionSaveQueuedRef.current = false;
+        const latestIssue = issueRef.current;
+        const latestDraft = { ...descriptionDraftRef.current };
+        if (latestIssue && hasDescriptionChanges(latestDraft, latestIssue))
+          await saveDescription(latestDraft.description, latestDraft.title);
+      } else if (!succeeded) {
+        descriptionSaveQueuedRef.current = false;
+      }
+      if (succeeded && closeAfterDescriptionSaveRef.current && !closePendingRef.current) {
+        const latestIssue = issueRef.current;
+        if (latestIssue && !hasDescriptionChanges(descriptionDraftRef.current, latestIssue)) {
+          closeAfterDescriptionSaveRef.current = false;
+          void closePanel();
+        }
+      } else if (!succeeded) {
+        closeAfterDescriptionSaveRef.current = false;
+      }
+    })();
+    descriptionSavePromiseRef.current = savePromise;
+    await savePromise;
+  }
+
+  function requestDescriptionAutosave(): Promise<void> {
+    const targetIssue = issueRef.current;
+    const draft = { ...descriptionDraftRef.current };
+    if (descriptionSavePromiseRef.current || savingRef.current || pendingRef.current) {
+      const inFlightDraft = descriptionSaveDraftRef.current;
+      if (
+        (inFlightDraft && !sameDescriptionDraft(draft, inFlightDraft)) ||
+        (!inFlightDraft && targetIssue && hasDescriptionChanges(draft, targetIssue))
+      ) {
+        descriptionSaveQueuedRef.current = true;
+      }
+      return descriptionSavePromiseRef.current ?? Promise.resolve();
+    }
+    if (!targetIssue || !hasDescriptionChanges(draft, targetIssue)) return Promise.resolve();
+    return saveDescription(draft.description, draft.title);
+  }
+
+  function scheduleDescriptionAutosave() {
+    if (descriptionAutosaveTimerRef.current !== null)
+      window.clearTimeout(descriptionAutosaveTimerRef.current);
+    descriptionAutosaveTimerRef.current = window.setTimeout(() => {
+      descriptionAutosaveTimerRef.current = null;
+      void requestDescriptionAutosave();
+    }, 0);
+  }
+
+  async function flushDescriptionAutosave(): Promise<boolean> {
+    const targetIssue = issueRef.current;
+    if (descriptionRetry !== null) return false;
+    if (
+      descriptionSaveFailedRef.current &&
+      (!targetIssue || !hasDescriptionChanges(descriptionDraftRef.current, targetIssue))
+    )
+      return false;
+    await waitForOtherMutation();
+    if (descriptionRetry !== null) return false;
+    if (descriptionAutosaveTimerRef.current !== null) {
+      window.clearTimeout(descriptionAutosaveTimerRef.current);
+      descriptionAutosaveTimerRef.current = null;
+    }
+    descriptionSaveFailedRef.current = false;
+    await requestDescriptionAutosave();
+    if (descriptionSaveFailedRef.current) return false;
+    const latestIssue = issueRef.current;
+    return !latestIssue || !hasDescriptionChanges(descriptionDraftRef.current, latestIssue);
+  }
+
+  function waitForParentMutation(): Promise<void> {
+    if (!pendingRef.current && !pending) return Promise.resolve();
+    return new Promise((resolve) => pendingWaitersRef.current.push(resolve));
+  }
+
+  function waitForOtherMutation(): Promise<void> {
+    if (descriptionSavePromiseRef.current || (!savingRef.current && !saving))
+      return Promise.resolve();
+    return new Promise((resolve) => savingWaitersRef.current.push(resolve));
+  }
+
+  useEffect(() => {
+    if (saving || pending || descriptionSavePromiseRef.current || !descriptionSaveQueuedRef.current)
+      return;
+    descriptionSaveQueuedRef.current = false;
+    const targetIssue = issueRef.current;
+    const draft = { ...descriptionDraftRef.current };
+    if (targetIssue && hasDescriptionChanges(draft, targetIssue))
+      void saveDescription(draft.description, draft.title);
+  }, [pending, saving]);
+
+  function handleDescriptionBlur(event: ReactFocusEvent<HTMLTextAreaElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget === titleInputRef.current || nextTarget === descriptionInputRef.current) return;
+    scheduleDescriptionAutosave();
+  }
+
+  async function updateIssueAfterDescriptionSave(patch: Partial<Issue>) {
+    await waitForParentMutation();
+    if (!(await flushDescriptionAutosave())) return;
+    const targetIssue = issueRef.current;
+    if (targetIssue) onUpdate(targetIssue, patch);
+  }
+
+  async function navigateAfterDescriptionSave(path: string) {
+    await waitForParentMutation();
+    if (!(await flushDescriptionAutosave())) return;
+    await router.navigate({ to: path as never });
+  }
+
+  async function closePanel() {
+    const targetIssue = issueRef.current;
+    if (!targetIssue) {
+      onClose();
+      return;
+    }
+    if (descriptionRetry !== null) return;
+    if (
+      !descriptionSavePromiseRef.current &&
+      !hasDescriptionChanges(descriptionDraftRef.current, targetIssue)
+    ) {
+      if (!savingRef.current && !saving) {
+        onClose();
+        return;
+      }
+      await waitForOtherMutation();
+      if (descriptionRetry !== null || descriptionSaveFailedRef.current) return;
+      onClose();
+      return;
+    }
+    if (closePendingRef.current) return;
+    closePendingRef.current = true;
+    descriptionSaveFailedRef.current = false;
+    if (pendingRef.current || pending) {
+      closeAfterDescriptionSaveRef.current = true;
+      descriptionSaveQueuedRef.current = true;
+      await waitForParentMutation();
+    }
+    const autosaveCompleted = await flushDescriptionAutosave();
+    closePendingRef.current = false;
+    if (!autosaveCompleted) return;
+    onClose();
+  }
+
+  function updateDescriptionDraft(next: IssueDescriptionDraft) {
+    descriptionDraftRef.current = next;
+    dirtyDescriptionDraftRef.current = issueRef.current
+      ? hasDescriptionChanges(next, issueRef.current)
+      : false;
+    if (
+      (descriptionSaveDraftRef.current &&
+        !sameDescriptionDraft(next, descriptionSaveDraftRef.current)) ||
+      (!descriptionSaveDraftRef.current &&
+        (savingRef.current || pendingRef.current) &&
+        issueRef.current &&
+        hasDescriptionChanges(next, issueRef.current))
+    ) {
+      descriptionSaveQueuedRef.current = true;
+    }
+    setDescription(next.description);
+    setTitleDraft(next.title);
+    setDescriptionSaveStatus(descriptionSavePromiseRef.current ? "saving" : "idle");
+    setDescriptionFieldErrors(null);
+    setDescriptionRetry(null);
+    setError(null);
   }
 
   async function saveProject(nextProjectId = projectIdDraft) {
-    if (!issue || saving) return;
-    if (nextProjectId === (issue.projectId ?? "")) {
+    const targetIssue = issueRef.current;
+    if (!targetIssue || saving) return;
+    if (nextProjectId === (targetIssue.projectId ?? "")) {
       setProjectRetry(null);
       return;
     }
-    setSaving(true);
+    await waitForParentMutation();
+    if (!(await flushDescriptionAutosave())) return;
+    const saveIssue = issueRef.current;
+    if (!saveIssue) return;
+    if (nextProjectId === (saveIssue.projectId ?? "")) {
+      setProjectRetry(null);
+      return;
+    }
+    setDetailSaving(true);
     setError(null);
     setProjectRetry(null);
     try {
-      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
+      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
         idempotencyKey: idempotencyKey(),
-        version: issue.version,
+        version: saveIssue.version,
         patch: { projectId: projectIdFromSelection(nextProjectId) },
       });
       applyUpdatedIssue(result.issue);
+      dirtyProjectDraftRef.current = false;
+      setProjectIdDraft(result.issue.projectId ?? "");
       setProjectRetry(null);
       await detailQuery.refetch();
     } catch (caught) {
@@ -6614,47 +6916,58 @@ export function IssueDetailPanel({
         const latest = await detailQuery.refetch();
         if (latest.data) {
           applyUpdatedIssue(latest.data.issue);
+          dirtyProjectDraftRef.current = false;
           setProjectIdDraft(latest.data.issue.projectId ?? "");
         } else {
-          setProjectIdDraft(issue.projectId ?? "");
+          dirtyProjectDraftRef.current = false;
+          setProjectIdDraft(saveIssue.projectId ?? "");
         }
       } else {
-        setProjectIdDraft(issue.projectId ?? "");
+        dirtyProjectDraftRef.current = false;
+        setProjectIdDraft(saveIssue.projectId ?? "");
       }
       setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function trashIssue() {
-    if (!issue || saving) return;
+    const targetIssue = issueRef.current;
+    if (!targetIssue || saving) return;
     if (typeof window !== "undefined" && !window.confirm("このIssueをゴミ箱へ移動しますか？"))
       return;
-    setSaving(true);
+    await waitForParentMutation();
+    if (!(await flushDescriptionAutosave())) return;
+    const trashTarget = issueRef.current;
+    if (!trashTarget) return;
+    setDetailSaving(true);
     setError(null);
     try {
-      await apiPost(`/api/v1/issues/${issue.id}?action=trash`, {
+      await apiPost(`/api/v1/issues/${trashTarget.id}?action=trash`, {
         idempotencyKey: idempotencyKey(),
       });
       queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
         current
-          ? { ...current, issues: current.issues.filter((item) => item.id !== issue.id) }
+          ? { ...current, issues: current.issues.filter((item) => item.id !== trashTarget.id) }
           : current,
       );
       await queryClient.invalidateQueries({ queryKey: ["issues"] });
-      queryClient.removeQueries({ queryKey: ["issue-detail", issue.id] });
+      queryClient.removeQueries({ queryKey: ["issue-detail", trashTarget.id] });
       onClose();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Issueの削除に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function archiveCurrentIssue() {
-    if (!issue || saving) return;
-    setSaving(true);
+    const targetIssue = issueRef.current;
+    if (!targetIssue || saving) return;
+    await waitForParentMutation();
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await onArchive();
@@ -6662,13 +6975,14 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Issueのアーカイブに失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function addNote() {
     if (!noteBody || saving) return;
-    setSaving(true);
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await apiPost(`/api/v1/issues/${issueId}/notes`, {
@@ -6680,13 +6994,14 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "メモの追加に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function editNote(note: IssueNoteViewModel) {
     if (!noteDraft || saving) return;
-    setSaving(true);
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await apiPatch(`/api/v1/issues/${issueId}/notes/${note.id}`, {
@@ -6699,13 +7014,14 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "メモの保存に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function removeNote(noteId: string) {
     if (saving) return;
-    setSaving(true);
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await apiDelete(`/api/v1/issues/${issueId}/notes/${noteId}`);
@@ -6713,13 +7029,14 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "メモの削除に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function addRelation() {
     if (!relationTargetId || saving) return;
-    setSaving(true);
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await apiPost(`/api/v1/issues/${issueId}/relations`, {
@@ -6732,13 +7049,14 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Relationの追加に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
   async function removeRelation(relationId: string) {
     if (saving) return;
-    setSaving(true);
+    if (!(await flushDescriptionAutosave())) return;
+    setDetailSaving(true);
     setError(null);
     try {
       await apiDelete(`/api/v1/issues/${issueId}/relations/${relationId}`);
@@ -6746,7 +7064,7 @@ export function IssueDetailPanel({
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Relationの削除に失敗しました。");
     } finally {
-      setSaving(false);
+      setDetailSaving(false);
     }
   }
 
@@ -6757,10 +7075,15 @@ export function IssueDetailPanel({
       aria-modal="true"
       aria-labelledby="issue-detail-title"
       onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          void closePanel();
+        }
       }}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) {
+          void closePanel();
+        }
       }}
     >
       <div className="detail-panel modal-panel">
@@ -6774,13 +7097,19 @@ export function IssueDetailPanel({
               ref={titleInputRef}
               value={titleDraft}
               rows={1}
-              onChange={(event) => setTitleDraft(event.target.value)}
+              onChange={(event) =>
+                updateDescriptionDraft({
+                  description: descriptionDraftRef.current.description,
+                  title: event.target.value,
+                })
+              }
+              onBlur={handleDescriptionBlur}
             />
           </div>
           <button
             className="icon-button detail-close"
             aria-label="Issue詳細を閉じる"
-            onClick={onClose}
+            onClick={() => void closePanel()}
           >
             ×
           </button>
@@ -6810,7 +7139,9 @@ export function IssueDetailPanel({
                   value={issue.priority}
                   disabled={pending || saving}
                   onChange={(event) =>
-                    onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
+                    void updateIssueAfterDescriptionSave({
+                      priority: priorityFromSelection(event.target.value),
+                    })
                   }
                 >
                   {Object.entries(priorityLabel).map(([value, label]) => (
@@ -6825,7 +7156,9 @@ export function IssueDetailPanel({
                   aria-label="IssueのStatus"
                   value={issue.statusId}
                   disabled={pending || saving}
-                  onChange={(event) => onUpdate(issue, { statusId: event.target.value })}
+                  onChange={(event) =>
+                    void updateIssueAfterDescriptionSave({ statusId: event.target.value })
+                  }
                 >
                   {workflowStates.map((state) => (
                     <option value={state.id} key={state.id}>
@@ -6844,7 +7177,12 @@ export function IssueDetailPanel({
                   aria-label="IssueのProject"
                   value={projectIdDraft}
                   disabled={saving}
-                  onChange={(event) => setProjectIdDraft(event.target.value)}
+                  onChange={(event) => {
+                    const nextProjectId = event.target.value;
+                    dirtyProjectDraftRef.current =
+                      nextProjectId !== (issueRef.current?.projectId ?? "");
+                    setProjectIdDraft(nextProjectId);
+                  }}
                 >
                   <option value="">Projectなし</option>
                   {projects.map((project) => (
@@ -6872,7 +7210,9 @@ export function IssueDetailPanel({
                   value={dateInputValue(issue.dueAt)}
                   disabled={pending || saving}
                   onChange={(event) =>
-                    onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })
+                    void updateIssueAfterDescriptionSave({
+                      dueAt: dateInputToUnix(event.target.value),
+                    })
                   }
                 />
                 <label className="field-label" htmlFor="issue-parent">
@@ -6883,7 +7223,11 @@ export function IssueDetailPanel({
                   aria-label="IssueのParent"
                   value={issue.parentId ?? ""}
                   disabled={pending || saving}
-                  onChange={(event) => onUpdate(issue, { parentId: event.target.value || null })}
+                  onChange={(event) =>
+                    void updateIssueAfterDescriptionSave({
+                      parentId: event.target.value || null,
+                    })
+                  }
                 >
                   <option value="">Parentなし</option>
                   {knownIssues
@@ -6913,7 +7257,7 @@ export function IssueDetailPanel({
                     <button
                       className="text-button hierarchy-parent"
                       onClick={() =>
-                        void router.navigate({ to: `/issues/${detail.parent!.id}` as never })
+                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
                       }
                     >
                       ↑ {detail.parent.identifier} · {detail.parent.title}
@@ -6928,7 +7272,7 @@ export function IssueDetailPanel({
                       <button
                         className="text-button child-issue-link"
                         key={child.id}
-                        onClick={() => void router.navigate({ to: `/issues/${child.id}` as never })}
+                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
                       >
                         {child.identifier} · {child.title}
                       </button>
@@ -6951,22 +7295,27 @@ export function IssueDetailPanel({
               <textarea
                 id="issue-description"
                 className="detail-textarea"
+                ref={descriptionInputRef}
                 value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                onChange={(event) =>
+                  updateDescriptionDraft({
+                    description: event.target.value,
+                    title: descriptionDraftRef.current.title,
+                  })
+                }
+                onBlur={handleDescriptionBlur}
                 placeholder="説明を追加…"
                 rows={6}
               />
               <div className="detail-actions">
-                <button
-                  className="button primary"
-                  disabled={
-                    saving || (description === issue.description && titleDraft === issue.title)
-                  }
-                  onClick={() => void saveDescription()}
-                >
-                  {saving ? "保存中…" : "説明を保存"}
-                </button>
-                <button className="button ghost" onClick={onClose}>
+                <span className="detail-save-status" aria-live="polite">
+                  {descriptionSaveStatus === "saving"
+                    ? "自動保存中…"
+                    : descriptionSaveStatus === "saved"
+                      ? "自動保存済み"
+                      : ""}
+                </span>
+                <button className="button ghost" onClick={() => void closePanel()}>
                   閉じる
                 </button>
                 <button
@@ -7113,7 +7462,7 @@ export function IssueDetailPanel({
                       <button
                         className="relation-target"
                         onClick={() =>
-                          void router.navigate({ to: `/issues/${relation.target.id}` as never })
+                          void navigateAfterDescriptionSave(`/issues/${relation.target.id}`)
                         }
                       >
                         <span className="issue-id">{relation.target.identifier}</span>
@@ -7157,14 +7506,17 @@ export function IssueDetailPanel({
         {error && (
           <div className="detail-live-error" role="alert">
             <span>{error}</span>
+            {descriptionFieldErrors && (
+              <span className="detail-field-errors">
+                {Object.values(descriptionFieldErrors).flat().join(" ")}
+              </span>
+            )}
             {descriptionRetry !== null && (
               <button
                 className="text-button"
                 onClick={() => {
                   const retry = descriptionRetry;
-                  setDescription(retry.description);
-                  setTitleDraft(retry.title);
-                  setError(null);
+                  updateDescriptionDraft(retry);
                   setDescriptionRetry(null);
                   void saveDescription(retry.description, retry.title);
                 }}

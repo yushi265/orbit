@@ -1,6 +1,9 @@
+import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { IssuesView } from "./OrbitApp";
 
 const appSource = () => readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
 const styles = () => readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
@@ -49,5 +52,55 @@ describe("Issue experience UI contract", () => {
     );
 
     expect(route).toContain('createFileRoute("/projects/$projectId")');
+  });
+
+  it("[代表値] Issues見出しの補足文を表示しない", () => {
+    const markup = renderToStaticMarkup(
+      createElement(IssuesView, {
+        issues: [],
+        scope: "active",
+        scopeLoading: false,
+        setScope: () => undefined,
+        workflowStates: [],
+        filterText: "",
+        setFilterText: () => undefined,
+        priorityFilter: "all",
+        setPriorityFilter: () => undefined,
+        projectFilter: "all",
+        setProjectFilter: () => undefined,
+        labelFilter: "all",
+        setLabelFilter: () => undefined,
+        showCompleted: true,
+        setShowCompleted: () => undefined,
+        issueSort: "updated_desc",
+        setIssueSort: () => undefined,
+        projects: [],
+        allIssues: [],
+        cycles: [],
+        labels: [],
+        viewMode: "list",
+        setViewMode: () => undefined,
+        selected: [],
+        setSelected: () => undefined,
+        pendingIssueId: null,
+        reorderBusy: false,
+        onUpdate: () => undefined,
+        onRestore: () => undefined,
+        onFocusIssue: () => undefined,
+        filterInputRef: { current: null },
+        displayInputRef: { current: null },
+        modifierLabel: "Ctrl",
+        onReorder: () => undefined,
+        onBulk: async () => undefined,
+        bulkBusy: false,
+        resetBulkMutation: () => undefined,
+        onCreate: () => undefined,
+        onOpenIssue: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("<h1>Issues</h1>");
+    expect(markup).toContain("＋ 新しいIssue");
+    expect(markup).not.toContain("すべての作業を、ここから見渡します。");
   });
 });

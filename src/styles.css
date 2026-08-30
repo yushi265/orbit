@@ -87,7 +87,7 @@ kbd { padding: 2px 5px; border: 1px solid #e1e5eb; border-bottom-width: 2px; bor
 .detail-label { display: block; margin-top: 24px; color: #697688; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .detail-textarea { width: 100%; min-height: 125px; margin-top: 8px; padding: 12px; resize: vertical; border: 1px solid #e3e8ee; border-radius: 8px; outline: 0; color: #3d4a5d; background: #fcfdfe; font-size: 12px; line-height: 1.6; }
 .detail-textarea:focus, .note-compose textarea:focus, .note-card textarea:focus { border-color: #ff9b8c; box-shadow: 0 0 0 3px #fff0ec; }
-.detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.detail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }.detail-save-status { margin-right: auto; color: #9ca5b1; font-size: 10px; }
 .detail-section { margin-top: 28px; padding-top: 20px; border-top: 1px solid #edf0f3; }
 .detail-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .detail-section-heading h3, .detail-activity h3 { margin-top: 7px; color: #4a586b; font-family: 'Space Grotesk', sans-serif; font-size: 16px; letter-spacing: -.03em; }

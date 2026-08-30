@@ -39,6 +39,7 @@ import {
   notificationReadMutationSchema,
   preferencesMutationSchema,
   projectCreateMutationSchema,
+  projectDisplayPreferencesMutationSchema,
   projectMetadataMutationSchema,
   relationMutationSchema,
   reorderIssueInputSchema,
@@ -52,6 +53,7 @@ import {
   issueSearchQuerySchema,
   recentIssueViewMutationSchema,
   recentSearchMutationSchema,
+  type ProjectDisplayPreferencesMutation,
 } from "../shared/contracts";
 
 const projectMetadataPatchEnvelopeSchema = z.strictObject({
@@ -362,6 +364,23 @@ export async function createProject(request: Request): Promise<Response> {
 export async function updateProject(request: Request, projectId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
     const body = await parseBody(request);
+    if (Object.prototype.hasOwnProperty.call(body, "displayPreferences")) {
+      const displayPreferences = parseContract(projectDisplayPreferencesMutationSchema, {
+        ...body,
+        idempotencyKey: bodyMutationKey(body, request),
+      }) as ProjectDisplayPreferencesMutation;
+      return json(
+        {
+          projectDisplayPreference: owner.store.updateProjectDisplayPreferences(
+            owner.userId,
+            projectId,
+            displayPreferences,
+          ),
+        },
+        200,
+        requestId,
+      );
+    }
     const parsed = Object.prototype.hasOwnProperty.call(body, "patch")
       ? (() => {
           const envelope = parseContract(projectMetadataPatchEnvelopeSchema, body);

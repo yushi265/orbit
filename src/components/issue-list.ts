@@ -1,5 +1,9 @@
 import type { Priority } from "../shared/contracts";
 import type {
+  ProjectIssueDisplaySettings,
+  ProjectIssueDueFilter,
+} from "../shared/contracts/project-display";
+import type {
   IssueViewModel as Issue,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
@@ -13,6 +17,17 @@ export type IssueSort =
   | "status_asc"
   | "priority_desc"
   | "due_asc";
+
+export type IssueDueFilter = ProjectIssueDueFilter;
+
+export interface IssueFilterState {
+  filterText: string;
+  statusFilter: string;
+  priorityFilter: Issue["priority"] | "all";
+  projectFilter: string;
+  labelFilter: string;
+  dueFilter: IssueDueFilter;
+}
 
 export const issueSortOptions: ReadonlyArray<{ value: IssueSort; label: string }> = [
   { value: "manual", label: "手動" },
@@ -50,6 +65,99 @@ export function filterIssuesByProject(issues: readonly Issue[], projectFilter: s
     return issues.filter((issue) => issue.projectId === null);
   }
   return issues.filter((issue) => issue.projectId === projectFilter);
+}
+
+function dateParts(value: number, timeZone: string): Record<string, string> {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      calendar: "gregory",
+      numberingSystem: "latn",
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(new Date(value))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+}
+
+export function issueDateKeyInTimeZone(value: number, timeZone: string): string {
+  const parts = dateParts(value, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function filterIssuesByDue(
+  issues: readonly Issue[],
+  dueFilter: IssueDueFilter,
+  now: number,
+  timeZone: string,
+): Issue[] {
+  if (dueFilter === "all") return [...issues];
+  if (dueFilter === "none") return issues.filter((issue) => issue.dueAt === null);
+  const today = issueDateKeyInTimeZone(now, timeZone);
+  return issues.filter((issue) => {
+    if (issue.dueAt === null) return false;
+    const due = issueDateKeyInTimeZone(issue.dueAt, timeZone);
+    if (dueFilter === "overdue") return due < today;
+    if (dueFilter === "today") return due === today;
+    return due > today;
+  });
+}
+
+export function filterIssues(
+  issues: readonly Issue[],
+  filters: IssueFilterState,
+  now: number,
+  timeZone: string,
+): Issue[] {
+  const text = filters.filterText.trim().toLocaleLowerCase();
+  const filtered = issues.filter((issue) => {
+    const matchesText =
+      !text ||
+      `${issue.identifier} ${issue.title} ${issue.description}`.toLocaleLowerCase().includes(text);
+    const matchesStatus = filters.statusFilter === "all" || issue.statusId === filters.statusFilter;
+    const matchesPriority =
+      filters.priorityFilter === "all" || issue.priority === filters.priorityFilter;
+    const matchesProject =
+      filters.projectFilter === "all" ||
+      (filters.projectFilter === NO_PROJECT_OPTION
+        ? issue.projectId === null
+        : issue.projectId === filters.projectFilter);
+    const matchesLabel =
+      filters.labelFilter === "all" || issue.labelIds.includes(filters.labelFilter);
+    return matchesText && matchesStatus && matchesPriority && matchesProject && matchesLabel;
+  });
+  return filterIssuesByDue(filtered, filters.dueFilter, now, timeZone);
+}
+
+export function filterProjectIssues(
+  issues: readonly Issue[],
+  projectId: string,
+  settings: ProjectIssueDisplaySettings,
+  workflowStates: readonly WorkflowState[],
+  now: number,
+  timeZone: string,
+): Issue[] {
+  const filtered = filterIssues(
+    issues.filter((issue) => !issue.archivedAt && !issue.deletedAt),
+    {
+      filterText: settings.filterText,
+      statusFilter: settings.statusFilter,
+      priorityFilter: settings.priorityFilter,
+      projectFilter: projectId,
+      labelFilter: settings.labelFilter,
+      dueFilter: settings.dueFilter,
+    },
+    now,
+    timeZone,
+  );
+  return sortIssues(
+    filterCompletedIssues(filtered, workflowStates, settings.showCompleted),
+    settings.order,
+    workflowStates,
+  );
 }
 
 function tieBreak(left: Issue, right: Issue): number {

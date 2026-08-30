@@ -26,8 +26,14 @@ import type {
   LabelViewModel as Label,
   RecentIssueViewModel,
   RecentSearchViewModel,
+  ProjectDisplayPreferenceViewModel,
 } from "../shared/view-models";
-import type { ColorTheme, IssueListScope } from "../shared/contracts";
+import {
+  defaultProjectIssueDisplaySettings,
+  type ColorTheme,
+  type IssueListScope,
+  type ProjectIssueDisplaySettings,
+} from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
@@ -35,11 +41,14 @@ import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
   filterCompletedIssues,
-  filterIssuesByProject,
+  filterIssues,
+  filterProjectIssues,
   issueSortOptions,
+  type IssueDueFilter,
   type IssueSort,
   sortIssues,
 } from "./issue-list";
+import { buildHomeSummary, homeDateLabel, homeRelativeDay } from "./home";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
@@ -78,6 +87,7 @@ type IssueReorderVariables = {
   idempotencyKey: string;
   cycleId?: string;
   statusId?: string;
+  projectId?: string;
 };
 
 export function activityTitle(event: { action: string; actorType: string }): string {
@@ -241,7 +251,9 @@ function OrbitAppInner(props: Props) {
   const [viewMode, setViewMode] = useState<"list" | "board">("list");
   const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
   const [projectFilter, setProjectFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [labelFilter, setLabelFilter] = useState("all");
+  const [dueFilter, setDueFilter] = useState<IssueDueFilter>("all");
   const [showCompleted, setShowCompleted] = useState(true);
   const [showCompletedReady, setShowCompletedReady] = useState(false);
   const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
@@ -280,6 +292,7 @@ function OrbitAppInner(props: Props) {
   const toastTimerRef = useRef<number | undefined>(undefined);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
+  const [clockNow] = useState(() => Date.now());
 
   function rememberIssueFocus(issueId: string) {
     issueTriggerIdRef.current = issueId;
@@ -345,6 +358,7 @@ function OrbitAppInner(props: Props) {
   const issueWorkspaceIssues =
     issueScope === "active" ? issues : (scopedIssuesQuery.data?.items ?? []);
   const projects = data?.projects ?? [];
+  const projectDisplayPreferences = data?.projectDisplayPreferences ?? [];
   const cycles = data?.cycles ?? [];
   const labels = data?.labels ?? [];
   const notifications = data?.notifications ?? [];
@@ -355,16 +369,19 @@ function OrbitAppInner(props: Props) {
     typeof navigator === "undefined" ? undefined : navigator.platform,
   );
   const visibleIssues = useMemo(() => {
-    const filtered = filterIssuesByProject(issueWorkspaceIssues, projectFilter).filter((issue) => {
-      const matchesText =
-        !filterText.trim() ||
-        `${issue.identifier} ${issue.title} ${issue.description}`
-          .toLocaleLowerCase()
-          .includes(filterText.toLocaleLowerCase());
-      const matchesPriority = priorityFilter === "all" || issue.priority === priorityFilter;
-      const matchesLabel = labelFilter === "all" || issue.labelIds.includes(labelFilter);
-      return matchesText && matchesPriority && matchesLabel;
-    });
+    const filtered = filterIssues(
+      issueWorkspaceIssues,
+      {
+        filterText,
+        statusFilter,
+        priorityFilter,
+        projectFilter,
+        labelFilter,
+        dueFilter,
+      },
+      clockNow,
+      data?.preferences.timezone ?? "UTC",
+    );
     return sortIssues(
       filterCompletedIssues(filtered, workflowStates, showCompleted),
       issueSort,
@@ -375,10 +392,14 @@ function OrbitAppInner(props: Props) {
     filterText,
     priorityFilter,
     projectFilter,
+    statusFilter,
     labelFilter,
+    dueFilter,
     workflowStates,
     showCompleted,
     issueSort,
+    clockNow,
+    data?.preferences.timezone,
   ]);
 
   useEffect(() => {
@@ -403,6 +424,11 @@ function OrbitAppInner(props: Props) {
       setProjectFilter("all");
     }
   }, [projects, projectFilter]);
+
+  useEffect(() => {
+    if (statusFilter !== "all" && !workflowStates.some((state) => state.id === statusFilter))
+      setStatusFilter("all");
+  }, [statusFilter, workflowStates]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -773,6 +799,7 @@ function OrbitAppInner(props: Props) {
       idempotencyKey: mutationKey,
       cycleId,
       statusId,
+      projectId,
     }: IssueReorderVariables) =>
       apiPost<{ issue: Issue }>("/api/v1/issues/reorder", {
         idempotencyKey: mutationKey,
@@ -781,6 +808,7 @@ function OrbitAppInner(props: Props) {
         beforeIssueId,
         ...(cycleId === undefined ? {} : { cycleId }),
         ...(statusId === undefined ? {} : { statusId }),
+        ...(projectId === undefined ? {} : { projectId }),
       }),
     onSuccess: async ({ issue }) => {
       await refresh();
@@ -822,6 +850,30 @@ function OrbitAppInner(props: Props) {
     queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
       current ? { ...current, preferences: result.preferences } : current,
     );
+  }
+
+  async function saveProjectDisplayPreferences(
+    projectId: string,
+    displayPreferences: ProjectIssueDisplaySettings,
+    mutationKey = idempotencyKey(),
+  ): Promise<ProjectDisplayPreferenceViewModel> {
+    const result = await apiPatch<{
+      projectDisplayPreference: ProjectDisplayPreferenceViewModel;
+    }>(`/api/v1/projects/${projectId}`, {
+      idempotencyKey: mutationKey,
+      displayPreferences,
+    });
+    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) => {
+      if (!current) return current;
+      const next = current.projectDisplayPreferences.filter(
+        (preference) => preference.projectId !== projectId,
+      );
+      return {
+        ...current,
+        projectDisplayPreferences: [...next, result.projectDisplayPreference],
+      };
+    });
+    return result.projectDisplayPreference;
   }
 
   async function saveCycleSettings(
@@ -866,6 +918,11 @@ function OrbitAppInner(props: Props) {
     setSelected([]);
     const path = next === "home" ? "/" : next === "settings" ? "/settings" : `/${next}`;
     await router.navigate({ to: path as never });
+  }
+
+  function openIssueComposer(projectId = "") {
+    setNewProjectId(projectId);
+    setComposerOpen(true);
   }
 
   async function markNotificationRead(notification: BootstrapPayload["notifications"][number]) {
@@ -1176,6 +1233,7 @@ function OrbitAppInner(props: Props) {
             <HomeView
               data={data}
               onNavigate={navigate}
+              onCreate={() => openIssueComposer()}
               onOpenIssue={(issue) => {
                 rememberIssueFocus(issue.id);
                 setSection("issues");
@@ -1196,10 +1254,14 @@ function OrbitAppInner(props: Props) {
               setFilterText={setFilterText}
               priorityFilter={priorityFilter}
               setPriorityFilter={setPriorityFilter}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
               projectFilter={projectFilter}
               setProjectFilter={setProjectFilter}
               labelFilter={labelFilter}
               setLabelFilter={setLabelFilter}
+              dueFilter={dueFilter}
+              setDueFilter={setDueFilter}
               showCompleted={showCompleted}
               setShowCompleted={setShowCompleted}
               issueSort={issueSort}
@@ -1278,6 +1340,31 @@ function OrbitAppInner(props: Props) {
               projectId={props.projectId}
               workflowStates={workflowStates}
               projectStatuses={data.projectStatuses}
+              timezone={data.preferences.timezone}
+              cycles={cycles}
+              labels={labels}
+              projectDisplayPreferences={projectDisplayPreferences}
+              selected={selected}
+              setSelected={setSelected}
+              pendingIssueId={pendingIssueId}
+              reorderBusy={reorderIssueMutation.isPending}
+              onUpdateIssue={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onReorderIssue={(issue, beforeIssueId, projectId) =>
+                reorderIssueMutation.mutate({
+                  issue,
+                  beforeIssueId,
+                  projectId,
+                  idempotencyKey: idempotencyKey(),
+                })
+              }
+              onBulk={bulkUpdateIssues}
+              bulkBusy={bulkBusy}
+              resetBulkMutation={() => {
+                bulkMutationKeyRef.current = null;
+              }}
+              onCreateIssue={openIssueComposer}
+              onSaveDisplayPreferences={saveProjectDisplayPreferences}
+              modifierLabel={modifierLabel}
               onCreate={() => setProjectComposerOpen(true)}
               onRefresh={refresh}
               onOpenIssue={(issue) => {
@@ -1639,58 +1726,73 @@ function NavItem({
   );
 }
 
-function HomeView({
+export function HomeView({
   data,
   onNavigate,
+  onCreate,
   onOpenIssue,
 }: {
   data: BootstrapPayload;
   onNavigate: (section: Section) => void;
+  onCreate: () => void;
   onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
 }) {
-  const cycle = data.cycles.find((item) => item.status === "active");
-  const cycleIssues = cycle ? data.issues.filter((item) => item.cycleId === cycle.id) : [];
-  const cycleMetrics = calculateCycleMetrics(cycleIssues, data.workflowStates);
+  const now = Date.now();
+  const summary = buildHomeSummary(data, now);
+  const activeProjects = data.projects.filter(
+    (project) => !project.archivedAt && !project.deletedAt,
+  );
   return (
     <div className="page">
-      <div className="page-heading">
+      <div className="page-heading home-heading">
         <div>
-          <span className="eyebrow">SUNDAY, AUGUST 23</span>
+          <span className="eyebrow home-date">{homeDateLabel(now, data.preferences.timezone)}</span>
           <h1>
-            おかえりなさい、<em>Orbit User</em>
+            おかえりなさい、<em>{data.me.name}</em>
           </h1>
-          <p className="subheading">今日も、小さく進めていきましょう。</p>
+          <p className="subheading">今日やることを確認して、次の一歩を始めましょう。</p>
         </div>
-        <button className="button primary" onClick={() => onNavigate("issues")}>
-          Issuesを見る <span>→</span>
-        </button>
+        <div className="home-heading-actions">
+          <button className="button secondary" onClick={() => onNavigate("issues")}>
+            Issuesを見る
+          </button>
+          <button className="button primary" onClick={onCreate}>
+            ＋ Issueを作成 <kbd>C</kbd>
+          </button>
+        </div>
       </div>
       <div className="home-grid">
         <section className="hero-card cycle-card">
           <div className="card-top">
             <div>
               <span className="eyebrow coral">CURRENT CYCLE</span>
-              <h2>{cycle?.nameOverride ?? cycle?.name ?? "Active Cycleなし"}</h2>
+              <h2>
+                {summary.activeCycle?.nameOverride ??
+                  summary.activeCycle?.name ??
+                  "Active Cycleなし"}
+              </h2>
               <p>
-                {cycle ? formatRange(cycle.startsAt, cycle.endsAt) : "次のCycleを設定しましょう"}
+                {summary.activeCycle
+                  ? formatRange(summary.activeCycle.startsAt, summary.activeCycle.endsAt)
+                  : "次のCycleを設定しましょう"}
               </p>
             </div>
             <span className="cycle-orbit">◒</span>
           </div>
-          {cycle && (
+          {summary.activeCycle ? (
             <>
               <div className="progress-line">
                 <span
                   style={{
-                    width: `${cycleMetrics.progressPercent}%`,
+                    width: `${summary.cycleMetrics.progressPercent}%`,
                   }}
                 />
               </div>
               <div className="cycle-stats">
                 <div>
                   <strong>
-                    {cycleMetrics.completed}
-                    <small> / {cycleMetrics.total - cycleMetrics.canceled}</small>
+                    {summary.cycleMetrics.completed}
+                    <small> / {summary.cycleMetrics.total - summary.cycleMetrics.canceled}</small>
                   </strong>
                   <span>完了したIssue</span>
                 </div>
@@ -1699,43 +1801,249 @@ function HomeView({
                 </button>
               </div>
             </>
+          ) : (
+            <button
+              className="button secondary home-cycle-setup"
+              onClick={() => onNavigate("cycles")}
+            >
+              Cycleを確認する →
+            </button>
           )}
         </section>
         <section className="metric-card">
           <span className="metric-icon purple">✦</span>
           <span className="eyebrow">OPEN ISSUES</span>
-          <strong>{data.issues.length}</strong>
-          <span className="metric-foot">Across your workspace</span>
+          <strong>{summary.openIssueCount}</strong>
+          <span className="metric-foot">未完了のIssue</span>
         </section>
         <section className="metric-card">
           <span className="metric-icon green">↗</span>
           <span className="eyebrow">PROJECTS</span>
-          <strong>{data.projects.length}</strong>
-          <span className="metric-foot">
-            {data.projects.filter((item) => item.archivedAt).length ? "1 archived" : "All active"}
-          </span>
+          <strong>{summary.activeProjectCount}</strong>
+          <span className="metric-foot">進行中のProject</span>
         </section>
       </div>
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">RECENTLY UPDATED</span>
-          <h2>最近のIssue</h2>
+      <section className="home-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow coral">NEXT ACTIONS</span>
+            <h2>期限から確認する</h2>
+          </div>
+          <button className="text-button" onClick={() => onNavigate("issues")}>
+            Issue一覧を開く →
+          </button>
         </div>
-        <button className="text-button" onClick={() => onNavigate("issues")}>
-          すべて見る →
-        </button>
-      </div>
-      <div className="recent-list">
-        {data.issues.slice(0, 4).map((issue) => (
-          <IssueRow
-            key={issue.id}
-            issue={issue}
-            state={data.workflowStates.find((item) => item.id === issue.statusId)}
-            compact
-            onClick={(trigger) => onOpenIssue(issue, trigger)}
+        <div className="home-deadline-grid">
+          <HomeIssueSection
+            label="OVERDUE"
+            title="期限超過"
+            issues={summary.overdue}
+            workflowStates={data.workflowStates}
+            now={now}
+            timezone={data.preferences.timezone}
+            empty="期限超過のIssueはありません。"
+            onOpenIssue={onOpenIssue}
           />
-        ))}
+          <HomeIssueSection
+            label="TODAY"
+            title="今日が期限"
+            issues={summary.dueToday}
+            workflowStates={data.workflowStates}
+            now={now}
+            timezone={data.preferences.timezone}
+            empty="今日が期限のIssueはありません。"
+            onOpenIssue={onOpenIssue}
+          />
+          <HomeIssueSection
+            label="NEXT 7 DAYS"
+            title="7日以内"
+            issues={summary.dueSoon}
+            workflowStates={data.workflowStates}
+            now={now}
+            timezone={data.preferences.timezone}
+            empty="7日以内に期限が来るIssueはありません。"
+            onOpenIssue={onOpenIssue}
+          />
+        </div>
+      </section>
+      <section className="home-section home-cycle-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow coral">CURRENT CYCLE</span>
+            <h2>Cycleの未完了Issue</h2>
+          </div>
+          <button className="text-button" onClick={() => onNavigate("cycles")}>
+            Cycle詳細 →
+          </button>
+        </div>
+        {summary.activeCycle ? (
+          <HomeIssueSection
+            label={`${summary.cycleMetrics.progressPercent}% COMPLETE`}
+            title={summary.activeCycle.nameOverride ?? summary.activeCycle.name}
+            issues={summary.currentCycleIssues}
+            workflowStates={data.workflowStates}
+            now={now}
+            timezone={data.preferences.timezone}
+            empty="Current Cycleに未完了Issueはありません。"
+            onOpenIssue={onOpenIssue}
+          />
+        ) : (
+          <div className="home-empty-card">
+            <strong>Active Cycleはありません</strong>
+            <span>Cycleを確認すると、ここに今取り組むIssueが表示されます。</span>
+          </div>
+        )}
+      </section>
+      <section className="home-section">
+        <div>
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">RECENTLY UPDATED</span>
+              <h2>最近更新されたIssue</h2>
+            </div>
+            <button className="text-button" onClick={() => onNavigate("issues")}>
+              すべて見る →
+            </button>
+          </div>
+          <HomeIssueList
+            issues={summary.recentIssues}
+            workflowStates={data.workflowStates}
+            now={now}
+            timezone={data.preferences.timezone}
+            empty="最近更新されたIssueはありません。"
+            onOpenIssue={onOpenIssue}
+          />
+        </div>
+      </section>
+      <section className="home-section home-project-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">PROJECTS</span>
+            <h2>Projectの進捗</h2>
+          </div>
+          <button className="text-button" onClick={() => onNavigate("projects")}>
+            Projectsを見る →
+          </button>
+        </div>
+        <div className="home-project-list">
+          {activeProjects.slice(0, 4).map((project) => {
+            const projectIssues = data.issues.filter(
+              (issue) => issue.projectId === project.id && !issue.archivedAt && !issue.deletedAt,
+            );
+            const metrics = calculateCycleMetrics(projectIssues, data.workflowStates);
+            return (
+              <Link
+                className="home-project-item"
+                key={project.id}
+                to={projectDetailPath(project.id) as never}
+              >
+                <span className="project-icon" style={{ background: project.color }}>
+                  {project.icon}
+                </span>
+                <span className="home-project-copy">
+                  <strong>{project.name}</strong>
+                  <span>
+                    {metrics.progressPercent}% · {projectIssues.length} Issues
+                  </span>
+                </span>
+                <span className="home-project-arrow">→</span>
+              </Link>
+            );
+          })}
+          {activeProjects.length === 0 && (
+            <div className="home-empty-card">
+              <strong>Projectはまだありません</strong>
+              <span>Projectsから作成すると、ここで進捗を確認できます。</span>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HomeIssueSection({
+  label,
+  title,
+  issues,
+  workflowStates,
+  now,
+  timezone,
+  empty,
+  onOpenIssue,
+}: {
+  label: string;
+  title: string;
+  issues: Issue[];
+  workflowStates: WorkflowState[];
+  now: number;
+  timezone: string;
+  empty: string;
+  onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
+}) {
+  return (
+    <section className="home-issue-section">
+      <div className="home-issue-section-heading">
+        <div>
+          <span className="eyebrow">{label}</span>
+          <h3>{title}</h3>
+        </div>
+        <span className="count-pill">{issues.length}</span>
       </div>
+      <HomeIssueList
+        issues={issues.slice(0, 4)}
+        workflowStates={workflowStates}
+        now={now}
+        timezone={timezone}
+        empty={empty}
+        onOpenIssue={onOpenIssue}
+      />
+      {issues.length > 4 && <span className="home-more-hint">他 {issues.length - 4}件</span>}
+    </section>
+  );
+}
+
+function HomeIssueList({
+  issues,
+  workflowStates,
+  now,
+  timezone,
+  empty,
+  onOpenIssue,
+}: {
+  issues: Issue[];
+  workflowStates: WorkflowState[];
+  now: number;
+  timezone: string;
+  empty: string;
+  onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
+}) {
+  if (issues.length === 0) {
+    return <p className="home-issue-empty">{empty}</p>;
+  }
+  return (
+    <div className="home-issue-list">
+      {issues.map((issue) => (
+        <button
+          className="home-issue-row"
+          data-issue-id={issue.id}
+          key={issue.id}
+          onClick={(event) => onOpenIssue(issue, event.currentTarget)}
+        >
+          <span className="home-issue-main">
+            <span className="issue-id">{issue.identifier}</span>
+            <strong>{issue.title}</strong>
+          </span>
+          <span className="home-issue-meta">
+            <span className="home-issue-status">
+              {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "Status"}
+            </span>
+            <span className="home-issue-due">
+              {issue.dueAt === null ? "期限なし" : homeRelativeDay(issue.dueAt, now, timezone)}
+            </span>
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -1750,10 +2058,14 @@ export function IssuesView({
   setFilterText,
   priorityFilter,
   setPriorityFilter,
+  statusFilter = "all",
+  setStatusFilter = () => undefined,
   projectFilter,
   setProjectFilter,
   labelFilter,
   setLabelFilter,
+  dueFilter = "all",
+  setDueFilter = () => undefined,
   showCompleted,
   setShowCompleted,
   issueSort,
@@ -1780,6 +2092,10 @@ export function IssuesView({
   resetBulkMutation,
   onCreate,
   onOpenIssue,
+  showProjectFilter = true,
+  showScopeFilter = true,
+  showHeading = true,
+  displaySettingsBusy = false,
 }: {
   issues: Issue[];
   scope: IssueListScope;
@@ -1790,10 +2106,14 @@ export function IssuesView({
   setFilterText: (value: string) => void;
   priorityFilter: Issue["priority"] | "all";
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
+  statusFilter?: string;
+  setStatusFilter?: (value: string) => void;
   projectFilter: string;
   setProjectFilter: (value: string) => void;
   labelFilter: string;
   setLabelFilter: (value: string) => void;
+  dueFilter?: IssueDueFilter;
+  setDueFilter?: (value: IssueDueFilter) => void;
   showCompleted: boolean;
   setShowCompleted: (value: boolean) => void;
   issueSort: IssueSort;
@@ -1820,6 +2140,10 @@ export function IssuesView({
   resetBulkMutation: () => void;
   onCreate: () => void;
   onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
+  showProjectFilter?: boolean;
+  showScopeFilter?: boolean;
+  showHeading?: boolean;
+  displaySettingsBusy?: boolean;
 }) {
   const [bulkField, setBulkField] = useState<"status" | "priority" | "cycle" | "project" | "label">(
     "status",
@@ -1835,15 +2159,19 @@ export function IssuesView({
     .filter((group) => group.issues.length > 0);
   const hasIssueFilter =
     Boolean(filterText.trim()) ||
+    statusFilter !== "all" ||
     priorityFilter !== "all" ||
-    projectFilter !== "all" ||
+    (showProjectFilter && projectFilter !== "all") ||
     labelFilter !== "all" ||
+    dueFilter !== "all" ||
     !showCompleted;
   function clearIssueFilters() {
     setFilterText("");
+    setStatusFilter("all");
     setPriorityFilter("all");
-    setProjectFilter("all");
+    if (showProjectFilter) setProjectFilter("all");
     setLabelFilter("all");
+    setDueFilter("all");
     setShowCompleted(true);
   }
 
@@ -1870,17 +2198,19 @@ export function IssuesView({
   }
 
   return (
-    <div className="page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">WORKSPACE / ISSUES</span>
-          <h1>Issues</h1>
-          <p className="subheading">すべての作業を、ここから見渡します。</p>
+    <div className={`page ${showHeading ? "" : "issue-workspace-embedded"}`}>
+      {showHeading && (
+        <div className="page-heading compact-heading">
+          <div>
+            <span className="eyebrow">WORKSPACE / ISSUES</span>
+            <h1>Issues</h1>
+            <p className="subheading">すべての作業を、ここから見渡します。</p>
+          </div>
+          <button className="button primary" onClick={onCreate}>
+            ＋ 新しいIssue <kbd>C</kbd>
+          </button>
         </div>
-        <button className="button primary" onClick={onCreate}>
-          ＋ 新しいIssue <kbd>C</kbd>
-        </button>
-      </div>
+      )}
       <div className="toolbar">
         <div className="inline-search">
           <span>⌕</span>
@@ -1890,14 +2220,31 @@ export function IssuesView({
             value={filterText}
             onChange={(event) => setFilterText(event.target.value)}
             placeholder="Issueを検索…"
+            disabled={displaySettingsBusy}
           />
           <kbd>{modifierLabel} F</kbd>
         </div>
         <select
           className="filter-select"
+          id="issues-status-filter"
+          aria-label="Statusで絞り込む"
+          value={statusFilter}
+          disabled={displaySettingsBusy}
+          onChange={(event) => setStatusFilter(event.target.value)}
+        >
+          <option value="all">すべてのStatus</option>
+          {workflowStates.map((state) => (
+            <option value={state.id} key={state.id}>
+              {state.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="filter-select"
           id="issues-priority-filter"
           aria-label="Priorityで絞り込む"
           value={priorityFilter}
+          disabled={displaySettingsBusy}
           onChange={(event) => setPriorityFilter(event.target.value as Issue["priority"] | "all")}
         >
           <option value="all">すべてのPriority</option>
@@ -1907,36 +2254,42 @@ export function IssuesView({
             </option>
           ))}
         </select>
-        <select
-          className="filter-select"
-          id="issues-project-filter"
-          aria-label="Projectで絞り込む"
-          value={projectFilter}
-          onChange={(event) => setProjectFilter(event.target.value)}
-        >
-          <option value="all">すべてのProject</option>
-          <option value={NO_PROJECT_OPTION}>Projectなし</option>
-          {projects.map((project) => (
-            <option value={project.id} key={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="filter-select"
-          id="issues-scope-filter"
-          aria-label="Issueの表示範囲"
-          value={scope}
-          disabled={scopeLoading}
-          onChange={(event) => setScope(event.target.value as IssueListScope)}
-        >
-          <option value="active">Active Issues</option>
-          <option value="archived">Archived Issues</option>
-        </select>
+        {showProjectFilter && (
+          <select
+            className="filter-select"
+            id="issues-project-filter"
+            aria-label="Projectで絞り込む"
+            value={projectFilter}
+            disabled={displaySettingsBusy}
+            onChange={(event) => setProjectFilter(event.target.value)}
+          >
+            <option value="all">すべてのProject</option>
+            <option value={NO_PROJECT_OPTION}>Projectなし</option>
+            {projects.map((project) => (
+              <option value={project.id} key={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {showScopeFilter && (
+          <select
+            className="filter-select"
+            id="issues-scope-filter"
+            aria-label="Issueの表示範囲"
+            value={scope}
+            disabled={scopeLoading || displaySettingsBusy}
+            onChange={(event) => setScope(event.target.value as IssueListScope)}
+          >
+            <option value="active">Active Issues</option>
+            <option value="archived">Archived Issues</option>
+          </select>
+        )}
         <select
           className="filter-select"
           aria-label="Labelで絞り込む"
           value={labelFilter}
+          disabled={displaySettingsBusy}
           onChange={(event) => setLabelFilter(event.target.value)}
         >
           <option value="all">すべてのLabel</option>
@@ -1952,6 +2305,7 @@ export function IssuesView({
           id="issues-sort-select"
           aria-label="Issueのソート"
           value={issueSort}
+          disabled={displaySettingsBusy}
           onChange={(event) => setIssueSort(event.target.value as IssueSort)}
         >
           {issueSortOptions.map((option) => (
@@ -1960,10 +2314,25 @@ export function IssuesView({
             </option>
           ))}
         </select>
+        <select
+          className="filter-select"
+          id="issues-due-filter"
+          aria-label="Due dateで絞り込む"
+          value={dueFilter}
+          disabled={displaySettingsBusy}
+          onChange={(event) => setDueFilter(event.target.value as IssueDueFilter)}
+        >
+          <option value="all">すべての期限</option>
+          <option value="none">期限なし</option>
+          <option value="overdue">期限超過</option>
+          <option value="today">今日が期限</option>
+          <option value="upcoming">今後が期限</option>
+        </select>
         <label className="completed-toggle">
           <input
             type="checkbox"
             checked={showCompleted}
+            disabled={displaySettingsBusy}
             onChange={(event) => setShowCompleted(event.target.checked)}
           />
           完了Issueを表示
@@ -1972,12 +2341,14 @@ export function IssuesView({
         <div className="view-toggle-group">
           <button
             className={`view-toggle ${viewMode === "list" ? "selected" : ""}`}
+            disabled={displaySettingsBusy}
             onClick={() => setViewMode("list")}
           >
             ☷ List
           </button>
           <button
             className={`view-toggle ${viewMode === "board" ? "selected" : ""}`}
+            disabled={displaySettingsBusy}
             onClick={() => setViewMode("board")}
           >
             ▦ Board
@@ -3479,12 +3850,28 @@ export function CyclesView({
   );
 }
 
-function ProjectsView({
+export function ProjectsView({
   projects,
   issues,
   projectId,
   workflowStates,
   projectStatuses,
+  timezone,
+  cycles,
+  labels,
+  projectDisplayPreferences,
+  selected,
+  setSelected,
+  pendingIssueId,
+  reorderBusy,
+  onUpdateIssue,
+  onReorderIssue,
+  onBulk,
+  bulkBusy,
+  resetBulkMutation,
+  onCreateIssue,
+  onSaveDisplayPreferences,
+  modifierLabel,
   onCreate,
   onRefresh,
   onOpenIssue,
@@ -3494,6 +3881,26 @@ function ProjectsView({
   projectId?: string;
   workflowStates: WorkflowState[];
   projectStatuses: BootstrapPayload["projectStatuses"];
+  timezone: string;
+  cycles: Cycle[];
+  labels: Label[];
+  projectDisplayPreferences: BootstrapPayload["projectDisplayPreferences"];
+  selected: string[];
+  setSelected: (value: string[]) => void;
+  pendingIssueId: string | null;
+  reorderBusy: boolean;
+  onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
+  onReorderIssue: (issue: Issue, beforeIssueId: string | null, projectId: string) => void;
+  onBulk: (patch: Record<string, unknown>) => Promise<void>;
+  bulkBusy: boolean;
+  resetBulkMutation: () => void;
+  onCreateIssue: (projectId: string) => void;
+  onSaveDisplayPreferences: (
+    projectId: string,
+    settings: ProjectIssueDisplaySettings,
+    mutationKey?: string,
+  ) => Promise<ProjectDisplayPreferenceViewModel>;
+  modifierLabel: "⌘" | "Ctrl";
   onCreate: () => void;
   onRefresh: () => void;
   onOpenIssue: (issue: Issue) => void;
@@ -3509,6 +3916,17 @@ function ProjectsView({
   const [error, setError] = useState<string | null>(null);
   const mutationKeyRef = useRef<string | null>(null);
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const [displaySettings, setDisplaySettings] = useState<ProjectIssueDisplaySettings>(() =>
+    defaultProjectIssueDisplaySettings(),
+  );
+  const [displaySettingsReady, setDisplaySettingsReady] = useState(false);
+  const [displaySaving, setDisplaySaving] = useState(false);
+  const [displayError, setDisplayError] = useState<string | null>(null);
+  const displaySaveTimerRef = useRef<number | undefined>(undefined);
+  const displayMutationKeyRef = useRef<string | null>(null);
+  const persistedDisplaySettingsRef = useRef<string | null>(null);
+  const projectIssueFilterInputRef = useRef<HTMLInputElement>(null);
+  const projectIssueDisplayInputRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
     if (projectId) setSelectedProjectId(projectId);
@@ -3519,10 +3937,24 @@ function ProjectsView({
         (issue) =>
           issue.userId === selectedProject.userId &&
           issue.projectId === selectedProject.id &&
+          !issue.archivedAt &&
           !issue.deletedAt,
       )
     : [];
   const projectMetrics = calculateCycleMetrics(projectIssues, workflowStates);
+  const savedDisplayPreferences = selectedProject
+    ? projectDisplayPreferences.find((item) => item.projectId === selectedProject.id)
+    : undefined;
+  const projectVisibleIssues = selectedProject
+    ? filterProjectIssues(
+        projectIssues,
+        selectedProject.id,
+        displaySettings,
+        workflowStates,
+        Date.now(),
+        timezone,
+      )
+    : [];
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -3543,6 +3975,100 @@ function ProjectsView({
     selectedProject?.statusId,
     selectedProject?.targetAt,
   ]);
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setDisplaySettingsReady(false);
+      return;
+    }
+    const next = savedDisplayPreferences?.settings ?? defaultProjectIssueDisplaySettings();
+    setDisplaySettings(next);
+    persistedDisplaySettingsRef.current = JSON.stringify(next);
+    displayMutationKeyRef.current = null;
+    setDisplaySettingsReady(true);
+    setDisplayError(null);
+  }, [selectedProject?.id, savedDisplayPreferences?.updatedAt]);
+
+  useEffect(
+    () => () => {
+      if (displaySaveTimerRef.current !== undefined)
+        window.clearTimeout(displaySaveTimerRef.current);
+    },
+    [],
+  );
+
+  const displaySettingsKey = JSON.stringify(displaySettings);
+
+  useEffect(() => {
+    if (!displaySettingsReady || !selectedProject) return;
+    if (displaySettingsKey === persistedDisplaySettingsRef.current) return;
+    if (displaySaveTimerRef.current !== undefined) window.clearTimeout(displaySaveTimerRef.current);
+    displaySaveTimerRef.current = window.setTimeout(() => {
+      displaySaveTimerRef.current = undefined;
+      void persistDisplaySettings(displaySettings);
+    }, 250);
+  }, [displaySettingsKey, displaySettingsReady, selectedProject?.id]);
+
+  function updateDisplaySettings(patch: Partial<ProjectIssueDisplaySettings>) {
+    setDisplaySettings((current) => ({ ...current, ...patch }));
+    setDisplayError(null);
+  }
+
+  async function persistDisplaySettings(settings: ProjectIssueDisplaySettings): Promise<void> {
+    if (!selectedProject || displaySaving) return;
+    setDisplaySaving(true);
+    setDisplayError(null);
+    const mutationKey =
+      displayMutationKeyRef.current ?? (displayMutationKeyRef.current = idempotencyKey());
+    try {
+      await onSaveDisplayPreferences(selectedProject.id, settings, mutationKey);
+      if (JSON.stringify(settings) === displaySettingsKey)
+        persistedDisplaySettingsRef.current = JSON.stringify(settings);
+      displayMutationKeyRef.current = null;
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        displayMutationKeyRef.current = null;
+        await onRefresh();
+        setDisplayError("別の表示設定が保存されています。最新の表示設定を読み込みました。");
+        return;
+      }
+      if (caught instanceof ApiError && caught.status !== 423) displayMutationKeyRef.current = null;
+      setDisplayError(
+        caught instanceof ApiError && caught.fieldErrors
+          ? Object.values(caught.fieldErrors).flat().join(" ")
+          : caught instanceof ApiError
+            ? caught.message
+            : "表示設定の保存に失敗しました。",
+      );
+    } finally {
+      setDisplaySaving(false);
+    }
+  }
+
+  function retryDisplaySettings() {
+    void persistDisplaySettings(displaySettings);
+  }
+
+  useEffect(() => {
+    const visibleIds = new Set(projectVisibleIssues.map((issue) => issue.id));
+    const next = selected.filter((issueId) => visibleIds.has(issueId));
+    if (next.length !== selected.length) setSelected(next);
+  }, [projectVisibleIssues, selected, setSelected]);
+
+  useEffect(() => {
+    const patch: Partial<ProjectIssueDisplaySettings> = {};
+    if (
+      displaySettings.statusFilter !== "all" &&
+      !workflowStates.some((state) => state.id === displaySettings.statusFilter)
+    )
+      patch.statusFilter = "all";
+    if (
+      displaySettings.labelFilter !== "all" &&
+      !labels.some((label) => label.id === displaySettings.labelFilter)
+    )
+      patch.labelFilter = "all";
+    if (Object.keys(patch).length > 0) updateDisplaySettings(patch);
+  }, [displaySettings.labelFilter, displaySettings.statusFilter, labels, workflowStates]);
 
   if (projectId && !selectedProject) {
     return (
@@ -3614,6 +4140,214 @@ function ProjectsView({
     }
   }
 
+  if (projectId && selectedProject) {
+    return (
+      <div className="page project-detail-page">
+        <div className="page-heading project-detail-heading">
+          <div>
+            <button
+              className="text-button project-back"
+              onClick={() => void router.navigate({ to: "/projects" })}
+            >
+              ← Projectsへ戻る
+            </button>
+            <span className="eyebrow coral">PROJECT DETAIL</span>
+            <div className="project-detail-title-line">
+              <span className="project-icon" style={{ background: selectedProject.color }}>
+                {selectedProject.icon}
+              </span>
+              {editing ? (
+                <input
+                  className="text-input project-name-input"
+                  aria-label="Project名"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                  disabled={saving}
+                />
+              ) : (
+                <h1>{selectedProject.name}</h1>
+              )}
+            </div>
+            <p className="subheading">
+              {selectedProject.description || "このProjectの作業をまとめて管理します。"}
+            </p>
+            <div className="project-detail-properties">
+              <span className="status-pill">
+                {projectStatuses.find((status) => status.id === selectedProject.statusId)?.name ??
+                  "Status"}
+              </span>
+              <span>Target {formatDateOnly(selectedProject.targetAt)}</span>
+              <span>{projectIssues.length} Issues</span>
+            </div>
+          </div>
+          <div className="project-detail-actions">
+            <button
+              className="button secondary"
+              onClick={() => onCreateIssue(selectedProject.id)}
+              disabled={saving || displaySaving}
+            >
+              ＋ Issueを追加
+            </button>
+            <button
+              className="button ghost"
+              onClick={() => (editing ? cancelEdit() : setEditing(true))}
+              disabled={saving || displaySaving}
+            >
+              {editing ? "取消" : "Projectを編集"}
+            </button>
+          </div>
+        </div>
+        {editing && (
+          <div className="project-metadata-editor">
+            <label className="field-label" htmlFor="project-description-detail">
+              Description
+            </label>
+            <textarea
+              id="project-description-detail"
+              className="text-input project-description-input"
+              value={descriptionDraft}
+              onChange={(event) => setDescriptionDraft(event.target.value)}
+              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              disabled={saving}
+              rows={3}
+            />
+            <label className="field-label" htmlFor="project-status-detail">
+              Status
+            </label>
+            <select
+              id="project-status-detail"
+              className="text-input"
+              value={statusDraft}
+              onChange={(event) => setStatusDraft(event.target.value)}
+              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              disabled={saving}
+            >
+              {projectStatuses.map((status) => (
+                <option key={status.id} value={status.id}>
+                  {status.name}
+                </option>
+              ))}
+            </select>
+            <label className="field-label" htmlFor="project-target-detail">
+              Target date
+            </label>
+            <input
+              id="project-target-detail"
+              className="text-input"
+              type="date"
+              value={targetDraft}
+              onChange={(event) => setTargetDraft(event.target.value)}
+              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              disabled={saving}
+            />
+            <button className="button primary" onClick={() => void saveProject()} disabled={saving}>
+              {saving ? "保存中…" : "Projectを保存"}
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="detail-live-error" role="alert">
+            {error}
+            {editing && (
+              <button className="text-button" onClick={() => void saveProject()} disabled={saving}>
+                再試行
+              </button>
+            )}
+          </div>
+        )}
+        <div className="cycle-metrics project-metrics" aria-label="Project進捗">
+          <div>
+            <strong>{projectMetrics.total}</strong>
+            <span>Issues</span>
+          </div>
+          <div>
+            <strong>{projectMetrics.completed}</strong>
+            <span>Completed</span>
+          </div>
+          <div>
+            <strong>{projectMetrics.progressPercent}%</strong>
+            <span>Progress</span>
+          </div>
+        </div>
+        <section className="detail-card project-issues-workspace" aria-label="ProjectのIssue">
+          <div className="section-heading project-issues-heading">
+            <div>
+              <span className="eyebrow">PROJECT ISSUES</span>
+              <h2>このProjectのIssue</h2>
+            </div>
+            <span className="project-display-status" aria-live="polite">
+              {displaySaving ? "表示設定を保存中…" : "表示設定は自動保存"}
+            </span>
+          </div>
+          {displayError && (
+            <div className="detail-live-error" role="alert">
+              {displayError}
+              <button
+                className="text-button"
+                onClick={retryDisplaySettings}
+                disabled={displaySaving}
+              >
+                再試行
+              </button>
+            </div>
+          )}
+          <IssuesView
+            issues={projectVisibleIssues}
+            scope="active"
+            scopeLoading={false}
+            setScope={() => undefined}
+            workflowStates={workflowStates}
+            filterText={displaySettings.filterText}
+            setFilterText={(value) => updateDisplaySettings({ filterText: value })}
+            statusFilter={displaySettings.statusFilter}
+            setStatusFilter={(value) => updateDisplaySettings({ statusFilter: value })}
+            priorityFilter={displaySettings.priorityFilter}
+            setPriorityFilter={(value) => updateDisplaySettings({ priorityFilter: value })}
+            projectFilter={selectedProject.id}
+            setProjectFilter={() => undefined}
+            labelFilter={displaySettings.labelFilter}
+            setLabelFilter={(value) => updateDisplaySettings({ labelFilter: value })}
+            dueFilter={displaySettings.dueFilter}
+            setDueFilter={(value) => updateDisplaySettings({ dueFilter: value })}
+            showCompleted={displaySettings.showCompleted}
+            setShowCompleted={(value) => updateDisplaySettings({ showCompleted: value })}
+            issueSort={displaySettings.order}
+            setIssueSort={(value) => updateDisplaySettings({ order: value })}
+            projects={projects}
+            allIssues={projectIssues}
+            cycles={cycles}
+            labels={labels}
+            viewMode={displaySettings.mode}
+            setViewMode={(value) => updateDisplaySettings({ mode: value })}
+            selected={selected}
+            setSelected={setSelected}
+            pendingIssueId={pendingIssueId}
+            reorderBusy={reorderBusy}
+            onUpdate={onUpdateIssue}
+            onRestore={() => undefined}
+            onFocusIssue={() => undefined}
+            filterInputRef={projectIssueFilterInputRef}
+            displayInputRef={projectIssueDisplayInputRef}
+            modifierLabel={modifierLabel}
+            onReorder={(issue, beforeIssueId) =>
+              onReorderIssue(issue, beforeIssueId, selectedProject.id)
+            }
+            onBulk={onBulk}
+            bulkBusy={bulkBusy}
+            resetBulkMutation={resetBulkMutation}
+            onCreate={() => onCreateIssue(selectedProject.id)}
+            onOpenIssue={onOpenIssue}
+            showProjectFilter={false}
+            showScopeFilter={false}
+            showHeading={false}
+            displaySettingsBusy={displaySaving}
+          />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-heading compact-heading">
@@ -3677,142 +4411,6 @@ function ProjectsView({
           />
         )}
       </div>
-      {selectedProject && (
-        <section className="detail-card project-detail-workspace">
-          <div className="detail-card-head">
-            <div>
-              <span className="eyebrow coral">PROJECT DETAIL</span>
-              {editing ? (
-                <input
-                  className="text-input project-name-input"
-                  aria-label="Project名"
-                  value={nameDraft}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                  onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
-                  disabled={saving}
-                />
-              ) : (
-                <h2>{selectedProject.name}</h2>
-              )}
-              <p>{selectedProject.description || "説明はまだありません。"}</p>
-              <div className="project-detail-properties">
-                <span className="status-pill">
-                  {projectStatuses.find((status) => status.id === selectedProject.statusId)?.name ??
-                    "Status"}
-                </span>
-                <span>Target {formatDateOnly(selectedProject.targetAt)}</span>
-              </div>
-            </div>
-            <button
-              className="button ghost"
-              onClick={() => (editing ? cancelEdit() : setEditing(true))}
-              disabled={saving}
-            >
-              {editing ? "取消" : "編集"}
-            </button>
-          </div>
-          {editing && (
-            <div className="project-metadata-editor">
-              <label className="field-label" htmlFor="project-description-detail">
-                Description
-              </label>
-              <textarea
-                id="project-description-detail"
-                className="text-input project-description-input"
-                value={descriptionDraft}
-                onChange={(event) => setDescriptionDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
-                disabled={saving}
-                rows={3}
-              />
-              <label className="field-label" htmlFor="project-status-detail">
-                Status
-              </label>
-              <select
-                id="project-status-detail"
-                className="text-input"
-                value={statusDraft}
-                onChange={(event) => setStatusDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
-                disabled={saving}
-              >
-                {projectStatuses.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
-              <label className="field-label" htmlFor="project-target-detail">
-                Target date
-              </label>
-              <input
-                id="project-target-detail"
-                className="text-input"
-                type="date"
-                value={targetDraft}
-                onChange={(event) => setTargetDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
-                disabled={saving}
-              />
-              <button
-                className="button primary"
-                onClick={() => void saveProject()}
-                disabled={saving}
-              >
-                {saving ? "保存中…" : "Projectを保存"}
-              </button>
-            </div>
-          )}
-          {error && (
-            <div className="detail-live-error" role="alert">
-              {error}
-              {editing && (
-                <button
-                  className="text-button"
-                  onClick={() => void saveProject()}
-                  disabled={saving}
-                >
-                  再試行
-                </button>
-              )}
-            </div>
-          )}
-          <div className="cycle-metrics project-metrics" aria-label="Project進捗">
-            <div>
-              <strong>{projectMetrics.total}</strong>
-              <span>Issues</span>
-            </div>
-            <div>
-              <strong>{projectMetrics.completed}</strong>
-              <span>Completed</span>
-            </div>
-            <div>
-              <strong>{projectMetrics.progressPercent}%</strong>
-              <span>Progress</span>
-            </div>
-          </div>
-          <div className="cycle-list project-issue-list">
-            {projectIssues.map((issue) => (
-              <button
-                className="mini-issue project-issue-link"
-                key={issue.id}
-                aria-label={`${issue.identifier} ${issue.title}を開く`}
-                onClick={() => onOpenIssue(issue)}
-              >
-                <span className={`priority-dot ${priorityTone[issue.priority]}`} />
-                <span className="issue-id">{issue.identifier}</span>
-                <strong>{issue.title}</strong>
-                <span className="cycle-issue-status">
-                  {workflowStates.find((state) => state.id === issue.statusId)?.name}
-                </span>
-              </button>
-            ))}
-            {projectIssues.length === 0 && (
-              <p className="detail-empty">このProjectにIssueはありません。</p>
-            )}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -4083,7 +4681,7 @@ export function SearchView({
   );
 }
 
-function InboxView({
+export function InboxView({
   notifications,
   onOpenNotification,
   onMarkAllRead,
@@ -4094,6 +4692,7 @@ function InboxView({
   onMarkAllRead: () => Promise<void>;
   onNavigateIssues: () => void;
 }) {
+  const [filter, setFilter] = useState<"all" | "unread">("all");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [allBusy, setAllBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4102,6 +4701,22 @@ function InboxView({
   >(null);
   const [errorAction, setErrorAction] = useState<"individual" | "all" | null>(null);
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  const visibleNotifications =
+    filter === "unread"
+      ? notifications.filter((notification) => !notification.readAt)
+      : notifications;
+
+  function notificationTypeLabel(type: string): string {
+    return (
+      {
+        due_soon: "期限が近い",
+        overdue: "期限超過",
+        cycle_started: "Cycle開始",
+        cycle_completed: "Cycle完了",
+        automation_failed: "自動処理の失敗",
+      }[type] ?? "お知らせ"
+    );
+  }
 
   async function open(notification: BootstrapPayload["notifications"][number]) {
     setBusyId(notification.id);
@@ -4152,7 +4767,7 @@ function InboxView({
         <div>
           <span className="eyebrow">UPDATES</span>
           <h1>Inbox</h1>
-          <p className="subheading">あなたのワークスペースの変化。</p>
+          <p className="subheading">Orbitからのお知らせを確認して、次の行動につなげます。</p>
         </div>
         <button
           className="button ghost"
@@ -4162,6 +4777,24 @@ function InboxView({
           {allBusy ? "更新中…" : "すべて既読"}
         </button>
       </div>
+      <section className="inbox-guide" aria-labelledby="inbox-guide-title">
+        <span className="eyebrow coral">HOW INBOX WORKS</span>
+        <h2 id="inbox-guide-title">Inboxは通知を処理する場所です</h2>
+        <p>
+          期限やCycleなど、Orbitからのお知らせがここに届きます。通知を開くと既読になり、関連するIssue・Cycle・Projectへ移動できます。
+        </p>
+        <div className="inbox-guide-steps">
+          <span>
+            <strong>1</strong> 通知の内容を確認
+          </span>
+          <span>
+            <strong>2</strong> 開いて対象へ移動
+          </span>
+          <span>
+            <strong>3</strong> 開くと自動で既読
+          </span>
+        </div>
+      </section>
       {error && (
         <div className="detail-live-error" role="alert">
           {error}
@@ -4178,8 +4811,26 @@ function InboxView({
           </button>
         </div>
       )}
+      <div className="inbox-toolbar" role="tablist" aria-label="Inboxの表示範囲">
+        <button
+          className={`inbox-filter ${filter === "all" ? "selected" : ""}`}
+          role="tab"
+          aria-selected={filter === "all"}
+          onClick={() => setFilter("all")}
+        >
+          すべて <span>{notifications.length}</span>
+        </button>
+        <button
+          className={`inbox-filter ${filter === "unread" ? "selected" : ""}`}
+          role="tab"
+          aria-selected={filter === "unread"}
+          onClick={() => setFilter("unread")}
+        >
+          未読 <span>{unreadCount}</span>
+        </button>
+      </div>
       <div className="inbox-list">
-        {notifications.map((notification) => (
+        {visibleNotifications.map((notification) => (
           <div
             className={`notification-row ${notification.readAt ? "read" : ""}`}
             key={notification.id}
@@ -4193,24 +4844,23 @@ function InboxView({
                 {notification.type === "overdue" ? "!" : "✦"}
               </span>
               <span className="notification-copy">
+                <small className="notification-type">
+                  {notificationTypeLabel(notification.type)}
+                </small>
+                <small className="notification-read-state">
+                  {notification.readAt ? "既読" : "未読"}
+                </small>
                 <strong>{notification.title}</strong>
                 <span>{notification.body}</span>
                 <small>{formatDate(notification.createdAt)}</small>
+                <span className="notification-action">開いて対象を確認 →</span>
               </span>
-            </button>
-            <button
-              className="more"
-              aria-label={`${notification.title}を開く`}
-              onClick={() => void open(notification)}
-              disabled={Boolean(busyId) || allBusy}
-            >
-              •••
             </button>
           </div>
         ))}
-        {notifications.length === 0 && (
+        {visibleNotifications.length === 0 && (
           <EmptyState
-            title="新しい通知はありません"
+            title={filter === "unread" ? "未読の通知はありません" : "新しい通知はありません"}
             action="Issueを見る"
             onAction={onNavigateIssues}
           />

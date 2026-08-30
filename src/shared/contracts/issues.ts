@@ -53,6 +53,7 @@ export const reorderIssueInputSchema = z
     issueId: opaqueIdSchema,
     version: z.number().int().nonnegative(),
     beforeIssueId: opaqueIdSchema.nullable(),
+    projectId: opaqueIdSchema.optional(),
     cycleId: opaqueIdSchema.optional(),
     statusId: opaqueIdSchema.optional(),
   })

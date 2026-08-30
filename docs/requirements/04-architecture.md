@@ -101,6 +101,7 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 | issue_notes | id, issue_id, user_id, body_json, created_at, edited_at, deleted_at |
 | cycle_issue_history | id, user_id, issue_id, from_cycle_id, to_cycle_id, reason, moved_at |
 | saved_views | id, user_id, name, entity_type, query_json, layout_json, deleted_at |
+| project display preferences（Snapshot bridge） | user_id, project_id, settings_json, updated_at |
 | recent_issue_views | user_id, issue_id, viewed_at |
 | recent_searches | id, user_id, normalized_query_json, searched_at |
 | notifications | id, user_id, type, entity_type, entity_id, read_at, deleted_at, created_at |
@@ -135,6 +136,7 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 - `recent_issue_views(user_id, issue_id)` unique
 - `recent_searches(user_id, normalized_query_json)` unique。`normalized_query_json`はKey順・既定値・空条件を正規化したCanonical JSONとする
 - `workflow_states(user_id)`と`project_statuses(user_id)`は、それぞれ`is_default = true`を1件だけ許可する部分Unique Indexを持つ
+- Project詳細のIssue表示設定は、MVPでは`orbit_store_snapshots.state_json`内のOwner scoped配列として保存し、別端末のBootstrapで復元する。正規化D1 tableへの移行は将来のSnapshot bridge整理で判断する。
 - `workflow_states.category`はBacklog / Unstarted / Started / Completed / Canceled、`project_statuses.category`はBacklog / Planned / In Progress / Completed / Canceledだけを許可する
 - 最近閲覧と最近の検索は上記Unique制約をConflict targetとしてUpsertし、種別ごとに新しい20件だけを保持する
 - 親子Issueは同一ユーザー所有に限定し、再帰更新前に循環を検出する

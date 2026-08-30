@@ -15,11 +15,13 @@
 - Cycle auto-add: `PATCH /api/v1/cycle-settings`の`autoAddToCurrentCycle`をONにすると、未所属IssueがStarted / Completedへstatus遷移したcreate / PATCH / bulk MutationでActive Cycleへ自動割当する。割当はIssue versionを1回だけ進め、`cycle.auto_assigned` / `system:automation`のActivityと`issue.cycle.auto_assigned` Outboxを一意化して記録する（参照: `src/shared/contracts/cycles.ts`、`src/server/model.ts`、`src/server/store.ts`、`src/components/OrbitApp.tsx`、`drizzle/0003_white_swordsman.sql`）。
 - Upcoming Cycleの即時開始は`POST /api/v1/cycles/:cycleId/start`へJSONの`idempotencyKey`を渡し、Storeが現在Cycleのclose・次Cycleのactive化・後続日付再計算を行う（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/cycles/$cycleId/start.ts`）。
 - Project workspaceはBootstrapのProject / Issueを使い、既存`PATCH /api/v1/projects/:projectId`をmetadata更新に再利用する。Saved Viewは`POST/PATCH/DELETE /api/v1/views*`でOwner scopedに管理する（参照: `src/server/api.ts`、`src/routes/api/v1/projects/`、`src/routes/api/v1/views/`）。
+- Project detailのIssue表示設定はBootstrapの`projectDisplayPreferences`へOwner scopedで投影し、既存`PATCH /api/v1/projects/:projectId`の`displayPreferences` strict branchで保存する。List / Board、検索、Status / Priority / Label / Due、並び順、完了表示をSnapshotへ保存し、別端末のBootstrap再取得で復元する（参照: `src/shared/contracts/project-display.ts`、`src/server/store.ts`、`src/server/api.ts`、`src/components/OrbitApp.tsx`）。
 - Label / Bulk workspaceはBootstrapの`labels`とIssueの`labelIds`を使い、Label CRUDを`/api/v1/labels*`、複数Issue更新を`POST /api/v1/issues/bulk`で公開する。現段階はMemory StoreのOwner / Lock / Receipt / Activity / Outbox境界を正本とする（参照: `src/server/api.ts`、`src/server/store.ts`、`src/routes/api/v1/labels/`、`src/routes/api/v1/issues/bulk.ts`）。
 - 本番APIは`withOwner`でOwner単位のD1 Snapshot Sessionを開き、成功Response後だけVersion CAS保存する。ローカルはMemory Storeを維持し、本番でD1 Bindingが無い場合はフォールバックしない（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/db/repositories/store-snapshot.ts`）。
 - Inbox / NotificationはBootstrapの`notifications`と既存`PATCH /api/v1/notifications/:notificationId`を再利用し、strict `NotificationReadMutation`で個別既読・全件既読・Issue / Project / Cycle遷移を行う。通知生成は別スコープとする（参照: `src/components/OrbitApp.tsx`、`src/server/api.ts`、`src/shared/contracts/notifications.ts`）。
 - 共通wire契約は `src/shared/contracts/` のZod Schemaを正本とする（参照: `src/shared/contracts/index.ts`）。
 - Issue Listの手動順は `POST /api/v1/issues/reorder` の `{ idempotencyKey, issueId, version, beforeIssueId }` で保存し、Boardは共通Orderを表示するがDnDはListに限定する（参照: `src/server/api.ts`、`src/routes/api/v1/issues/reorder.ts`、`src/shared/contracts/issues.ts`）。
+- Project detailの手動順は同じreorder契約へ任意の`projectId`を渡し、対象Project内だけを並べ替える。UIのselection / bulk / inline mutationもProject scopeを共有し、Canceledは完了Issue扱いにしない（参照: `src/components/issue-list.ts`、`src/components/OrbitApp.tsx`、`src/server/store.ts`）。
 - Preferencesの表示モード`theme`とは別に`colorTheme`（`coral / ocean / violet / forest / amber`）を`PATCH /api/v1/preferences`で保存する（参照: `src/shared/contracts/enums.ts`、`src/db/schema.ts`、`src/components/theme.ts`）。
 - Phase 1 Preferencesは`PATCH /api/v1/preferences`で`timezone`（IANA）、`locale`、`theme`、`colorTheme`、`estimateEnabled`をstrict検証し、Workflowは`GET/POST /api/v1/workflow-states`と`PATCH/DELETE /api/v1/workflow-states/:workflowStateId`でOwner scopedに管理する（参照: `src/shared/contracts/preferences.ts`、`src/shared/contracts/workflow.ts`、`src/server/api.ts`、`src/routes/api/v1/workflow-states/`）。
 - Production Ownerの初期化は`pnpm run db:bootstrap:production`で行い、`OWNER_USER_ID` / `OWNER_EMAIL` / 任意の`ORBIT_OWNER_NAME`をローカル検証してからWranglerのproduction D1へ3つのOwner関連行を`ON CONFLICT DO NOTHING`で投入する（参照: `scripts/bootstrap-owner.mjs`、`docs/deployment.md`）。
@@ -43,6 +45,7 @@
 - Issue controls UI: Issue詳細のStatusは既存Issue PATCHへ`version`と`patch.statusId`を渡し、一覧の完了表示切替・5種のソートは`src/components/issue-list.ts`の純粋関数でList / Boardへ共通適用する（参照: `src/components/OrbitApp.tsx`）。
 - Issue controls follow-up UI: 完了表示は`orbit.issues.showCompleted`へlocalStorage保存し、Issue PATCH成功Toastは`src/components/issue-undo.ts`の逆Patchで「元に戻す」を提供する。ソート選択はIssues toolbarに置き、Status / Priority / Due等の並び替えを`src/components/issue-list.ts`で統一する（参照: `src/components/OrbitApp.tsx`）。
 - Issue experience polish: PriorityはListで`PriorityIcon`へ変換し、IME変換中のEnterは`isComposing` / `keyCode 229`でsubmitを抑止する。ColorThemeは`data-color-theme`とCSS変数へ反映し、旧Snapshotの欠落値はCoralへ補完する（参照: `src/components/issue-priority.ts`、`src/components/issue-composer.ts`、`src/components/OrbitApp.tsx`、`src/server/store.ts`）。
+- Home actionable dashboard: Home専用APIを増やさず、BootstrapのTimezone・Cycle・Project・Issueから期限超過 / 今日 / 7日以内 / Current Cycle / 最近更新を導出する。各カードは既存Issue / Cycle / Project routeへ遷移し、空状態には次の操作を示す（参照: `src/components/home.ts`、`src/components/OrbitApp.tsx`）。
 
 ## 既知の罠
 
@@ -61,7 +64,8 @@
 - Workflowの順序変更はサーバー側で0始まりの連続positionへ正規化し、既定stateまたはIssue参照中stateの削除を先に拒否する。UIのRetryは操作signatureが同じ場合だけ同じidempotencyKeyを再利用する（参照: `src/server/store.ts`、`src/components/OrbitApp.tsx`）。
 - Parent/Sub-issueの更新は同一Owner・未削除・未Archivedの親だけを受け付け、自己参照と子孫参照を`VALIDATION_ERROR` + field errorで拒否する。Detailの子進捗は直下の未削除Issueだけを対象にし、Canceledを分母から除外する（参照: `src/server/store.ts`、`src/shared/cycle-workspace.ts`）。
 - Command / Shortcutは新規Menuライブラリを使わず、`nextCommandIndex`、`shortcutActionFor`、`shortcutModifierLabel`を使ってArrow選択・入力フォーカス除外・OS別modifier表示を実装する（参照: `src/components/issue-core-ui.ts`、`src/components/OrbitApp.tsx`）。
+- Inbox guidance: 既存通知の既読化・対象遷移を維持しつつ、通知の役割、未読の読み方、通知がない場合の次の行動をInbox内のGuide / Tab / Empty stateで説明する。通知生成・Push・削除APIは追加しない（参照: `src/components/OrbitApp.tsx`、`docs/spec/FEAT-home-project-inbox-ux/`）。
 
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / 2026-08-29
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / 2026-08-30

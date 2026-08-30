@@ -16,6 +16,7 @@ import {
   Notification,
   Preferences,
   Project,
+  ProjectDisplayPreference,
   ProjectStatus,
   PublicRunSummary,
   SavedView,
@@ -45,11 +46,14 @@ import {
   type LabelMutation,
   type LabelUpdate,
   type PreferencesMutation,
+  type ProjectDisplayPreferencesMutation,
   type ReorderIssueInput,
   type SavedViewUpdate,
   type WorkflowStateCreateMutation,
   type WorkflowStateUpdateMutation,
   issueSearchQuerySchema,
+  projectIssueDisplaySettingsSchema,
+  defaultProjectIssueDisplaySettings,
   type IssueSearchQuery,
   isValidTimeZone,
   workflowStateColorSchema,
@@ -73,6 +77,7 @@ export interface OrbitStoreSnapshot {
   workflowStates: WorkflowState[];
   projectStatuses: ProjectStatus[];
   projects: Project[];
+  projectDisplayPreferences: ProjectDisplayPreference[];
   cycles: Cycle[];
   cycleSettings: CycleSettings[];
   issues: Issue[];
@@ -268,6 +273,7 @@ export class OrbitStore {
   readonly workflowStates = new Map<string, WorkflowState>();
   readonly projectStatuses = new Map<string, ProjectStatus>();
   readonly projects = new Map<string, Project>();
+  readonly projectDisplayPreferences = new Map<string, ProjectDisplayPreference>();
   readonly cycles = new Map<string, Cycle>();
   readonly cycleSettings = new Map<string, CycleSettings>();
   readonly issues = new Map<string, Issue>();
@@ -303,6 +309,7 @@ export class OrbitStore {
       workflowStates: [...this.workflowStates.values()],
       projectStatuses: [...this.projectStatuses.values()],
       projects: [...this.projects.values()],
+      projectDisplayPreferences: [...this.projectDisplayPreferences.values()],
       cycles: [...this.cycles.values()],
       cycleSettings: [...this.cycleSettings.values()],
       issues: [...this.issues.values()],
@@ -334,6 +341,8 @@ export class OrbitStore {
     const normalized = normalizedValue as Record<string, unknown>;
     if (!Array.isArray(normalized.recentIssueViews)) normalized.recentIssueViews = [];
     if (!Array.isArray(normalized.recentSearches)) normalized.recentSearches = [];
+    if (!Array.isArray(normalized.projectDisplayPreferences))
+      normalized.projectDisplayPreferences = [];
     if (Array.isArray(normalized.preferences)) {
       normalized.preferences = normalized.preferences.map((preference) => {
         if (
@@ -374,6 +383,7 @@ export class OrbitStore {
     setById(store.workflowStates, source.workflowStates);
     setById(store.projectStatuses, source.projectStatuses);
     setById(store.projects, source.projects);
+    setById(store.projectDisplayPreferences, source.projectDisplayPreferences);
     setById(store.cycles, source.cycles);
     setByUserId(store.cycleSettings, source.cycleSettings);
     setById(store.issues, source.issues);
@@ -405,6 +415,7 @@ export class OrbitStore {
       "workflowStates",
       "projectStatuses",
       "projects",
+      "projectDisplayPreferences",
       "cycles",
       "cycleSettings",
       "issues",
@@ -456,6 +467,16 @@ export class OrbitStore {
               !Array.isArray(entry[field]),
           ),
       );
+    const uniqueProjectDisplayPreferences = (() => {
+      const keys = new Set<string>();
+      return items("projectDisplayPreferences").every((entry) => {
+        if (!isRecord(entry)) return false;
+        const key = `${entry.userId}:${entry.projectId}`;
+        if (keys.has(key)) return false;
+        keys.add(key);
+        return true;
+      });
+    })();
     const hasIdOwner = [
       "workflowStates",
       "projectStatuses",
@@ -494,6 +515,17 @@ export class OrbitStore {
         strings: ["id", "userId", "name", "statusId", "priority", "color", "icon", "description"],
         numbers: ["createdAt", "updatedAt"],
       }) &&
+      hasTypes("projectDisplayPreferences", {
+        strings: ["id", "userId", "projectId"],
+        numbers: ["updatedAt"],
+      }) &&
+      items("projectDisplayPreferences").every(
+        (entry) =>
+          isRecord(entry) &&
+          isRecord(entry.settings) &&
+          projectIssueDisplaySettingsSchema.safeParse(entry.settings).success,
+      ) &&
+      uniqueProjectDisplayPreferences &&
       hasTypes("cycles", {
         strings: ["id", "userId", "name", "description", "status"],
         numbers: ["number", "startsAt", "endsAt"],
@@ -582,6 +614,7 @@ export class OrbitStore {
       "workflowStates",
       "projectStatuses",
       "projects",
+      "projectDisplayPreferences",
       "cycles",
       "cycleSettings",
       "issues",
@@ -1908,6 +1941,17 @@ export class OrbitStore {
     if (input.beforeIssueId === target.id)
       throw validationError({ beforeIssueId: ["移動先には対象Issue自身を指定できません。"] });
 
+    if (input.projectId !== undefined) {
+      const project = this.projects.get(input.projectId);
+      if (
+        !project ||
+        project.userId !== userId ||
+        project.deletedAt ||
+        target.projectId !== project.id
+      )
+        throw notFound();
+    }
+
     const before = input.beforeIssueId ? this.issues.get(input.beforeIssueId) : null;
     if (
       input.beforeIssueId &&
@@ -1917,13 +1961,19 @@ export class OrbitStore {
         before.archivedAt !== null)
     )
       throw notFound();
+    if (input.projectId !== undefined && before && before.projectId !== input.projectId)
+      throw notFound();
 
     if (input.statusId !== undefined && input.cycleId === undefined)
       throw validationError({ cycleId: ["statusIdを指定する場合はcycleIdが必要です。"] });
 
     const activeIssues = [...this.issues.values()]
       .filter(
-        (issue) => issue.userId === userId && issue.deletedAt === null && issue.archivedAt === null,
+        (issue) =>
+          issue.userId === userId &&
+          issue.deletedAt === null &&
+          issue.archivedAt === null &&
+          (input.projectId === undefined || issue.projectId === input.projectId),
       )
       .sort(
         (left, right) =>
@@ -2210,6 +2260,97 @@ export class OrbitStore {
     return [...this.projects.values()]
       .filter((item) => item.userId === userId && !item.deletedAt)
       .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  private findProjectDisplayPreference(
+    userId: string,
+    projectId: string,
+  ): ProjectDisplayPreference | undefined {
+    return [...this.projectDisplayPreferences.values()].find(
+      (item) => item.userId === userId && item.projectId === projectId,
+    );
+  }
+
+  getProjectDisplayPreferences(userId: string, projectId: string): ProjectDisplayPreference {
+    this.assertOwner(userId);
+    const project = this.projects.get(projectId);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    const existing = this.findProjectDisplayPreference(userId, projectId);
+    return (
+      structuredClone(existing) ?? {
+        id: `project-display-default:${projectId}`,
+        userId,
+        projectId,
+        settings: defaultProjectIssueDisplaySettings(),
+        updatedAt: 0,
+      }
+    );
+  }
+
+  listProjectDisplayPreferences(userId: string): ProjectDisplayPreference[] {
+    this.assertOwner(userId);
+    return [...this.projectDisplayPreferences.values()]
+      .filter((item) => {
+        const project = this.projects.get(item.projectId);
+        return item.userId === userId && project?.userId === userId && !project.deletedAt;
+      })
+      .sort((left, right) => left.projectId.localeCompare(right.projectId))
+      .map((item) => structuredClone(item));
+  }
+
+  updateProjectDisplayPreferences(
+    userId: string,
+    projectId: string,
+    input: ProjectDisplayPreferencesMutation,
+  ): ProjectDisplayPreference {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const request = { projectId, displayPreferences: input.displayPreferences };
+    const existingReceipt = this.checkReceipt<ProjectDisplayPreference>(
+      userId,
+      "project.displayPreferences.update",
+      input.idempotencyKey,
+      request,
+    );
+    if (existingReceipt) return existingReceipt;
+    const project = this.projects.get(projectId);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    const parsed = projectIssueDisplaySettingsSchema.safeParse(input.displayPreferences);
+    if (!parsed.success)
+      throw validationError({ displayPreferences: ["Projectの表示設定が不正です。"] });
+    if (
+      parsed.data.statusFilter !== "all" &&
+      (!this.workflowStates.get(parsed.data.statusFilter) ||
+        this.workflowStates.get(parsed.data.statusFilter)?.userId !== userId)
+    )
+      throw notFound();
+    if (
+      parsed.data.labelFilter !== "all" &&
+      (!this.labels.get(parsed.data.labelFilter) ||
+        this.labels.get(parsed.data.labelFilter)?.userId !== userId)
+    )
+      throw notFound();
+
+    const now = this.clock();
+    const existing = this.findProjectDisplayPreference(userId, projectId);
+    const preference: ProjectDisplayPreference = existing ?? {
+      id: createId("project-display"),
+      userId,
+      projectId,
+      settings: defaultProjectIssueDisplaySettings(),
+      updatedAt: now,
+    };
+    preference.settings = structuredClone(parsed.data);
+    preference.updatedAt = now;
+    this.projectDisplayPreferences.set(preference.id, preference);
+    this.recordReceipt(
+      userId,
+      "project.displayPreferences.update",
+      input.idempotencyKey,
+      request,
+      preference,
+    );
+    return structuredClone(preference);
   }
 
   getProjectMetrics(userId: string, projectId: string): CycleMetrics {
@@ -2990,6 +3131,7 @@ export class OrbitStore {
       cycles: this.listCycles(userId),
       cycleHistory: this.listCycleHistory(userId),
       views: this.listViews(userId),
+      projectDisplayPreferences: this.listProjectDisplayPreferences(userId),
       notifications: this.listNotifications(userId),
       background: { run: active ? this.publicRun(active) : null },
     };

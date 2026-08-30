@@ -79,4 +79,5 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 - [FEAT-cycle-settings.md](./FEAT-cycle-settings.md) — Cycle期間・開始曜日設定（2026-08-28）
 - [CYC-11.md](./CYC-11.md) — IssueのCycle繰越履歴表示（2026-08-28）
 - [CYC-14.md](./CYC-14.md) — Cycle内IssueのList / Board並び替え（2026-08-29）
+- [FEAT-home-project-inbox-ux.md](./FEAT-home-project-inbox-ux.md) — Home・Project詳細・Inbox UX（2026-08-29）
 - [CI-CD-github-actions.md](./CI-CD-github-actions.md) — GitHub Actions CIとWorkers Builds CDの責務分担（2026-08-29）

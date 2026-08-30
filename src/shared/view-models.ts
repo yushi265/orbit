@@ -10,6 +10,7 @@ import type {
   ChildProgress,
   IssueSearchQuery,
 } from "./contracts";
+import type { ProjectIssueDisplaySettings } from "./contracts";
 
 export interface UserViewModel {
   id: string;
@@ -163,6 +164,13 @@ export interface ProjectViewModel {
   createdAt: number;
   updatedAt: number;
 }
+export interface ProjectDisplayPreferenceViewModel {
+  id: string;
+  userId: string;
+  projectId: string;
+  settings: ProjectIssueDisplaySettings;
+  updatedAt: number;
+}
 export interface CycleViewModel {
   id: string;
   userId: string;
@@ -242,6 +250,7 @@ export interface BootstrapViewModel {
   issues: IssueViewModel[];
   labels: LabelViewModel[];
   projects: ProjectViewModel[];
+  projectDisplayPreferences: ProjectDisplayPreferenceViewModel[];
   cycles: CycleViewModel[];
   cycleHistory: CycleHistoryViewModel[];
   views: SavedViewViewModel[];

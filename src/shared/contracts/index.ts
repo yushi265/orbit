@@ -12,5 +12,6 @@ export * from "./issue-core";
 export * from "./labels";
 export * from "./notifications";
 export * from "./preferences";
+export * from "./project-display";
 export * from "./views";
 export * from "./workflow";

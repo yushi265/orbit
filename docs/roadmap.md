@@ -9,8 +9,14 @@
 - 基準日: 2026-08-29
 - ブランチ: `main`
 - 最新コミット: CYC-17反映済み（確定値は`git log`を参照）
-- 現在の重点: Phase 3 Cycleの残タスクを閉じる
-- 次に着手: `CYC-16` 開始時点・追加削除履歴から日別Completed / Remaining / Scope changeを表示
+- 現在の重点: `FEAT-home-project-inbox-ux` Home / Project / Inbox UXを実装中
+- 次に着手: 本機能のGate 3確認後、`CYC-16` 開始時点・追加削除履歴から日別Completed / Remaining / Scope changeを表示
+
+## 進行中
+
+| ID | 内容 | 依存 | 状態 |
+|---|---|---|---|
+| FEAT-home-project-inbox-ux | Home actionable dashboard、Project Issue workspace、Project表示設定の別端末同期、Inbox guidance UX | 既存Issue / Project / Snapshot基盤 | 実装完了・Gate 3待ち |
 
 ## 完了済み
 

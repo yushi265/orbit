@@ -46,6 +46,7 @@ ui  →  shared ← service → data
 - ローカル開発は既存の`OrbitStore`（Memory Store）を使い、主要な画面Journeyを高速に検証する。
 - productionは`withOwner`のRequest SessionがD1 Snapshotをロードし、成功したRequestだけをOwner単位のVersion CASで保存する。D1 Bindingが無い場合にMemory Storeへフォールバックしない。
 - `src/db/`の正規化Schema / Repositoryは段階移行の正本として残し、Snapshot表は現行`OrbitStore`の全モデルを欠落なく永続化するためのMVP bridgeとする。
+- Project詳細のIssue表示設定は、MVPではOwner scopedなSnapshot配列として保存し、Bootstrapで端末間へ同期する。正規化Repositoryへの移行時期は別途判断する。
 
 ## ドメイン境界（初期予定）
 
@@ -53,7 +54,7 @@ MVPでは単一 Worker 内のモジュールとして次を分ける。独立し
 
 - `issues`: Issue、Sub-issue、Label、Relation、Activity
 - `cycles`: Cycle設定、状態遷移、繰越、進捗
-- `projects`: Project、ステータス、進捗
+- `projects`: Project、ステータス、進捗、Project詳細のIssue表示設定
 - `views`: Filter、Group、Order、Saved View
 - `notifications`: Inboxと通知設定
 - `auth`: Cloudflare Access JWT検証と本人スコープ

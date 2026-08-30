@@ -16,6 +16,7 @@ import {
   type IssueListScope,
   type IssueSearchQuery,
   type IssueSummary,
+  type ProjectIssueDisplaySettings,
 } from "../shared/contracts";
 import type { CycleHistoryViewModel } from "../shared/view-models";
 
@@ -84,6 +85,14 @@ export interface Project {
   archivedAt: number | null;
   deletedAt: number | null;
   createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectDisplayPreference {
+  id: string;
+  userId: string;
+  projectId: string;
+  settings: ProjectIssueDisplaySettings;
   updatedAt: number;
 }
 
@@ -320,6 +329,7 @@ export interface BootstrapPayload {
   issues: Issue[];
   labels: Label[];
   projects: Project[];
+  projectDisplayPreferences: ProjectDisplayPreference[];
   cycles: Cycle[];
   cycleHistory: CycleHistoryViewModel[];
   views: SavedView[];

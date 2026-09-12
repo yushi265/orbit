@@ -1,4 +1,5 @@
-import { resolveOwner, OwnerContext } from "./auth";
+import { resolveOwner, runtimeEnv, OwnerContext, type RuntimeEnvironment } from "./auth";
+import { resolveLocalOrigins, resolveRuntimeConfig } from "./runtime-config";
 import { ServiceError } from "./errors";
 import { openStoreSession } from "./store-session";
 import type { OrbitStore } from "./store";
@@ -9,6 +10,7 @@ export interface HandlerContext {
 }
 
 export interface HandlerDependencies {
+  runtimeEnv?: () => Promise<RuntimeEnvironment>;
   resolveOwner?: typeof resolveOwner;
   openStoreSession?: typeof openStoreSession;
 }
@@ -67,20 +69,30 @@ export async function withOwner(
 ): Promise<Response> {
   const id = requestId();
   try {
-    if (
-      !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
-      request.headers.get("X-Requested-With") !== "XMLHttpRequest"
-    ) {
+    const environment = (await (dependencies.runtimeEnv ?? runtimeEnv)()) as RuntimeEnvironment;
+    const config = resolveRuntimeConfig(environment);
+    const isMutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
+    if (config.mode === "local") {
+      const origins = resolveLocalOrigins(environment);
+      const url = new URL(request.url);
+      if (
+        !origins.includes(url.origin) ||
+        request.headers.get("Host") !== url.host ||
+        (isMutation && request.headers.get("Origin") !== url.origin)
+      )
+        throw new ServiceError(400, "VALIDATION_ERROR", "ローカル接続元を確認してください。");
+    }
+    if (isMutation && request.headers.get("X-Requested-With") !== "XMLHttpRequest") {
       throw new ServiceError(400, "VALIDATION_ERROR", "同一OriginのMutationだけを受け付けます。");
     }
-    const resolvedOwner = await (dependencies.resolveOwner ?? resolveOwner)(request);
+    const resolvedOwner = await (dependencies.resolveOwner ?? resolveOwner)(request, environment);
     const session = await (dependencies.openStoreSession ?? openStoreSession)(
       resolvedOwner.userId,
       resolvedOwner.email,
+      environment,
     );
     const owner = { ...resolvedOwner, store: session.store };
     const response = await handler({ owner, requestId: id });
-    const isMutation = !["GET", "HEAD", "OPTIONS"].includes(request.method);
     if (response.ok && (isMutation || session.needsInitialPersist)) await session.persist();
     return response;
   } catch (error) {

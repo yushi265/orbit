@@ -18,13 +18,21 @@ vi.mock("jose", () => ({
 import { resolveOwner, type RuntimeEnvironment } from "./auth";
 
 class OwnerD1 {
-  constructor(private readonly email: string | null) {}
+  constructor(
+    private readonly email: string | null,
+    private readonly userId = "owner-1",
+  ) {}
+
+  readonly boundValues: unknown[][] = [];
 
   prepare(_query: string) {
     const statement = {
-      bind: () => statement,
+      bind: (...values: unknown[]) => {
+        this.boundValues.push(values);
+        return statement;
+      },
       first: async () => ({
-        id: "owner-1",
+        id: this.userId,
         name: "Owner",
         email: this.email,
         avatar_url: null,
@@ -36,7 +44,7 @@ class OwnerD1 {
             ? []
             : [
                 {
-                  id: "owner-1",
+                  id: this.userId,
                   name: "Owner",
                   email: this.email,
                   avatar_url: null,
@@ -45,7 +53,7 @@ class OwnerD1 {
               ],
       }),
       raw: async () =>
-        this.email === null ? [] : [["owner-1", "Owner", this.email, null, 1_700_000_000_000]],
+        this.email === null ? [] : [[this.userId, "Owner", this.email, null, 1_700_000_000_000]],
     };
     return statement;
   }
@@ -127,4 +135,55 @@ describe("production owner lookup boundary", () => {
       resolveOwner(request(), environment(new OwnerD1(null) as unknown as D1Database)),
     ).rejects.toMatchObject({ status: 401, code: "AUTH_REQUIRED" });
   });
+});
+
+describe("local owner lookup boundary", () => {
+  it("[デシジョンテーブル] localはAccessヘッダーやOwner上書きを無視して固定OwnerをDB照合する", async () => {
+    const { createRemoteJWKSet, jwtVerify } = await import("jose");
+    vi.mocked(createRemoteJWKSet).mockClear();
+    vi.mocked(jwtVerify).mockClear();
+    for (const token of [undefined, "untrusted-access-token"]) {
+      const database = new OwnerD1("local-owner@orbit.local", "local-owner");
+      const prepare = vi.spyOn(database, "prepare");
+      const owner = await resolveOwner(
+        new Request("http://127.0.0.1:3000/api/v1/bootstrap", {
+          headers: token ? { "Cf-Access-Jwt-Assertion": token } : {},
+        }),
+        {
+          APP_ENV: "local",
+          ORBIT_STORAGE: "d1",
+          DB: database as unknown as D1Database,
+          DEV_OWNER_USER_ID: "attacker",
+          OWNER_USER_ID: "attacker",
+          OWNER_EMAIL: "attacker@example.com",
+        } as unknown as RuntimeEnvironment,
+      );
+      expect(owner).toEqual({
+        userId: "local-owner",
+        email: "local-owner@orbit.local",
+        accessAuthenticated: false,
+      });
+      expect(prepare).toHaveBeenCalled();
+      expect(database.boundValues).toEqual([["local-owner"]]);
+    }
+    expect(createRemoteJWKSet).not.toHaveBeenCalled();
+    expect(jwtVerify).not.toHaveBeenCalled();
+  });
+});
+
+it("[同値分割] local DB欠落・Owner欠落・email衝突・DB失敗は500で停止する", async () => {
+  for (const DB of [
+    undefined,
+    new OwnerD1(null),
+    new OwnerD1("other@example.com"),
+    new FailingD1(),
+  ]) {
+    await expect(
+      resolveOwner(new Request("http://127.0.0.1:3000/api/v1/bootstrap"), {
+        APP_ENV: "local",
+        ORBIT_STORAGE: "d1",
+        DB,
+      } as unknown as RuntimeEnvironment),
+    ).rejects.toMatchObject({ status: 500, code: "INTERNAL_ERROR" });
+  }
 });

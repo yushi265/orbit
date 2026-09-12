@@ -739,6 +739,7 @@ export async function continueBackgroundRun(request: Request, runId: string): Pr
       idempotencyKey: body.idempotencyKey,
     }) as ContinueRunInput;
     const store = owner.store;
+    store.getRun(owner.userId, runId);
     return json(
       store.continueRun(owner.userId, runId, input, store.lockTokenFor(owner.userId, runId)),
       200,

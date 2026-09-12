@@ -34,6 +34,12 @@ Drizzle ORMはCloudflare D1とWorkers環境を正式にサポートする。[Dri
 
 ## 9.2 Cloudflare構成
 
+この構成図・Access認証・remote D1・外部ログ転送はクラウド運用に適用する。ローカル専用モードでは、同じアプリをCloudflareのローカル実行ツール上で動かし、ローカルD1を使う。クラウドアカウント・Access・外部ログ転送に依存しない。
+
+ローカル専用モードは`APP_ENV=local` / `ORBIT_STORAGE=d1`と固定Owner `local-owner`を使い、既存MigrationとOwner単位のSnapshot / Version CASで永続化する。保存先はリポジトリ基準`.orbit/local`または`ORBIT_LOCAL_DATA_DIR`の絶対パスで、初期化・起動・バックアップに同じ解決値を使う。通常HTTPは`127.0.0.1:3000`固定。`--lan`時は0.0.0.0:3000で待ち受け、検出したRFC1918 IPv4とloopbackの許可OriginをWorkerへ設定する。UIのフォントを含め外部リソースを自動取得しない。DB欠落・破損・保存失敗をMemory Storeで隠さない。
+
+既存`pnpm dev`のMemory Storeは画面開発用として維持する。Manual RunはlocalでもHTTP Chunk方式を使い、サーバー停止中は処理しない。バックアップは停止中に永続状態全体と版情報を保存し、同じコード・ツール版の空の別保存先へ復元する。詳細は[ローカル利用手順](../local-development.md)を参照する。
+
 ```mermaid
 flowchart TD
   U[Web / PWA] --> A[Cloudflare Access]

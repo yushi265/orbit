@@ -1,10 +1,15 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { LOCAL_OWNER, resolveRuntimeConfig } from "./runtime-config";
 import { ServiceError } from "./errors";
 import { createDb } from "../db/client";
 import { findOwnedUser } from "../db/repositories/owner";
 import type { D1Database } from "@cloudflare/workers-types";
 
-type RuntimeEnv = Record<string, string | undefined>;
+type RuntimeEnv = Record<string, string | undefined> & {
+  APP_ENV?: string;
+  ORBIT_STORAGE?: string;
+  ORBIT_LOCAL_ORIGINS?: string;
+};
 export type RuntimeEnvironment = RuntimeEnv & { DB?: D1Database };
 
 export async function runtimeEnv(): Promise<RuntimeEnv> {
@@ -32,7 +37,19 @@ export async function resolveOwner(
   suppliedEnvironment?: RuntimeEnvironment,
 ): Promise<OwnerContext> {
   const env = suppliedEnvironment ?? ((await runtimeEnv()) as RuntimeEnvironment);
-  const appEnv = env.APP_ENV ?? "development";
+  const { mode: appEnv } = resolveRuntimeConfig(env);
+  if (appEnv === "local") {
+    if (!env.DB) throw new ServiceError(500, "INTERNAL_ERROR", "ローカルDBを確認できません。");
+    let owner;
+    try {
+      owner = await findOwnedUser(createDb({ DB: env.DB }), LOCAL_OWNER.userId, LOCAL_OWNER.email);
+    } catch {
+      throw new ServiceError(500, "INTERNAL_ERROR", "ローカルDBを確認できません。");
+    }
+    if (!owner)
+      throw new ServiceError(500, "INTERNAL_ERROR", "ローカルOwnerを初期化してください。");
+    return { ...LOCAL_OWNER, accessAuthenticated: false };
+  }
   const devOwner = env.DEV_OWNER_USER_ID ?? "dev-owner";
   const token = request.headers.get("Cf-Access-Jwt-Assertion");
   if (appEnv !== "production" && !token) {

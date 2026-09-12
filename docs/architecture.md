@@ -43,10 +43,19 @@ ui  →  shared ← service → data
 
 ## 永続化モード
 
-- ローカル開発は既存の`OrbitStore`（Memory Store）を使い、主要な画面Journeyを高速に検証する。
+- `pnpm dev`による画面開発は既存の`OrbitStore`（Memory Store）を使い、主要な画面Journeyを高速に検証する。再起動で内容は失われる。
+- `pnpm local:start`によるローカル専用運用は`APP_ENV=local` / `ORBIT_STORAGE=d1`で、固定Owner `local-owner`とローカルD1 Snapshotを使う。AccessやJWKS取得は行わない。DB / Owner欠落・破損時はMemory Storeへフォールバックしない。
 - productionは`withOwner`のRequest SessionがD1 Snapshotをロードし、成功したRequestだけをOwner単位のVersion CASで保存する。D1 Bindingが無い場合にMemory Storeへフォールバックしない。
 - `src/db/`の正規化Schema / Repositoryは段階移行の正本として残し、Snapshot表は現行`OrbitStore`の全モデルを欠落なく永続化するためのMVP bridgeとする。
 - Project詳細のIssue表示設定は、MVPではOwner scopedなSnapshot配列として保存し、Bootstrapで端末間へ同期する。正規化Repositoryへの移行時期は別途判断する。
+
+## ローカル専用運用の境界
+
+ローカル専用設定`wrangler.local.jsonc`はクラウドDB ID・remote Bindingを含まない。Vite PluginとWranglerは、リポジトリ基準の`.orbit/local`または`ORBIT_LOCAL_DATA_DIR`で指定した絶対パスを共用する。データ層の既存Migration・Snapshot・Owner単位のVersion CASを再利用する。
+
+通常HTTPは`127.0.0.1:3000`だけで待ち受ける。明示的な`local:start -- --lan`では0.0.0.0:3000で待ち受け、起動時のRFC1918 IPv4とloopbackを許可OriginとしてWorkerへ渡す。APIのURLが許可Origin内にありHostと一致すること、MutationのOriginがそのRequest URLのOriginと一致することを検証する。固定OwnerはHTTPヘッダーで切り替えない。productionは引き続きAccess JWTとDB Owner照合を必須とし、local認証へフォールバックしない。
+
+表示層は同一Originの相対APIとシステムフォントを使用する。Manual Runは既存HTTP Chunk Runnerを使い、サーバー停止中は進まない。保存先全体のバックアップ・空の別保存先への復元はサーバー停止中に行う。操作手順・初期対応範囲は[ローカル利用手順](./local-development.md)を参照する。
 
 ## ドメイン境界（初期予定）
 

@@ -4,6 +4,7 @@ import {
   SnapshotVersionConflict,
   writeStoreSnapshot,
 } from "../db/repositories/store-snapshot";
+import { resolveRuntimeConfig } from "./runtime-config";
 import { conflict } from "./errors";
 import { runtimeEnv } from "./auth";
 import { getOrbitStore, OrbitStore } from "./store";
@@ -16,6 +17,7 @@ export interface StoreSession {
 
 export type StoreSessionEnvironment = {
   APP_ENV?: string;
+  ORBIT_STORAGE?: string;
   DB?: D1Database;
 };
 
@@ -25,14 +27,18 @@ export async function openStoreSession(
   suppliedEnvironment?: StoreSessionEnvironment,
 ): Promise<StoreSession> {
   const env = suppliedEnvironment ?? ((await runtimeEnv()) as StoreSessionEnvironment);
-  if ((env.APP_ENV ?? "development") !== "production") {
+  const config = resolveRuntimeConfig(env);
+  if (config.storage === "memory") {
     const store = getOrbitStore(userId);
     store.ensureOwner(userId, email, userId === "dev-owner");
     return { store, persist: async () => {}, needsInitialPersist: false };
   }
 
   const database = env.DB;
-  if (!database) throw new Error("Production D1 binding is missing");
+  if (!database)
+    throw new Error(
+      `${config.mode === "production" ? "Production" : "Local"} D1 binding is missing`,
+    );
   const row = await readStoreSnapshot(database, userId);
   const store = row ? OrbitStore.fromSnapshot(row.snapshot, undefined, userId) : new OrbitStore();
   const initialSnapshotJson = row ? JSON.stringify(store.toSnapshot()) : null;

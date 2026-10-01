@@ -66,6 +66,14 @@
 - Command / Shortcutは新規Menuライブラリを使わず、`nextCommandIndex`、`shortcutActionFor`、`shortcutModifierLabel`を使ってArrow選択・入力フォーカス除外・OS別modifier表示を実装する（参照: `src/components/issue-core-ui.ts`、`src/components/OrbitApp.tsx`）。
 - Inbox guidance: 既存通知の既読化・対象遷移を維持しつつ、通知の役割、未読の読み方、通知がない場合の次の行動をInbox内のGuide / Tab / Empty stateで説明する。通知生成・Push・削除APIは追加しない（参照: `src/components/OrbitApp.tsx`、`docs/spec/FEAT-home-project-inbox-ux/`）。
 
+## ローカル専用モード
+
+- `pnpm local:setup` / `local:start`は`APP_ENV=local` + `ORBIT_STORAGE=d1`、固定`local-owner`とローカルD1を使う。従来`pnpm dev`はMemory Store、productionはAccess + D1を維持。不正な環境・保存先の組合せは拒否する（参照: `src/server/runtime-config.ts`、`src/server/auth.ts`、`src/server/store-session.ts`）。
+- 通常localの正規Originは`http://127.0.0.1:3000`。明示`local:start -- --lan`では起動時に検出したRFC1918 IPv4も許可し、MutationはそのRequest URLと同一Originを要求する（追加契約: `docs/spec/FEAT-local-only/lan.md`）。ViteのHostガードは403 text、API到達後のHost / Mutation Origin不一致は400。非所有Runのcontinueはlock取得より先にgetRunで404にする（参照: `vite.config.ts`、`src/server/http.ts`、`src/server/api.ts`）。
+- CLIは同一絶対保存先・専用Wrangler設定・loopback・Node通信防壁を使用する。backup/restoreではコピー元・先と双方の`.lock`領域の重複も拒否する。ロックのfinally削除による成果物消失を避けるため、本体パスの親子比較だけに戻さない（参照: `scripts/local.mjs`、`scripts/local-network.mjs`）。
+- 実D1テストは公開Snapshot Repositoryを使う。テスト内の手書きCAS SQLでは本番RepositoryのWHERE条件の回帰を捕捉できない。全Snapshot配列非空と中断Runの再開は`local-repository.integration.mjs`で確認する。Notification fixtureは保存専用で通常Ownerの通知生成を意味しない（参照: `scripts/local-repository.integration.mjs`、`docs/spec/FEAT-local-only/verification.md`）。
+- Node防壁・ブラウザログとnative全プロセスの通信試行監査は別物。OS遮断下の機能動作は確認済みだが、全native試行監査は現環境で陽性対照が成立せずAC-7未完了（参照: `docs/spec/FEAT-local-only/verification.md`）。
+
 ## 最終更新
 
-MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / 2026-08-30
+MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

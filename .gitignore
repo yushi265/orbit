@@ -19,3 +19,6 @@ build/
 .env.*.local
 
 # AI-DLC engine のローカル揮発 state は .claude/aidlc/.gitignore で管理
+
+# ローカル専用DB・排他・運用ログ
+.orbit/

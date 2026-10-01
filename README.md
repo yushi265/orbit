@@ -5,18 +5,27 @@ Linearライクな個人用プロジェクト管理アプリです。要件定�
 
 MVPの主要なIssue / Cycle / Project / View / Search / Inbox / Settings / Background Runと、TanStack Start + Cloudflare Workersの実行基盤を実装しています。
 
-## MVPを動かす
+## ローカルのみで使う
 
-依存関係を導入して開発サーバーを起動します。
+Node 24と`package.json`指定のpnpmを用意し、初回に依存関係を導入します。
 
 ```bash
-pnpm install
-pnpm dev
+pnpm install --frozen-lockfile
+pnpm local:setup
+pnpm local:start
 ```
 
-ローカル開発では `DEV_OWNER_USER_ID`（既定値 `dev-owner`）を使った明示的な開発Ownerへフォールバックします。Cloudflare Access環境では `APP_ENV=production`、`OWNER_USER_ID`、`OWNER_EMAIL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD` をWorker Secret / Environmentへ設定してください。JWTは `jose` とAccess JWKSで署名・issuer・audience・emailを検証し、失敗時はfail-closedになります。
+`http://127.0.0.1:3000`を開きます。ローカル専用モードはCloudflareへのログインなしで固定Ownerを使い、データを`.orbit/local`のローカルD1へ保存します。初回はデモIssueを作りません。停止は起動したターミナルでCtrl+Cを押します。
 
-MVPのローカルデータはWorkerの開発Storeで保持されます。本番はD1 Snapshot Adapterで所有者単位の状態を永続化し、D1用の正規化SchemaとRepository基盤は `src/db/` と `drizzle/` に含まれています。本番デプロイの進捗と残タスクは [`docs/deployment.md`](./docs/deployment.md) を参照してください。現時点では、Snapshot Migration、Cloudflare AccessのSecret、Owner行の準備が必要です。
+既存の`.dev.vars` / `.dev.vars.*`がある場合はリポジトリ外へ退避してください。ローカル専用コマンドはこれらの暗黙読込を拒否します。
+
+保存先の変更、バックアップ・復元、更新時の手順と確認範囲は[ローカル利用手順](./docs/local-development.md)を参照してください。依存導入にはネットワークが必要です。通常は同じPC内限定です。同じLANの端末から利用する場合は`pnpm local:start -- --lan`で起動し、表示されたLAN URLを開きます。LANの利用者も同じ固定Ownerのデータを操作します。
+
+## 開発・クラウド運用
+
+画面開発用の`pnpm dev`は従来どおりMemory Storeと開発Owner（既定値`dev-owner`）を使います。再起動でデータが消えるため、継続利用には`pnpm local:start`を使ってください。
+
+クラウド運用は`APP_ENV=production`でCloudflare Access JWTとDB Ownerを照合し、D1 Snapshotへ保存します。必要なSecret、Migration、Owner登録は[本番デプロイ手順](./docs/deployment.md)を参照してください。
 
 品質ゲート:
 
@@ -79,6 +88,7 @@ pnpm test
 
 | ドキュメント | 内容 |
 |------------|------|
+| [`docs/local-development.md`](./docs/local-development.md) | ローカル専用の初期化・起動・停止・バックアップ・復元 |
 | [`docs/requirements/index.md`](./docs/requirements/index.md) | プロダクト要件・受入条件・技術選定の入口 |
 | [`.claude/README.md`](./.claude/README.md) | ハーネス取扱説明書（運用・構成・機械強制・導入手順） |
 | [`docs/ai-dlc-flow-guide.md`](./docs/ai-dlc-flow-guide.md) | AI-DLC フローの解説（承認ゲート・KPT・FAQ） |

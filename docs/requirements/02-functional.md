@@ -2,6 +2,10 @@
 
 ## 6.1 認証・本人限定アクセス
 
+以下のAUTH-01〜06とAccessログアウト・再認証要件はクラウド運用に適用する。ローカル専用モードはCloudflare Accessを使わず、通常は同じPCの`http://127.0.0.1:3000`から固定Owner `local-owner`として利用する。ユーザーが`--lan`を指定した場合は、起動時に検出したLAN IPv4からも同じOwnerで利用できる。APIのHost / URLとMutationのOriginを検証し、外部Host・別Originを拒否する。固定Ownerはリクエストで変更できない。local設定をproduction認証の代替として使わない。
+
+ローカル専用モードでも以下の業務機能・所有者境界・Run所有者照合は維持する。端末ごとのDB同期は対象外。LANアクセスは明示起動した同じローカルDBの共有として扱う。初回は既定Workflow等のみを用意し、デモIssueは作成しない。[ローカル利用手順](../local-development.md)に初期化と保存方法を定める。
+
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
 | AUTH-01 | Cloudflare Access経由でメールOTPまたはGoogle認証できる | Access Policyで許可された1つのメールアドレスだけが認証成功する |

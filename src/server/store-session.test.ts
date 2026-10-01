@@ -44,6 +44,25 @@ class FakeD1 {
 }
 
 describe("store session", () => {
+  it("[状態遷移] localはD1へ保存し、Memory Storeリセット後も空状態から作ったIssueを再読込する", async () => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV: "local", ORBIT_STORAGE: "d1", DB: database };
+    const first = await openStoreSession("local-owner", "local-owner@orbit.local", environment);
+    expect(first.store.listIssues("local-owner")).toHaveLength(0);
+    first.store.createIssue("local-owner", {
+      idempotencyKey: "local-d1-issue",
+      title: "Persistent local issue",
+    });
+    await first.persist();
+    resetOrbitStores();
+    const reloaded = await openStoreSession("local-owner", "local-owner@orbit.local", environment);
+    expect(reloaded.store).not.toBe(first.store);
+    expect(reloaded.store.listIssues("local-owner").map((issue) => issue.title)).toEqual([
+      "Persistent local issue",
+    ]);
+    expect((await readStoreSnapshot(database, "local-owner"))?.version).toBe(1);
+  });
+
   it("[レイヤー内結合] production Sessionの再読込後もCycle繰越履歴を投影する", async () => {
     const database = new FakeD1() as unknown as D1Database;
     const environment = { APP_ENV: "production", DB: database };
@@ -250,243 +269,255 @@ describe("store session", () => {
     expect(third.store.listCycles("owner-1")).toHaveLength(4);
   });
 
-  it("does not persist a discarded session and rejects stale writers", async () => {
-    const database = new FakeD1() as unknown as D1Database;
-    const environment = { APP_ENV: "production", DB: database };
-    const first = await openStoreSession("owner-1", "owner@example.com", environment);
-    const stale = await openStoreSession("owner-1", "owner@example.com", environment);
-    const status = first.store.ownedWorkflowStates("owner-1")[1];
-    first.store.createIssue("owner-1", {
-      idempotencyKey: "issue-1",
-      title: "First writer",
-      statusId: status.id,
-    });
-    stale.store.createIssue("owner-1", {
-      idempotencyKey: "issue-2",
-      title: "Stale writer",
-      statusId: stale.store.ownedWorkflowStates("owner-1")[1].id,
-    });
-    const writes = await Promise.allSettled([first.persist(), stale.persist()]);
-    expect(writes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(writes.filter((result) => result.status === "rejected")[0]).toMatchObject({
-      reason: { code: "D1_WRITE_CONFLICT", status: 409 },
-    });
+  it.each(["local", "production"])(
+    "does not persist a discarded session and rejects stale writers (%s)",
+    async (APP_ENV) => {
+      const database = new FakeD1() as unknown as D1Database;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const first = await openStoreSession("owner-1", "owner@example.com", environment);
+      const stale = await openStoreSession("owner-1", "owner@example.com", environment);
+      const status = first.store.ownedWorkflowStates("owner-1")[1];
+      first.store.createIssue("owner-1", {
+        idempotencyKey: "issue-1",
+        title: "First writer",
+        statusId: status.id,
+      });
+      stale.store.createIssue("owner-1", {
+        idempotencyKey: "issue-2",
+        title: "Stale writer",
+        statusId: stale.store.ownedWorkflowStates("owner-1")[1].id,
+      });
+      const writes = await Promise.allSettled([first.persist(), stale.persist()]);
+      expect(writes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(writes.filter((result) => result.status === "rejected")[0]).toMatchObject({
+        reason: { code: "D1_WRITE_CONFLICT", status: 409 },
+      });
 
-    const discarded = await openStoreSession("owner-1", "owner@example.com", environment);
-    discarded.store.createIssue("owner-1", {
-      idempotencyKey: "issue-3",
-      title: "Discarded issue",
-      statusId: discarded.store.ownedWorkflowStates("owner-1")[1].id,
-    });
-    const reloaded = await openStoreSession("owner-1", "owner@example.com", environment);
-    expect(reloaded.store.listIssues("owner-1").map((issue) => issue.title)).toEqual([
-      "First writer",
-    ]);
-  });
+      const discarded = await openStoreSession("owner-1", "owner@example.com", environment);
+      discarded.store.createIssue("owner-1", {
+        idempotencyKey: "issue-3",
+        title: "Discarded issue",
+        statusId: discarded.store.ownedWorkflowStates("owner-1")[1].id,
+      });
+      const reloaded = await openStoreSession("owner-1", "owner@example.com", environment);
+      expect(reloaded.store.listIssues("owner-1").map((issue) => issue.title)).toEqual([
+        "First writer",
+      ]);
+    },
+  );
 
-  it("persists only successful mutation handlers", async () => {
-    const database = new FakeD1() as unknown as D1Database;
-    const environment = { APP_ENV: "production", DB: database };
-    const resolvedOwner = {
-      userId: "owner-1",
-      email: "owner@example.com",
-      accessAuthenticated: true,
-    };
-    const request = new Request("https://orbit.example/api/v1/issues", {
-      method: "POST",
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-    });
-    const open = (userId: string, email: string) => openStoreSession(userId, email, environment);
+  it.each(["local", "production"])(
+    "persists only successful mutation handlers (%s)",
+    async (APP_ENV) => {
+      const database = new FakeD1() as unknown as D1Database;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const resolvedOwner = {
+        userId: "owner-1",
+        email: "owner@example.com",
+        accessAuthenticated: true,
+      };
+      const request = new Request("https://orbit.example/api/v1/issues", {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const open = (userId: string, email: string) => openStoreSession(userId, email, environment);
 
-    const success = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-success",
-          title: "Successful mutation",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: true });
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(success.status).toBe(200);
-
-    const failure = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-failure",
-          title: "Failed mutation",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        throw new ServiceError(400, "VALIDATION_ERROR", "invalid");
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(failure.status).toBe(400);
-
-    const serverFailure = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-server-failure",
-          title: "Server failure",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: false }, 500);
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(serverFailure.status).toBe(500);
-
-    const notFound = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-not-found",
-          title: "Not found",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: false }, 404);
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(notFound.status).toBe(404);
-
-    const conflictResponse = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-handler-conflict",
-          title: "Handler conflict",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: false }, 409);
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(conflictResponse.status).toBe(409);
-
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const unexpected = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-unexpected",
-          title: "Unexpected error",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        throw new Error("unexpected");
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(unexpected.status).toBe(500);
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
-
-    const reloaded = await openStoreSession("owner-1", "owner@example.com", environment);
-    expect(reloaded.store.listIssues("owner-1").map((issue) => issue.title)).toEqual([
-      "Successful mutation",
-    ]);
-  });
-
-  it("maps a production D1 conflict to a 409 ErrorEnvelope", async () => {
-    const database = new FakeD1() as unknown as D1Database;
-    const environment = { APP_ENV: "production", DB: database };
-    const resolvedOwner = {
-      userId: "owner-1",
-      email: "owner@example.com",
-      accessAuthenticated: true,
-    };
-    const request = new Request("https://orbit.example/api/v1/issues", {
-      method: "POST",
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-    });
-    const first = await openStoreSession("owner-1", "owner@example.com", environment);
-    const stale = await openStoreSession("owner-1", "owner@example.com", environment);
-
-    const success = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-first",
-          title: "First",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: true });
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: async () => first },
-    );
-    expect(success.status).toBe(200);
-
-    const conflict = await withOwner(
-      request,
-      async ({ owner }) => {
-        owner.store.createIssue("owner-1", {
-          idempotencyKey: "issue-stale",
-          title: "Stale",
-          statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
-        });
-        return json({ ok: true });
-      },
-      { resolveOwner: async () => resolvedOwner, openStoreSession: async () => stale },
-    );
-    expect(conflict.status).toBe(409);
-    expect(await conflict.json()).toMatchObject({ error: { code: "D1_WRITE_CONFLICT" } });
-  });
-
-  it("initializes a missing snapshot on the first GET but does not rewrite an existing one", async () => {
-    const database = new FakeD1() as unknown as D1Database;
-    const environment = { APP_ENV: "production", DB: database };
-    const resolvedOwner = {
-      userId: "owner-1",
-      email: "owner@example.com",
-      accessAuthenticated: true,
-    };
-    const open = (userId: string, email: string) => openStoreSession(userId, email, environment);
-    const getRequest = (method: string) =>
-      new Request("https://orbit.example/api/v1/bootstrap", { method });
-
-    const initial = await withOwner(
-      getRequest("GET"),
-      async ({ owner }) => json(owner.store.bootstrap("owner-1")),
-      { resolveOwner: async () => resolvedOwner, openStoreSession: open },
-    );
-    expect(initial.status).toBe(200);
-    expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
-
-    for (const method of ["GET", "HEAD", "OPTIONS"]) {
-      const session = await open("owner-1", "owner@example.com");
-      const response = await withOwner(
-        getRequest(method),
+      const success = await withOwner(
+        request,
         async ({ owner }) => {
-          owner.store.cycleSettings.get("owner-1")!.durationWeeks = 8;
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-success",
+            title: "Successful mutation",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
           return json({ ok: true });
         },
-        { resolveOwner: async () => resolvedOwner, openStoreSession: async () => session },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
       );
-      expect(response.status).toBe(200);
-    }
-    expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
+      expect(success.status).toBe(200);
 
-    for (const status of [404, 409]) {
-      const session = await open("owner-1", "owner@example.com");
-      const response = await withOwner(
-        new Request("https://orbit.example/api/v1/issues", {
-          method: "POST",
-          headers: { "X-Requested-With": "XMLHttpRequest" },
-        }),
+      const failure = await withOwner(
+        request,
         async ({ owner }) => {
-          owner.store.cycleSettings.get("owner-1")!.durationWeeks = 7;
-          return json({ ok: false }, status);
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-failure",
+            title: "Failed mutation",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          throw new ServiceError(400, "VALIDATION_ERROR", "invalid");
         },
-        { resolveOwner: async () => resolvedOwner, openStoreSession: async () => session },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
       );
-      expect(response.status).toBe(status);
-    }
-    expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
-  });
+      expect(failure.status).toBe(400);
+
+      const serverFailure = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-server-failure",
+            title: "Server failure",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          return json({ ok: false }, 500);
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
+      );
+      expect(serverFailure.status).toBe(500);
+
+      const notFound = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-not-found",
+            title: "Not found",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          return json({ ok: false }, 404);
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
+      );
+      expect(notFound.status).toBe(404);
+
+      const conflictResponse = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-handler-conflict",
+            title: "Handler conflict",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          return json({ ok: false }, 409);
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
+      );
+      expect(conflictResponse.status).toBe(409);
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const unexpected = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-unexpected",
+            title: "Unexpected error",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          throw new Error("unexpected");
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
+      );
+      expect(unexpected.status).toBe(500);
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
+
+      const reloaded = await openStoreSession("owner-1", "owner@example.com", environment);
+      expect(reloaded.store.listIssues("owner-1").map((issue) => issue.title)).toEqual([
+        "Successful mutation",
+      ]);
+    },
+  );
+
+  it.each(["local", "production"])(
+    "maps a production D1 conflict to a 409 ErrorEnvelope (%s)",
+    async (APP_ENV) => {
+      const database = new FakeD1() as unknown as D1Database;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const resolvedOwner = {
+        userId: "owner-1",
+        email: "owner@example.com",
+        accessAuthenticated: true,
+      };
+      const request = new Request("https://orbit.example/api/v1/issues", {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const first = await openStoreSession("owner-1", "owner@example.com", environment);
+      const stale = await openStoreSession("owner-1", "owner@example.com", environment);
+
+      const success = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-first",
+            title: "First",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          return json({ ok: true });
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: async () => first },
+      );
+      expect(success.status).toBe(200);
+
+      const conflict = await withOwner(
+        request,
+        async ({ owner }) => {
+          owner.store.createIssue("owner-1", {
+            idempotencyKey: "issue-stale",
+            title: "Stale",
+            statusId: owner.store.ownedWorkflowStates("owner-1")[1].id,
+          });
+          return json({ ok: true });
+        },
+        { resolveOwner: async () => resolvedOwner, openStoreSession: async () => stale },
+      );
+      expect(conflict.status).toBe(409);
+      expect(await conflict.json()).toMatchObject({ error: { code: "D1_WRITE_CONFLICT" } });
+    },
+  );
+
+  it.each(["local", "production"])(
+    "initializes a missing snapshot on the first GET but does not rewrite an existing one (%s)",
+    async (APP_ENV) => {
+      const database = new FakeD1() as unknown as D1Database;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const resolvedOwner = {
+        userId: "owner-1",
+        email: "owner@example.com",
+        accessAuthenticated: true,
+      };
+      const open = (userId: string, email: string) => openStoreSession(userId, email, environment);
+      const getRequest = (method: string) =>
+        new Request("https://orbit.example/api/v1/bootstrap", { method });
+
+      const initial = await withOwner(
+        getRequest("GET"),
+        async ({ owner }) => json(owner.store.bootstrap("owner-1")),
+        { resolveOwner: async () => resolvedOwner, openStoreSession: open },
+      );
+      expect(initial.status).toBe(200);
+      expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
+
+      for (const method of ["GET", "HEAD", "OPTIONS"]) {
+        const session = await open("owner-1", "owner@example.com");
+        const response = await withOwner(
+          getRequest(method),
+          async ({ owner }) => {
+            owner.store.cycleSettings.get("owner-1")!.durationWeeks = 8;
+            return json({ ok: true });
+          },
+          { resolveOwner: async () => resolvedOwner, openStoreSession: async () => session },
+        );
+        expect(response.status).toBe(200);
+      }
+      expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
+
+      for (const status of [404, 409]) {
+        const session = await open("owner-1", "owner@example.com");
+        const response = await withOwner(
+          new Request("https://orbit.example/api/v1/issues", {
+            method: "POST",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          }),
+          async ({ owner }) => {
+            owner.store.cycleSettings.get("owner-1")!.durationWeeks = 7;
+            return json({ ok: false }, status);
+          },
+          { resolveOwner: async () => resolvedOwner, openStoreSession: async () => session },
+        );
+        expect(response.status).toBe(status);
+      }
+      expect((await readStoreSnapshot(database, "owner-1"))?.version).toBe(1);
+    },
+  );
 
   it("does not fall back when production D1 is missing", async () => {
     await expect(
@@ -494,45 +525,48 @@ describe("store session", () => {
     ).rejects.toThrow("Production D1 binding is missing");
   });
 
-  it("[状態遷移] persists a lease expiry discovered during a successful GET", async () => {
-    let now = 1_700_000_000_000;
-    const database = new FakeD1() as unknown as D1Database;
-    const seed = new OrbitStore(() => now);
-    seed.ensureOwner("owner-lease", "lease@example.com");
-    seed.ensureUpcomingCycles("owner-lease");
-    const run = seed.startRun("owner-lease", {
-      kind: "maintenance",
-      idempotencyKey: "lease-expiry-run",
-    });
-    await writeStoreSnapshot(database, "owner-lease", 0, seed.toSnapshot(), now);
-    now = run.leaseExpiresAt!;
-    const environment = { APP_ENV: "production", DB: database };
-    const resolvedOwner = {
-      userId: "owner-lease",
-      email: "lease@example.com",
-      accessAuthenticated: true,
-    };
+  it.each(["local", "production"])(
+    "[状態遷移] persists a lease expiry discovered during a successful GET (%s)",
+    async (APP_ENV) => {
+      let now = 1_700_000_000_000;
+      const database = new FakeD1() as unknown as D1Database;
+      const seed = new OrbitStore(() => now);
+      seed.ensureOwner("owner-lease", "lease@example.com");
+      seed.ensureUpcomingCycles("owner-lease");
+      const run = seed.startRun("owner-lease", {
+        kind: "maintenance",
+        idempotencyKey: "lease-expiry-run",
+      });
+      await writeStoreSnapshot(database, "owner-lease", 0, seed.toSnapshot(), now);
+      now = run.leaseExpiresAt!;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const resolvedOwner = {
+        userId: "owner-lease",
+        email: "lease@example.com",
+        accessAuthenticated: true,
+      };
 
-    const response = await withOwner(
-      new Request("https://orbit.example/api/v1/background-runs/current"),
-      async ({ owner }) => {
-        const current = owner.store.currentRun("owner-lease");
-        return json({ run: current ? owner.store.publicRun(current) : null });
-      },
-      {
-        resolveOwner: async () => resolvedOwner,
-        openStoreSession: (userId, email) => openStoreSession(userId, email, environment),
-      },
-    );
+      const response = await withOwner(
+        new Request("https://orbit.example/api/v1/background-runs/current"),
+        async ({ owner }) => {
+          const current = owner.store.currentRun("owner-lease");
+          return json({ run: current ? owner.store.publicRun(current) : null });
+        },
+        {
+          resolveOwner: async () => resolvedOwner,
+          openStoreSession: (userId, email) => openStoreSession(userId, email, environment),
+        },
+      );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ run: { status: "paused" } });
-    const persisted = await readStoreSnapshot(database, "owner-lease");
-    const snapshot = persisted?.snapshot as OrbitStoreSnapshot | undefined;
-    expect(persisted?.version).toBe(2);
-    expect(snapshot?.runs[0]?.status).toBe("paused");
-    expect(snapshot?.locks[0]?.status).toBe("idle");
-  });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ run: { status: "paused" } });
+      const persisted = await readStoreSnapshot(database, "owner-lease");
+      const snapshot = persisted?.snapshot as OrbitStoreSnapshot | undefined;
+      expect(persisted?.version).toBe(2);
+      expect(snapshot?.runs[0]?.status).toBe("paused");
+      expect(snapshot?.locks[0]?.status).toBe("idle");
+    },
+  );
 
   it("keeps development sessions on the existing Memory Store", async () => {
     resetOrbitStores();
@@ -550,7 +584,7 @@ describe("store session", () => {
     expect(second.store.listIssues("local-owner")[0].title).toBe("Local issue");
     resetOrbitStores();
 
-    for (const appEnv of [undefined, "preview"]) {
+    for (const appEnv of [undefined, "development"]) {
       const fixtureEnvironment = appEnv ? { APP_ENV: appEnv } : {};
       const fixture = await openStoreSession("dev-owner", "you@orbit.local", fixtureEnvironment);
       expect(fixture.store.listIssues("dev-owner").length).toBeGreaterThan(0);
@@ -558,32 +592,84 @@ describe("store session", () => {
     }
   });
 
-  it("keeps two production owners in separate snapshot rows", async () => {
-    const database = new FakeD1() as unknown as D1Database;
-    const environment = { APP_ENV: "production", DB: database };
-    const ownerA = await openStoreSession("owner-a", "a@example.com", environment);
-    ownerA.store.createIssue("owner-a", {
-      idempotencyKey: "issue-a",
-      title: "Owner A issue",
-      statusId: ownerA.store.ownedWorkflowStates("owner-a")[1].id,
-    });
-    await ownerA.persist();
+  it.each(["local", "production"])(
+    "keeps two production owners in separate snapshot rows (%s)",
+    async (APP_ENV) => {
+      const database = new FakeD1() as unknown as D1Database;
+      const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+      const ownerA = await openStoreSession("owner-a", "a@example.com", environment);
+      ownerA.store.createIssue("owner-a", {
+        idempotencyKey: "issue-a",
+        title: "Owner A issue",
+        statusId: ownerA.store.ownedWorkflowStates("owner-a")[1].id,
+      });
+      await ownerA.persist();
 
-    const ownerB = await openStoreSession("owner-b", "b@example.com", environment);
-    ownerB.store.createIssue("owner-b", {
-      idempotencyKey: "issue-b",
-      title: "Owner B issue",
-      statusId: ownerB.store.ownedWorkflowStates("owner-b")[1].id,
-    });
-    await ownerB.persist();
+      const ownerB = await openStoreSession("owner-b", "b@example.com", environment);
+      ownerB.store.createIssue("owner-b", {
+        idempotencyKey: "issue-b",
+        title: "Owner B issue",
+        statusId: ownerB.store.ownedWorkflowStates("owner-b")[1].id,
+      });
+      await ownerB.persist();
 
-    const reloadedA = await openStoreSession("owner-a", "a@example.com", environment);
-    const reloadedB = await openStoreSession("owner-b", "b@example.com", environment);
-    expect(reloadedA.store.listIssues("owner-a").map((issue) => issue.title)).toEqual([
-      "Owner A issue",
-    ]);
-    expect(reloadedB.store.listIssues("owner-b").map((issue) => issue.title)).toEqual([
-      "Owner B issue",
-    ]);
-  });
+      const reloadedA = await openStoreSession("owner-a", "a@example.com", environment);
+      const reloadedB = await openStoreSession("owner-b", "b@example.com", environment);
+      expect(reloadedA.store.listIssues("owner-a").map((issue) => issue.title)).toEqual([
+        "Owner A issue",
+      ]);
+      expect(reloadedB.store.listIssues("owner-b").map((issue) => issue.title)).toEqual([
+        "Owner B issue",
+      ]);
+    },
+  );
+});
+
+it("[同値分割] localのDB欠落・不正JSON・不正Snapshot・書込例外を500へ変換し再生成しない", async () => {
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    for (const fault of ["missing", "json", "shape", "write"]) {
+      const run = vi.fn(async () => {
+        throw new Error("disk write failed");
+      });
+      const statement = {
+        bind: (..._values: unknown[]) => statement,
+        first: async () =>
+          fault === "write"
+            ? null
+            : { version: 1, stateJson: fault === "json" ? "broken-json" : "{}", updatedAt: 1 },
+        run,
+      };
+      const DB =
+        fault === "missing" ? undefined : ({ prepare: () => statement } as unknown as D1Database);
+      const environment = { APP_ENV: "local", ORBIT_STORAGE: "d1", DB };
+      const handler = vi.fn(async ({ owner }: { owner: { store: OrbitStore } }) =>
+        json(owner.store.bootstrap("local-owner")),
+      );
+      const response = await withOwner(
+        new Request("http://127.0.0.1:3000/api/v1/bootstrap", {
+          headers: { Host: "127.0.0.1:3000" },
+        }),
+        handler,
+        {
+          runtimeEnv: async () => environment as unknown as import("./auth").RuntimeEnvironment,
+          resolveOwner: async () => ({
+            userId: "local-owner",
+            email: "local-owner@orbit.local",
+            accessAuthenticated: false,
+          }),
+        },
+      );
+      expect(response.status, fault).toBe(500);
+      expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      if (fault !== "write") {
+        expect(handler).not.toHaveBeenCalled();
+        expect(run).not.toHaveBeenCalled();
+      } else {
+        expect(run).toHaveBeenCalledTimes(1);
+      }
+    }
+  } finally {
+    consoleError.mockRestore();
+  }
 });

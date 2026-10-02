@@ -89,3 +89,15 @@ describe("Issue URL search contract", () => {
     expect(normalizeIssueSearch({ completed: value })).toEqual({ completed: value === "true" });
   });
 });
+
+describe("Home follow-up URL conditions", () => {
+  it("[Home条件] openとnext7を復元し、不正Booleanを除外する", () => {
+    expect(normalizeIssueSearch({ open: "true", due: "next7", completed: true })).toEqual({
+      open: true,
+      due: "next7",
+      completed: true,
+    });
+    expect(normalizeIssueSearch({ open: false })).toEqual({});
+    expect(normalizeIssueSearch({ open: [true] })).toEqual({});
+  });
+});

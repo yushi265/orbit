@@ -17,6 +17,8 @@ Issue期限の`dueAt: number | null`のwire/Snapshot形状を維持する。期�
 
 Bootstrapのbackgroundへ`lastRun: PublicRunViewModel | null`を追加する。これはOwnerの最新requested_atのRunで、既存PublicRunの全statusを許す。Owner ID、Lease token、内部stepCursors、receipt等の非公開値は既存publicRunで除去する。
 
+requested_atが同じミリ秒の場合は、既存Run集合へ後から追加されたRunを優先する。Snapshot復元でもこの順序を維持する。新しい時刻・連番fieldは追加しない。
+
 既存`background.run`はpending/running/paused/failedの進行中・復旧対象だけを返す。`GET /api/v1/background-runs/current`のnull/active契約は変更しない。`BootstrapViewModel.background.lastRun`はoptionalとし、旧Snapshot/既存test fixtureを受け入れる。StoreのBootstrapは常にlastRunを返す。
 
 ## テスト

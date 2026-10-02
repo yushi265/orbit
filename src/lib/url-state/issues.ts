@@ -12,6 +12,7 @@ export type IssueSearch = {
   order?: IssueSort;
   mode?: "board";
   completed?: boolean;
+  open?: true;
 };
 function scalar(value: unknown): string | undefined {
   return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
@@ -29,7 +30,7 @@ export function normalizeIssueSearch(input: Record<string, unknown>): IssueSearc
   }
   const priority = choice(input.priority, PRIORITY_VALUES);
   if (priority) result.priority = priority;
-  const due = choice(input.due, ["none", "overdue", "today", "upcoming"] as const);
+  const due = choice(input.due, ["none", "overdue", "today", "upcoming", "next7"] as const);
   if (due) result.due = due;
   if (input.scope === "archived") result.scope = "archived";
   const order = choice(
@@ -40,6 +41,7 @@ export function normalizeIssueSearch(input: Record<string, unknown>): IssueSearc
   if (input.mode === "board") result.mode = "board";
   if (input.completed === true || input.completed === "true") result.completed = true;
   if (input.completed === false || input.completed === "false") result.completed = false;
+  if (input.open === true || input.open === "true") result.open = true;
   return result;
 }
 export function resolveIssueSearch(search: IssueSearch, completedFallback: boolean) {
@@ -55,4 +57,9 @@ export function resolveIssueSearch(search: IssueSearch, completedFallback: boole
     viewMode: search.mode ?? ("list" as const),
     showCompleted: search.completed ?? completedFallback,
   };
+}
+
+export type ProjectSearch = { active?: true };
+export function normalizeProjectSearch(input: Record<string, unknown>): ProjectSearch {
+  return input.active === true || input.active === "true" ? { active: true } : {};
 }

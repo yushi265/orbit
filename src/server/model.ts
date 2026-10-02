@@ -309,7 +309,7 @@ export interface IssueQuery {
     projectIds?: string[];
     cycleIds?: string[];
     labelIds?: string[];
-    due?: "none" | "overdue" | "today" | "upcoming";
+    due?: "none" | "overdue" | "today" | "upcoming" | "next7";
     created?: { from?: number; to?: number };
   };
   group?: "status" | "priority" | "project" | "cycle" | "label";
@@ -334,7 +334,7 @@ export interface BootstrapPayload {
   cycleHistory: CycleHistoryViewModel[];
   views: SavedView[];
   notifications: Notification[];
-  background: { run: PublicRunSummary | null };
+  background: { run: PublicRunSummary | null; lastRun?: PublicRunSummary | null };
 }
 
 export type PublicRunSummary = Omit<

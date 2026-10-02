@@ -88,7 +88,7 @@ function Runtime({ bootstrap }: { bootstrap: PublicRunViewModel | null }) {
   });
   return createElement(
     "div",
-    null,
+    { "data-run-status": run?.status ?? "none" },
     createElement("button", { onClick: start }, "Runを開始"),
     run && ["pending", "running", "paused", "failed"].includes(run.status)
       ? createElement(RunOverlay, { run, busy, onResume: resume })
@@ -344,6 +344,35 @@ describe("Background Run browser recovery", () => {
     expect(dom.window.document.querySelector(".run-overlay")).toBeNull();
     expect(success).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["succeeded", "rejected"] as const)(
+    "[current null/通知/404] 既知%sを保持し新eligibleと404へだけ切り替える",
+    async (status) => {
+      let current: PublicRunViewModel | null = null;
+      let notFound = false;
+      stubApi({
+        current: () =>
+          notFound
+            ? response({ error: { code: "NOT_FOUND", message: "見つかりません" } }, 404)
+            : response({ run: current }),
+      });
+      await render(runAt(100, status));
+      const state = () =>
+        dom.window.document.querySelector("[data-run-status]")?.getAttribute("data-run-status");
+      expect(state()).toBe(status);
+      await advance(30_000);
+      expect(state()).toBe(status);
+      expect(success).toHaveBeenCalledTimes(status === "succeeded" ? 1 : 0);
+      current = { ...runAt(20, "paused"), run_id: "new-run" };
+      await act(async () => dom.window.dispatchEvent(new dom.window.Event("focus")));
+      expect(state()).toBe("paused");
+      notFound = true;
+      await advance(30_000);
+      expect(state()).toBe("none");
+      expect(success).toHaveBeenCalledTimes(status === "succeeded" ? 1 : 0);
+      expect(error).not.toHaveBeenCalled();
+    },
+  );
 
   it("[同時実行/境界値] 同値cursorのcontinue応答は5秒待って再試行し、tight loopを作らない", async () => {
     const fetch = stubApi({

@@ -7,6 +7,43 @@ import {
 } from "./issue-dates";
 
 describe("Issue期限の日付契約", () => {
+  it("[境界値] next7は8日後の期限を含まず、upcomingは引き続き含む", () => {
+    const now = Date.UTC(2026, 9, 1, 16);
+    const eightDaysLater = Date.UTC(2026, 9, 10);
+    expect(matchesIssueDueDate(eightDaysLater, "next7", now, "Asia/Tokyo")).toBe(false);
+    expect(matchesIssueDueDate(eightDaysLater, "upcoming", now, "Asia/Tokyo")).toBe(true);
+  });
+
+  it.each([
+    [null, false],
+    [Date.UTC(2026, 9, 1), false],
+    [Date.UTC(2026, 9, 2, 23, 59), false],
+    [Date.UTC(2026, 9, 3), true],
+    [Date.UTC(2026, 9, 9), true],
+    [Date.UTC(2026, 9, 9, 23, 59, 59, 999), true],
+    [Date.UTC(2026, 9, 10), false],
+  ] as const)("[境界値] next7のnull/昨日/今日/1日後/7日後/8日後: %s", (dueAt, expected) => {
+    expect(matchesIssueDueDate(dueAt, "next7", Date.UTC(2026, 9, 1, 16), "Asia/Tokyo")).toBe(
+      expected,
+    );
+  });
+
+  it.each([
+    ["2026-03-08T07:30:00Z", "America/Los_Angeles", Date.UTC(2026, 2, 14)],
+    ["2026-11-01T06:30:00Z", "America/Los_Angeles", Date.UTC(2026, 10, 7)],
+    ["2026-12-31T03:00:00Z", "Asia/Tokyo", Date.UTC(2027, 0, 7)],
+    ["2028-02-26T16:00:00Z", "Asia/Tokyo", Date.UTC(2028, 2, 5)],
+  ] as const)(
+    "[境界値] next7はDST/年越し/閏月でもOwnerの暦日7日後まで: %s",
+    (value, timezone, lastDay) => {
+      const now = Date.parse(value);
+      expect(matchesIssueDueDate(lastDay + 23 * 60 * 60 * 1000, "next7", now, timezone)).toBe(true);
+      expect(matchesIssueDueDate(lastDay + 24 * 60 * 60 * 1000, "next7", now, timezone)).toBe(
+        false,
+      );
+    },
+  );
+
   it("[代表値] UTCで保存した期限の年月日を返す", () => {
     expect(issueDueDateKey(Date.UTC(2026, 9, 2))).toBe("2026-10-02");
   });

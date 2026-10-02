@@ -201,6 +201,25 @@ describe("review Issues URL navigation", () => {
       dom.window.document.querySelector('button[data-issue-id="issue-1"]'),
     );
   });
+  it("[Home条件/詳細往復] open=trueを詳細と一覧への復帰で保持する", async () => {
+    const router = await render("/issues?open=true&completed=true");
+    await settled();
+    await act(async () =>
+      (
+        dom.window.document.querySelector('button[data-issue-id="issue-1"]') as HTMLButtonElement
+      ).click(),
+    );
+    await settled();
+    expect(router.state.location.search).toEqual({ open: true, completed: true });
+    await act(async () =>
+      (
+        dom.window.document.querySelector('[aria-label="Issue詳細を閉じる"]') as HTMLButtonElement
+      ).click(),
+    );
+    await settled();
+    expect(router.state.location.pathname).toBe("/issues");
+    expect(router.state.location.search).toEqual({ open: true, completed: true });
+  });
   it("[他画面の詳細導線] HomeからはIssuesの既定条件で開く", async () => {
     const router = await render("/?priority=low&q=unrelated&mode=board");
     await settled();

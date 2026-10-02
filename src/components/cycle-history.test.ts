@@ -372,7 +372,8 @@ describe("Cycle history UI", () => {
 
   it("[異常系] Bootstrapのloading/error/retry導線と履歴prop配線を維持する", () => {
     expect(appSource).toContain("if (bootstrap.isLoading)");
-    expect(appSource).toContain("if (bootstrap.error || !data)");
+    // Cached refetch failures and initial failures are behavior-tested in
+    // followup-shell-runtime.test.ts, rather than tied to a source guard string.
     expect(appSource).toContain("onClick={() => bootstrap.refetch()}");
     expect(appSource).toContain("cycleHistory={data.cycleHistory}");
   });

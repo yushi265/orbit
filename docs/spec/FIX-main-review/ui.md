@@ -12,6 +12,7 @@
 - **AC-14**: 古い検索応答・失敗が新しい検索結果や空検索を上書きしない。
 - **AC-15**: Project作成の連打・保存中のEnterを重複送信せず、IME確定Enterでは作成しない。
 - **AC-16**: Autosaveの409後に最新IssueをDetailと一覧Cacheへ同期する。
+- **AC-18**: 成功したRunをSettingsの最後の実行として表示できる。
 - **AC-19**: 1024pxの長いProject名でも操作ボタンの文字が細かく折り返されない。
 
 ## 契約・UI/UX方針
@@ -19,7 +20,7 @@
 - Runの既存APIを維持し、currentを定期取得する。running復元時に安全なcontinueを起動し、同一画面で二重runnerを作らない。通信失敗時は誤った成功Toastを出さず、進捗の再取得を続ける。paused/failedは既存Resume導線。無制限のtight loopにせずChunk間で制御を返す。
 - 初期・保存中・空・エラー・競合の既存表示を保持する。新しい画面やデザインシステムは追加しない。
 - URLは既存MVPが要求するFilter/Mode/Orderの正本とする。Issues一覧・詳細に同じvalidatorを置き、Route.useSearch()の結果を表示へ渡す。
-- search keysは`q`（文字列）、`status`/`label`（Owner ID）、`priority`（既存5値）、`project`（Owner IDまたは既存`__none__`）、`due`（none/overdue/today/upcoming）、`scope`（active/archived）、`order`（既存IssueSort 7値）、`mode`（list/board）、`completed`（boolean）。all/list/active/updated_descの既定値はURLから省略できる。`completed`は生成URLへ実効値を明示し、初回省略時のみStorageへfallbackする。
+- search keysは`q`（文字列）、`status`/`label`（Owner ID）、`priority`（既存5値）、`project`（Owner IDまたは既存`__none__`）、`due`（none/overdue/today/upcoming/next7）、`scope`（active/archived）、`order`（IssueSort 13値）、`mode`（list/board）、`completed`/`open`（boolean）。all/list/active/updated_descの既定値はURLから省略できる。`completed`は生成URLへ実効値を明示し、初回省略時のみStorageへfallbackする。open/next7/逆方向Orderの追加契約はFEAT-review-followupを参照する。
 - 不正Enum、配列、object、未知keyは安全な既定値へ正規化する。qは入力中の空白を保持し、手入力URLの数値primitiveは文字列として扱う。参照IDの存在補正はBootstrap取得後に行う。
 - Filter更新はreplace/resetScroll:false、解除は一括navigation。Issuesから詳細・詳細内Issue切替・閉じるでは同じsearchを保持する。他画面からはIssuesの既定条件で開く。閉じる先は既存どおり`/issues`。global EscapeはDetailの保存flushを迂回しない。
 - 一覧復帰時のFocusは対象行描画後に`preventScroll:true`で復元する。現在のRouter scrollRestorationを維持し、開閉時はresetScroll:falseを指定する。
@@ -29,6 +30,8 @@
 - Autosave競合の最新Detailを既存applyUpdatedIssueでActive/Archived等の既存一覧Cacheにも反映する。別操作でlifecycleが変わった場合は各scopeの所属を保ち、無関係な行を保持する。
 - Issue期限の表示/入力はUTC暦日を維持する。List/Filter/Home/relative dayだけsharedの期限日helperへ統一し、本人Timezoneのtodayと比較する。Activity・Project/Cycle等のtimestamp表示は変更しない。
 - blocking Runの視覚上のz-indexをDialog/Toastより上へ置き、Focus/inertの最前面priorityと一致させる。非blocking表示は従来の重なりを維持する。
+- Settingsは復旧対象Runを優先し、終端RunはcontrollerとBootstrap lastRunの新しいrequested_atを表示する。同ms・別IDはBootstrapを優先する。新しいcontroller完了結果が古いBootstrapを上回る場合はcontrollerを維持する。
+- current=nullとBootstrap refetch失敗の後も既知の完了を保持し、Cacheがある画面を維持する。初回エラー/RetryとApiClient再認証redirectは変更しない。
 
 ## レスポンシブ・アクセシビリティ
 

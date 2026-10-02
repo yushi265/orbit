@@ -361,7 +361,7 @@ describe("Issue detail autosave", () => {
     });
   });
 
-  it("[代表値] 変更がないblurでは保存せず、説明の保存ボタンだけを廃止する", async () => {
+  it("[代表値] 変更がないblurでは保存せず、説明とProjectの手動保存ボタンを表示しない", async () => {
     const { dom, root, queryClient, onClose } = renderPanel();
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(detail));
     vi.stubGlobal("fetch", fetchMock);
@@ -390,7 +390,7 @@ describe("Issue detail autosave", () => {
     expect(
       [...dom.window.document.querySelectorAll("button")].map((button) => button.textContent),
     ).not.toContain("説明を保存");
-    expect(dom.window.document.body.textContent).toContain("Projectを保存");
+    expect(dom.window.document.body.textContent).not.toContain("Projectを保存");
     expect(dom.window.document.body.textContent).toContain("メモを追加");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -563,17 +563,11 @@ describe("Issue detail autosave", () => {
 
     const title = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
     const projectSelect = dom.window.document.querySelector("#issue-project") as HTMLSelectElement;
-    const projectButton = [...dom.window.document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Projectを保存",
-    ) as HTMLButtonElement;
     await act(async () => {
       title.focus();
       setTextareaValue(dom, title, "更新タイトル");
       projectSelect.value = project.id;
       projectSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      projectButton.click();
     });
 
     await waitForState(() =>

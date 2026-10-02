@@ -164,7 +164,9 @@ describe("Issue date inputs and current calendar", () => {
       await act(async () =>
         root.render(readonlyList(reviewIssue("read-only", { dueAt: Date.UTC(2026, 9, 2) }))),
       );
-      expect(dom.window.document.querySelector(".due-cell")?.textContent).toBe("10月2日");
+      expect(dom.window.document.querySelector(".issue-row .due-cell")?.textContent).toBe(
+        "10月2日",
+      );
     },
   );
   it("[Home/設定変更] todayだけをOwnerTZで切り替え、同じ期限日は書き換えない", async () => {

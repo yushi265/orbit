@@ -22,7 +22,7 @@ export function calendarDateKeyInTimeZone(value: number, timeZone: string): stri
 
 export function matchesIssueDueDate(
   dueAt: number | null,
-  filter: "none" | "overdue" | "today" | "upcoming",
+  filter: "none" | "overdue" | "today" | "upcoming" | "next7",
   now: number,
   timeZone: string,
 ): boolean {
@@ -32,6 +32,11 @@ export function matchesIssueDueDate(
   const today = calendarDateKeyInTimeZone(now, timeZone);
   if (filter === "overdue") return due < today;
   if (filter === "today") return due === today;
+  if (filter === "next7") {
+    const lastDay = new Date(`${today}T00:00:00.000Z`);
+    lastDay.setUTCDate(lastDay.getUTCDate() + 7);
+    return due > today && due <= issueDueDateKey(lastDay.getTime());
+  }
   return due > today;
 }
 

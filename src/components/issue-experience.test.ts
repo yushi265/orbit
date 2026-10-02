@@ -35,8 +35,8 @@ describe("Issue experience UI contract", () => {
 
     expect(app).toContain('role="img"');
     expect(app).toContain("aria-label={`${issue.identifier}のPriority`}");
-    expect(app).toContain("を上へ移動");
-    expect(app).toContain("を下へ移動");
+    expect(app).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"');
+    expect(app).toContain("event.altKey");
     expect(css).toContain(".issue-table.manual-order");
     expect(css).toContain("@media (max-width: 767px)");
     expect(css).toContain("@media (min-width: 768px) and (max-width: 1023px)");

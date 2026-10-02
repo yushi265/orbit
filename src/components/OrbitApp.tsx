@@ -71,10 +71,13 @@ import {
 import { queryClient } from "../lib/query";
 import { useBackgroundRun } from "./background-run";
 import { useDialogBoundary } from "./dialog-boundary";
+import { LinkifiedText } from "./LinkifiedText";
+import { linkifyText } from "./linkified-text";
 import {
   normalizeIssueSearch,
   resolveIssueSearch,
   type IssueSearch,
+  type ProjectSearch,
 } from "../lib/url-state/issues";
 
 type Section =
@@ -92,6 +95,7 @@ type Props = {
   projectId?: string;
   cycleId?: string;
   issueSearch?: IssueSearch;
+  projectSearch?: ProjectSearch;
 };
 type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
@@ -126,7 +130,7 @@ type SearchFilters = {
   projectId: string;
   cycleId: string;
   labelId: string;
-  due: "all" | "none" | "overdue" | "today" | "upcoming";
+  due: "all" | "none" | "overdue" | "today" | "upcoming" | "next7";
 };
 
 const priorityLabel: Record<Issue["priority"], string> = {
@@ -172,6 +176,20 @@ const cycleWeekdayOptions = [
   [5, "金曜日"],
   [6, "土曜日"],
 ] as const;
+
+function settingsRunToDisplay(
+  controller: PublicRunSummary | null,
+  server: PublicRunSummary | null | undefined,
+): PublicRunSummary | null {
+  const eligible = (value: PublicRunSummary) =>
+    ["pending", "running", "paused", "failed"].includes(value.status);
+  if (controller && eligible(controller)) return controller;
+  if (!controller) return server ?? null;
+  if (!server) return controller;
+  // An earlier Bootstrap snapshot of this same Run must not regress completion.
+  if (controller.run_id === server.run_id && eligible(server)) return controller;
+  return controller.requested_at > server.requested_at ? controller : server;
+}
 
 function formatDate(value: number | null): string {
   if (!value) return "未設定";
@@ -285,6 +303,7 @@ function OrbitAppInner(props: Props) {
     issueSort,
     issueScope,
   } = resolveIssueSearch(props.issueSearch ?? {}, completedFallback);
+  const openOnly = props.issueSearch?.open === true;
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -472,7 +491,18 @@ function OrbitAppInner(props: Props) {
       data?.preferences.timezone ?? "UTC",
     );
     return sortIssues(
-      filterCompletedIssues(filtered, workflowStates, showCompleted),
+      filterCompletedIssues(
+        openOnly
+          ? filtered.filter((issue) => {
+              const category = workflowStates.find(
+                (state) => state.id === issue.statusId,
+              )?.category;
+              return category !== "completed" && category !== "canceled";
+            })
+          : filtered,
+        workflowStates,
+        showCompleted,
+      ),
       issueSort,
       workflowStates,
     );
@@ -486,6 +516,7 @@ function OrbitAppInner(props: Props) {
     dueFilter,
     workflowStates,
     showCompleted,
+    openOnly,
     issueSort,
     clockNow,
     data?.preferences.timezone,
@@ -1242,7 +1273,7 @@ function OrbitAppInner(props: Props) {
         <p>Orbitを準備しています…</p>
       </div>
     );
-  if (bootstrap.error || !data)
+  if (!data)
     return (
       <div className="loading-screen error-screen">
         <div className="brand-mark">!</div>
@@ -1304,6 +1335,18 @@ function OrbitAppInner(props: Props) {
           </div>
         </header>
         <main className="content-area">
+          {bootstrap.error && (
+            <div className="detail-live-error" role="alert">
+              最新情報を取得できませんでした。表示中の情報を保持しています。
+              <button
+                className="text-button"
+                onClick={() => void bootstrap.refetch()}
+                disabled={bootstrap.isFetching}
+              >
+                再試行
+              </button>
+            </div>
+          )}
           {section === "home" && (
             <HomeView
               data={data}
@@ -1320,6 +1363,7 @@ function OrbitAppInner(props: Props) {
               setScope={setIssueScope}
               workflowStates={workflowStates}
               filterText={filterText}
+              openOnly={openOnly}
               onClearFilters={() =>
                 updateIssueSearch({
                   q: undefined,
@@ -1329,6 +1373,7 @@ function OrbitAppInner(props: Props) {
                   label: undefined,
                   due: undefined,
                   completed: true,
+                  open: undefined,
                 })
               }
               setFilterText={setFilterText}
@@ -1410,7 +1455,11 @@ function OrbitAppInner(props: Props) {
           )}
           {section === "projects" && (
             <ProjectsView
-              projects={projects}
+              projects={
+                props.projectSearch?.active
+                  ? projects.filter((project) => !project.archivedAt && !project.deletedAt)
+                  : projects
+              }
               issues={issues}
               projectId={props.projectId}
               workflowStates={workflowStates}
@@ -1488,7 +1537,7 @@ function OrbitAppInner(props: Props) {
               workflowStates={workflowStates}
               labels={labels}
               onRefresh={refresh}
-              run={activeRun}
+              run={settingsRunToDisplay(run, data.background.lastRun)}
               runBusy={runBusy}
               onRun={runMaintenance}
               onResume={resumeMaintenance}
@@ -1520,6 +1569,7 @@ function OrbitAppInner(props: Props) {
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
             projects={projects}
+            labels={labels}
             onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
             pending={pendingIssueId === props.issueId}
             workflowStates={workflowStates}
@@ -1684,7 +1734,6 @@ function Sidebar({
       <div className="brand">
         <span className="brand-mark">O</span>
         <span className="brand-name">Orbit</span>
-        <span className="brand-version">MVP</span>
       </div>
       <button className="workspace-switcher">
         <span className="workspace-avatar">O</span>
@@ -1818,9 +1867,7 @@ export function HomeView({
       <div className="page-heading home-heading">
         <div>
           <span className="eyebrow home-date">{homeDateLabel(now, data.preferences.timezone)}</span>
-          <h1>
-            おかえりなさい、<em>{data.me.name}</em>
-          </h1>
+          <h1>Home</h1>
           <p className="subheading">今日やることを確認して、次の一歩を始めましょう。</p>
         </div>
         <div className="home-heading-actions">
@@ -1838,9 +1885,13 @@ export function HomeView({
             <div>
               <span className="eyebrow coral">CURRENT CYCLE</span>
               <h2>
-                {summary.activeCycle?.nameOverride ??
-                  summary.activeCycle?.name ??
-                  "Active Cycleなし"}
+                {summary.activeCycle ? (
+                  <Link to="/cycles/$cycleId" params={{ cycleId: summary.activeCycle.id }}>
+                    {summary.activeCycle.nameOverride ?? summary.activeCycle.name}
+                  </Link>
+                ) : (
+                  "Active Cycleなし"
+                )}
               </h2>
               <p>
                 {summary.activeCycle
@@ -1867,9 +1918,13 @@ export function HomeView({
                   </strong>
                   <span>完了したIssue</span>
                 </div>
-                <button className="text-button" onClick={() => onNavigate("cycles")}>
+                <Link
+                  className="text-button"
+                  to="/cycles/$cycleId"
+                  params={{ cycleId: summary.activeCycle.id }}
+                >
                   Cycle詳細 →
-                </button>
+                </Link>
               </div>
             </>
           ) : (
@@ -1882,16 +1937,20 @@ export function HomeView({
           )}
         </section>
         <section className="metric-card">
-          <span className="metric-icon purple">✦</span>
-          <span className="eyebrow">OPEN ISSUES</span>
-          <strong>{summary.openIssueCount}</strong>
-          <span className="metric-foot">未完了のIssue</span>
+          <Link className="home-metric-link" to="/issues" search={{ open: true, completed: true }}>
+            <span className="metric-icon purple">✦</span>
+            <span className="eyebrow">OPEN ISSUES</span>
+            <strong>{summary.openIssueCount}</strong>
+            <span className="metric-foot">未完了のIssue</span>
+          </Link>
         </section>
         <section className="metric-card">
-          <span className="metric-icon green">↗</span>
-          <span className="eyebrow">PROJECTS</span>
-          <strong>{summary.activeProjectCount}</strong>
-          <span className="metric-foot">進行中のProject</span>
+          <Link className="home-metric-link" to="/projects" search={{ active: true }}>
+            <span className="metric-icon green">↗</span>
+            <span className="eyebrow">PROJECTS</span>
+            <strong>{summary.activeProjectCount}</strong>
+            <span className="metric-foot">進行中のProject</span>
+          </Link>
         </section>
       </div>
       <section className="home-section">
@@ -1907,6 +1966,7 @@ export function HomeView({
         <div className="home-deadline-grid">
           <HomeIssueSection
             label="OVERDUE"
+            issueSearch={{ open: true, due: "overdue", completed: true }}
             title="期限超過"
             issues={summary.overdue}
             workflowStates={data.workflowStates}
@@ -1917,6 +1977,7 @@ export function HomeView({
           />
           <HomeIssueSection
             label="TODAY"
+            issueSearch={{ open: true, due: "today", completed: true }}
             title="今日が期限"
             issues={summary.dueToday}
             workflowStates={data.workflowStates}
@@ -1927,6 +1988,7 @@ export function HomeView({
           />
           <HomeIssueSection
             label="NEXT 7 DAYS"
+            issueSearch={{ open: true, due: "next7", completed: true }}
             title="7日以内"
             issues={summary.dueSoon}
             workflowStates={data.workflowStates}
@@ -1943,9 +2005,19 @@ export function HomeView({
             <span className="eyebrow coral">CURRENT CYCLE</span>
             <h2>Cycleの未完了Issue</h2>
           </div>
-          <button className="text-button" onClick={() => onNavigate("cycles")}>
-            Cycle詳細 →
-          </button>
+          {summary.activeCycle ? (
+            <Link
+              className="text-button"
+              to="/cycles/$cycleId"
+              params={{ cycleId: summary.activeCycle.id }}
+            >
+              Cycle詳細 →
+            </Link>
+          ) : (
+            <button className="text-button" onClick={() => onNavigate("cycles")}>
+              Cycle詳細 →
+            </button>
+          )}
         </div>
         {summary.activeCycle ? (
           <HomeIssueSection
@@ -2035,6 +2107,7 @@ export function HomeView({
 
 function HomeIssueSection({
   label,
+  issueSearch,
   title,
   issues,
   workflowStates,
@@ -2044,6 +2117,7 @@ function HomeIssueSection({
   onOpenIssue,
 }: {
   label: string;
+  issueSearch?: IssueSearch;
   title: string;
   issues: Issue[];
   workflowStates: WorkflowState[];
@@ -2054,13 +2128,23 @@ function HomeIssueSection({
 }) {
   return (
     <section className="home-issue-section">
-      <div className="home-issue-section-heading">
-        <div>
-          <span className="eyebrow">{label}</span>
-          <h3>{title}</h3>
+      {issueSearch ? (
+        <Link className="home-issue-section-heading" to="/issues" search={issueSearch}>
+          <div>
+            <span className="eyebrow">{label}</span>
+            <h3>{title}</h3>
+          </div>
+          <span className="count-pill">{issues.length}</span>
+        </Link>
+      ) : (
+        <div className="home-issue-section-heading">
+          <div>
+            <span className="eyebrow">{label}</span>
+            <h3>{title}</h3>
+          </div>
+          <span className="count-pill">{issues.length}</span>
         </div>
-        <span className="count-pill">{issues.length}</span>
-      </div>
+      )}
       <HomeIssueList
         issues={issues.slice(0, 4)}
         workflowStates={workflowStates}
@@ -2126,6 +2210,7 @@ export function IssuesView({
   setScope,
   workflowStates,
   filterText,
+  openOnly = false,
   onClearFilters,
   setFilterText,
   priorityFilter,
@@ -2175,6 +2260,7 @@ export function IssuesView({
   setScope: (value: IssueListScope) => void;
   workflowStates: WorkflowState[];
   filterText: string;
+  openOnly?: boolean;
   onClearFilters?: () => void;
   setFilterText: (value: string) => void;
   priorityFilter: Issue["priority"] | "all";
@@ -2231,6 +2317,7 @@ export function IssuesView({
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
     .filter((group) => group.issues.length > 0);
   const hasIssueFilter =
+    openOnly ||
     Boolean(filterText.trim()) ||
     statusFilter !== "all" ||
     priorityFilter !== "all" ||
@@ -2263,15 +2350,16 @@ export function IssuesView({
   }
 
   function moveIssue(issue: Issue, direction: "up" | "down") {
-    if (!manualOrder || reorderBusy) return;
+    if (!manualOrder || reorderBusy) return false;
     const index = issues.findIndex((item) => item.id === issue.id);
     const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return;
+    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return false;
     const beforeIssueId =
       allIssues.length === issues.length
         ? beforeIssueIdForMove(orderedIssues, issue.id, direction)
         : beforeIssueIdForDrop(orderedIssues, issue.id, issues[targetIndex].id);
     onReorder(issue, beforeIssueId);
+    return true;
   }
 
   return (
@@ -2403,6 +2491,7 @@ export function IssuesView({
           <option value="overdue">期限超過</option>
           <option value="today">今日が期限</option>
           <option value="upcoming">今後が期限</option>
+          <option value="next7">7日以内が期限</option>
         </select>
         <label className="completed-toggle">
           <input
@@ -2433,7 +2522,7 @@ export function IssuesView({
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
-        <p className="manual-order-hint">Issueをドラッグするか、↑↓ボタンで並び替えます。</p>
+        <p className="manual-order-hint">ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。</p>
       )}
       {selected.length > 0 && (
         <div className="bulk-bar" role="region" aria-label="Issue一括操作">
@@ -2624,11 +2713,11 @@ export function IssuesView({
                 }}
               />
             </span>
-            <span>ISSUE</span>
-            <span>STATUS</span>
-            <span>PRIORITY</span>
-            <span>PROJECT</span>
-            <span>DUE</span>
+            <span className="issue-main-heading">ISSUE</span>
+            <span className="status-cell">STATUS</span>
+            <span className="priority-cell">PRIORITY</span>
+            <span className="project-cell">PROJECT</span>
+            <span className="due-cell">DUE</span>
           </div>
           {issues.map((issue) => (
             <IssueRow
@@ -2711,6 +2800,61 @@ function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
   );
 }
 
+function useKeyboardReorderFocus(busy: boolean) {
+  const handleRef = useRef<HTMLButtonElement>(null);
+  const keyboardIntentRef = useRef(false);
+  const pendingSeenRef = useRef(false);
+  const stopMonitoringRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopMonitoringRef.current?.(), []);
+  useEffect(() => {
+    if (busy) {
+      if (keyboardIntentRef.current) pendingSeenRef.current = true;
+      return;
+    }
+    if (!pendingSeenRef.current) return;
+    pendingSeenRef.current = false;
+    stopMonitoringRef.current?.();
+    stopMonitoringRef.current = null;
+    const restore = keyboardIntentRef.current;
+    keyboardIntentRef.current = false;
+    const handle = handleRef.current;
+    if (!restore || !handle?.isConnected || handle.disabled || handle.closest("[inert]")) return;
+    const active = handle.ownerDocument.activeElement;
+    if (active === handle.ownerDocument.body || active === handle)
+      handle.focus({ preventScroll: true });
+  }, [busy]);
+  return {
+    handleRef,
+    rememberKeyboardFocus: () => {
+      stopMonitoringRef.current?.();
+      stopMonitoringRef.current = null;
+      const handle = handleRef.current;
+      keyboardIntentRef.current = !!handle && handle.ownerDocument.activeElement === handle;
+      pendingSeenRef.current = false;
+      if (!keyboardIntentRef.current || !handle) return;
+      const doc = handle.ownerDocument;
+      const onFocusIn = (event: FocusEvent) => {
+        if (event.target === handle || event.target === doc.body) return;
+        keyboardIntentRef.current = false;
+        stopMonitoringRef.current?.();
+        stopMonitoringRef.current = null;
+      };
+      const onDragStart = () => {
+        keyboardIntentRef.current = false;
+        pendingSeenRef.current = false;
+        stopMonitoringRef.current?.();
+        stopMonitoringRef.current = null;
+      };
+      doc.addEventListener("focusin", onFocusIn);
+      doc.addEventListener("dragstart", onDragStart, true);
+      stopMonitoringRef.current = () => {
+        doc.removeEventListener("focusin", onFocusIn);
+        doc.removeEventListener("dragstart", onDragStart, true);
+      };
+    },
+  };
+}
+
 function IssueRow({
   issue,
   state,
@@ -2755,9 +2899,10 @@ function IssueRow({
   onDragEnd?: () => void;
   onDragOver?: () => void;
   onDrop?: () => void;
-  onMove?: (direction: "up" | "down") => void;
+  onMove?: (direction: "up" | "down") => void | boolean;
   reorderBusy?: boolean;
 }) {
+  const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(pending || reorderBusy);
   return (
     <div
       className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
@@ -2791,26 +2936,24 @@ function IssueRow({
     >
       {manualOrder && (
         <span className="reorder-cell">
-          <span className="drag-handle" aria-hidden="true">
-            ⠿
-          </span>
           <button
             type="button"
-            className="reorder-button"
-            aria-label={`${issue.identifier}を上へ移動`}
+            ref={handleRef}
+            className="drag-handle"
+            aria-label={`${issue.identifier}の並び替え`}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            title="ドラッグ、またはAlt+↑ / Alt+↓で並べ替え"
             disabled={pending || reorderBusy}
-            onClick={() => onMove?.("up")}
+            onKeyDown={(event) => {
+              if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (pending || reorderBusy) return;
+              if (onMove && onMove(event.key === "ArrowUp" ? "up" : "down") !== false)
+                rememberKeyboardFocus();
+            }}
           >
-            ↑
-          </button>
-          <button
-            type="button"
-            className="reorder-button"
-            aria-label={`${issue.identifier}を下へ移動`}
-            disabled={pending || reorderBusy}
-            onClick={() => onMove?.("down")}
-          >
-            ↓
+            <span aria-hidden="true">⠿</span>
           </button>
         </span>
       )}
@@ -2990,25 +3133,33 @@ function CycleReorderControls({
   disabled: boolean;
   onMove: (direction: "up" | "down") => void;
 }) {
+  const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(disabled);
   return (
-    <div className="cycle-reorder-controls" aria-label={`${issue.identifier}の並び替え`}>
+    <div className="cycle-reorder-controls">
       <button
         type="button"
-        className="reorder-button"
-        aria-label={`${issue.identifier}を上へ`}
-        disabled={disabled || !canMoveUp}
-        onClick={() => onMove("up")}
+        ref={handleRef}
+        className="drag-handle"
+        aria-label={`${issue.identifier}の並び替え`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        title="ドラッグ、またはAlt+↑ / Alt+↓で並べ替え"
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (disabled) return;
+          if (event.key === "ArrowUp" && canMoveUp) {
+            rememberKeyboardFocus();
+            onMove("up");
+          }
+          if (event.key === "ArrowDown" && canMoveDown) {
+            rememberKeyboardFocus();
+            onMove("down");
+          }
+        }}
       >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="reorder-button"
-        aria-label={`${issue.identifier}を下へ`}
-        disabled={disabled || !canMoveDown}
-        onClick={() => onMove("down")}
-      >
-        ↓
+        <span aria-hidden="true">⠿</span>
       </button>
     </div>
   );
@@ -3761,7 +3912,9 @@ export function CyclesView({
               </button>
             </div>
             {selectedCycle.status !== "completed" && (
-              <span className="manual-order-hint">ドラッグまたは↑↓ボタンで並び替えます。</span>
+              <span className="manual-order-hint">
+                ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。
+              </span>
             )}
           </div>
           {issueViewMode === "board" ? (
@@ -5958,7 +6111,9 @@ export function SettingsView({
                         ? "一時停止中"
                         : run.status === "failed"
                           ? "復旧が必要"
-                          : "完了"
+                          : run.status === "rejected"
+                            ? "開始できませんでした"
+                            : "完了"
                   : "待機中"}
               </strong>
               <span>
@@ -6548,6 +6703,7 @@ export function IssueDetailPanel({
   fallbackIssue,
   knownIssues,
   projects,
+  labels = [],
   onUpdate,
   pending,
   workflowStates,
@@ -6559,6 +6715,7 @@ export function IssueDetailPanel({
   fallbackIssue?: Issue;
   knownIssues: Issue[];
   projects: Project[];
+  labels?: Label[];
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   pending: boolean;
   workflowStates: WorkflowState[];
@@ -6589,6 +6746,8 @@ export function IssueDetailPanel({
   const [relationTargetId, setRelationTargetId] = useState("");
   const [relationType, setRelationType] = useState<IssueRelationTypeViewModel>("related");
   const [saving, setSaving] = useState(false);
+  const [propertySaving, setPropertySaving] = useState(false);
+  const propertyMutationRef = useRef(false);
   const [descriptionSaveStatus, setDescriptionSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle",
   );
@@ -6602,6 +6761,7 @@ export function IssueDetailPanel({
     title: string;
   } | null>(null);
   const [projectRetry, setProjectRetry] = useState<string | null>(null);
+  const [labelRetry, setLabelRetry] = useState<string[] | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
   const issueRef = useRef(issue);
   const draftIssueIdRef = useRef(issue?.id ?? null);
@@ -6688,11 +6848,13 @@ export function IssueDetailPanel({
 
   useEffect(() => {
     setProjectRetry(null);
+    setLabelRetry(null);
     setDescriptionRetry(null);
     setError(null);
   }, [issue?.id]);
 
   function applyUpdatedIssue(updatedIssue: Issue) {
+    issueRef.current = updatedIssue;
     function syncScope(items: Issue[], scope: IssueListScope): Issue[] {
       const belongs =
         scope === "trash"
@@ -6985,52 +7147,100 @@ export function IssueDetailPanel({
 
   async function saveProject(nextProjectId = projectIdDraft) {
     const targetIssue = issueRef.current;
-    if (!targetIssue || saving) return;
+    if (!targetIssue || propertyMutationRef.current) return;
     if (nextProjectId === (targetIssue.projectId ?? "")) {
       setProjectRetry(null);
       return;
     }
-    await waitForParentMutation();
-    if (!(await flushDescriptionAutosave())) return;
-    const saveIssue = issueRef.current;
-    if (!saveIssue) return;
-    if (nextProjectId === (saveIssue.projectId ?? "")) {
-      setProjectRetry(null);
-      return;
-    }
-    setDetailSaving(true);
-    setError(null);
-    setProjectRetry(null);
+    propertyMutationRef.current = true;
+    setPropertySaving(true);
     try {
-      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
-        idempotencyKey: idempotencyKey(),
-        version: saveIssue.version,
-        patch: { projectId: projectIdFromSelection(nextProjectId) },
-      });
-      applyUpdatedIssue(result.issue);
-      dirtyProjectDraftRef.current = false;
-      setProjectIdDraft(result.issue.projectId ?? "");
-      setProjectRetry(null);
-      await detailQuery.refetch();
-    } catch (caught) {
-      setProjectRetry(nextProjectId);
-      if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
-        const latest = await detailQuery.refetch();
-        if (latest.data) {
-          applyUpdatedIssue(latest.data.issue);
-          dirtyProjectDraftRef.current = false;
-          setProjectIdDraft(latest.data.issue.projectId ?? "");
-        } else {
-          dirtyProjectDraftRef.current = false;
-          setProjectIdDraft(saveIssue.projectId ?? "");
-        }
-      } else {
-        dirtyProjectDraftRef.current = false;
-        setProjectIdDraft(saveIssue.projectId ?? "");
+      await waitForParentMutation();
+      if (!(await flushDescriptionAutosave())) {
+        setProjectRetry(nextProjectId);
+        return;
       }
-      setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
+      const saveIssue = issueRef.current;
+      if (!saveIssue || saveIssue.id !== targetIssue.id) return;
+      if (nextProjectId === (saveIssue.projectId ?? "")) {
+        setProjectRetry(null);
+        return;
+      }
+      setDetailSaving(true);
+      setError(null);
+      setProjectRetry(null);
+      try {
+        const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
+          idempotencyKey: idempotencyKey(),
+          version: saveIssue.version,
+          patch: { projectId: projectIdFromSelection(nextProjectId) },
+        });
+        applyUpdatedIssue(result.issue);
+        dirtyProjectDraftRef.current = false;
+        setProjectIdDraft(result.issue.projectId ?? "");
+        setProjectRetry(null);
+        await detailQuery.refetch();
+      } catch (caught) {
+        setProjectRetry(nextProjectId);
+        if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+          const latest = await detailQuery.refetch();
+          if (latest.data) {
+            applyUpdatedIssue(latest.data.issue);
+          }
+        }
+        dirtyProjectDraftRef.current = true;
+        setProjectIdDraft(nextProjectId);
+        setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
+      } finally {
+        setDetailSaving(false);
+      }
     } finally {
-      setDetailSaving(false);
+      propertyMutationRef.current = false;
+      setPropertySaving(false);
+    }
+  }
+
+  async function saveLabels(nextLabelIds: string[]) {
+    const targetIssue = issueRef.current;
+    if (!targetIssue || propertyMutationRef.current) return;
+    const ownedLabelIds = new Set(
+      labels.filter((label) => label.userId === targetIssue.userId).map((label) => label.id),
+    );
+    if (nextLabelIds.some((labelId) => !ownedLabelIds.has(labelId))) return;
+    propertyMutationRef.current = true;
+    setPropertySaving(true);
+    try {
+      await waitForParentMutation();
+      if (!(await flushDescriptionAutosave())) {
+        setLabelRetry(nextLabelIds);
+        return;
+      }
+      const saveIssue = issueRef.current;
+      if (!saveIssue || saveIssue.id !== targetIssue.id) return;
+      setDetailSaving(true);
+      setError(null);
+      setLabelRetry(null);
+      try {
+        const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
+          idempotencyKey: idempotencyKey(),
+          version: saveIssue.version,
+          patch: { labelIds: nextLabelIds },
+        });
+        applyUpdatedIssue(result.issue);
+        await detailQuery.refetch();
+      } catch (caught) {
+        setLabelRetry(nextLabelIds);
+        if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+          const latest = await detailQuery.refetch();
+          if (latest.data) applyUpdatedIssue(latest.data.issue);
+        }
+        setError(caught instanceof ApiError ? caught.message : "Labelの保存に失敗しました。");
+      } finally {
+        setDetailSaving(false);
+      }
+    } finally {
+      propertyMutationRef.current = false;
+      setPropertySaving(false);
     }
   }
 
@@ -7274,12 +7484,14 @@ export function IssueDetailPanel({
                   id="issue-project"
                   aria-label="IssueのProject"
                   value={projectIdDraft}
-                  disabled={saving}
+                  disabled={pending || saving || propertySaving}
                   onChange={(event) => {
+                    if (propertyMutationRef.current) return;
                     const nextProjectId = event.target.value;
                     dirtyProjectDraftRef.current =
                       nextProjectId !== (issueRef.current?.projectId ?? "");
                     setProjectIdDraft(nextProjectId);
+                    void saveProject(nextProjectId);
                   }}
                 >
                   <option value="">Projectなし</option>
@@ -7289,13 +7501,11 @@ export function IssueDetailPanel({
                     </option>
                   ))}
                 </select>
-                <button
-                  className="button secondary"
-                  disabled={saving || projectIdDraft === (issue.projectId ?? "")}
-                  onClick={() => void saveProject()}
-                >
-                  {saving ? "保存中…" : "Projectを保存"}
-                </button>
+                {propertySaving && (
+                  <span className="detail-property-status" role="status">
+                    保存中…
+                  </span>
+                )}
               </div>
               <div className="detail-property-editor issue-core-properties">
                 <label className="field-label" htmlFor="issue-due-date">
@@ -7342,6 +7552,36 @@ export function IssueDetailPanel({
                     ))}
                 </select>
               </div>
+              <fieldset
+                className="detail-label-editor"
+                disabled={pending || saving || propertySaving}
+              >
+                <legend className="field-label">Labels</legend>
+                {labels
+                  .filter((label) => label.userId === issue.userId)
+                  .map((label) => (
+                    <label className="setting-checkbox" key={label.id}>
+                      <input
+                        type="checkbox"
+                        aria-label={label.name}
+                        checked={issue.labelIds.includes(label.id)}
+                        onChange={(event) => {
+                          if (propertyMutationRef.current) return;
+                          const current = issueRef.current;
+                          if (!current) return;
+                          const next = event.target.checked
+                            ? [...current.labelIds, label.id]
+                            : current.labelIds.filter((labelId) => labelId !== label.id);
+                          void saveLabels([...new Set(next)]);
+                        }}
+                      />
+                      <span>{label.name}</span>
+                    </label>
+                  ))}
+                {labels.filter((label) => label.userId === issue.userId).length === 0 && (
+                  <span className="detail-empty">Labelはありません。</span>
+                )}
+              </fieldset>
               {detail && (
                 <section className="issue-hierarchy" aria-label="親子Issue">
                   <div className="detail-section-heading">
@@ -7405,6 +7645,14 @@ export function IssueDetailPanel({
                 placeholder="説明を追加…"
                 rows={6}
               />
+              {linkifyText(description).some((part) => part.type === "link") && (
+                <section
+                  className="detail-description-preview description-preview"
+                  aria-label="説明のリンクPreview"
+                >
+                  <LinkifiedText text={description} className="linkified-text" />
+                </section>
+              )}
               <div className="detail-actions">
                 <span className="detail-save-status" aria-live="polite">
                   {descriptionSaveStatus === "saving"
@@ -7466,7 +7714,9 @@ export function IssueDetailPanel({
                           rows={3}
                         />
                       ) : (
-                        <p className="note-body">{note.body}</p>
+                        <p className="note-body">
+                          <LinkifiedText text={note.body} className="linkified-text" />
+                        </p>
                       )}
                       <div className="note-footer">
                         <span>
@@ -7601,9 +7851,9 @@ export function IssueDetailPanel({
             </aside>
           </div>
         )}
-        {error && (
+        {(error || projectRetry !== null || labelRetry !== null) && (
           <div className="detail-live-error" role="alert">
-            <span>{error}</span>
+            <span>{error ?? "選択した変更を再試行してください。"}</span>
             {descriptionFieldErrors && (
               <span className="detail-field-errors">
                 {Object.values(descriptionFieldErrors).flat().join(" ")}
@@ -7625,6 +7875,7 @@ export function IssueDetailPanel({
             {projectRetry !== null && (
               <button
                 className="text-button"
+                disabled={propertySaving || saving || pending}
                 onClick={() => {
                   const retry = projectRetry;
                   setProjectIdDraft(retry);
@@ -7633,6 +7884,15 @@ export function IssueDetailPanel({
                 }}
               >
                 Projectを再試行
+              </button>
+            )}
+            {labelRetry !== null && (
+              <button
+                className="text-button"
+                disabled={propertySaving || saving || pending}
+                onClick={() => void saveLabels(labelRetry)}
+              >
+                Labelを再試行
               </button>
             )}
           </div>

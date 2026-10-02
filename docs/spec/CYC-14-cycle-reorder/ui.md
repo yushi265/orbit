@@ -1,5 +1,7 @@
 # CYC-14: uiレイヤー詳細設計
 
+> 2026-10-02の追加依頼で、上下ボタンをDrag handle上のAlt+ArrowUp/Downへ置き換える。保存契約とDnDは維持する。最新UI契約は[FEAT-review-followup AC-12](../FEAT-review-followup/index.md)を参照。以下は初回実装時の記録。
+
 ## 担保 AC（[index.md](./index.md) の AC からの引用）
 
 - **AC-1**: 本人がCyclesでCurrent / Upcoming / PastのCycleを選択すると、Cycle詳細のIssue領域をList / Boardで切り替えられ、両表示は選択中Cycleの本人所有・未削除Issueだけを同じ手動順で表示する。既存のCycle追加・解除導線（Current / Upcomingのみ、Completedは読み取り専用）は維持する。

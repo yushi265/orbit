@@ -1,5 +1,7 @@
 # FEAT-issue-project-assignment: UI 詳細設計
 
+> 2026-10-02の追加依頼で、詳細の手動保存は[FEAT-review-followup AC-4](../FEAT-review-followup/index.md)の選択時自動保存へ置き換える。保存失敗の選択値保持・Retryは新契約に従う。以下は初回実装時の記録。
+
 ## 担保 AC（[index.md](./index.md) の AC からの引用）
 
 - **AC-1**: 本人がIssue一覧またはIssue詳細で、Bootstrapに含まれる本人所有Projectを選択して保存でき、Projectなしを選ぶと`projectId: null`で解除できる。成功後はIssueのversionと一覧・詳細の表示が更新される。

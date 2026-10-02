@@ -55,12 +55,13 @@ function createRunner(events: Events) {
     try {
       const result = await apiGet<{ run: Run | null }>("/api/v1/background-runs/current");
       if (disposed) return;
-      // /current omits terminal runs; check the known Run before reporting completion.
+      // /current omits terminal Runs. Confirm known nonterminal Runs by ID;
+      // retain a confirmed terminal result until another Run or a 404 replaces it.
       const run =
         result.run ??
         (current && ["pending", "running", "paused", "failed"].includes(current.status)
           ? (await apiGet<{ run: Run }>(`/api/v1/background-runs/${current.run_id}`)).run
-          : null);
+          : current);
       if (disposed) return;
       publish(run);
       shouldContinue = active(run);

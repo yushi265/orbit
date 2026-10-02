@@ -17,6 +17,58 @@ describe("Issue date-only filters", () => {
     resetOrbitStores();
   });
 
+  it("[レイヤー内結合/Owner境界] next7の一覧と検索APIは1〜7日後だけを返す", async () => {
+    const now = Date.UTC(2026, 9, 1, 16);
+    vi.stubEnv("APP_ENV", "development");
+    vi.stubEnv("ORBIT_STORAGE", "memory");
+    vi.stubEnv("DEV_OWNER_USER_ID", "api-next7-owner");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const store = getOrbitStore("api-next7-owner");
+    for (const [title, dueAt] of [
+      ["Date Today", Date.UTC(2026, 9, 2, 23, 59)],
+      ["Date Tomorrow", Date.UTC(2026, 9, 3)],
+      ["Date Seventh", Date.UTC(2026, 9, 9, 23, 59)],
+      ["Date Eighth", Date.UTC(2026, 9, 10)],
+      ["Date None", null],
+    ] as const)
+      store.createIssue("api-next7-owner", { title, dueAt, idempotencyKey: title });
+    const archived = store.createIssue("api-next7-owner", {
+      title: "Date Archived",
+      dueAt: Date.UTC(2026, 9, 3),
+      idempotencyKey: "archived-next7",
+    });
+    store.archiveIssue("api-next7-owner", archived.id, "archive-next7");
+    const trash = store.createIssue("api-next7-owner", {
+      title: "Date Trash",
+      dueAt: Date.UTC(2026, 9, 3),
+      idempotencyKey: "trash-next7",
+    });
+    store.trashIssue("api-next7-owner", trash.id, "trash-next7-action");
+    store.ensureOwner("other", "other@example.com");
+    store.createIssue("other", {
+      title: "Date Foreign",
+      dueAt: Date.UTC(2026, 9, 3),
+      idempotencyKey: "foreign-next7",
+    });
+
+    const listed = await listIssues(
+      new Request("http://orbit.local/api/v1/issues?q=Date&due=next7"),
+    );
+    const searched = await searchIssues(
+      new Request("http://orbit.local/api/v1/search?q=Date&due=next7"),
+    );
+    expect(listed.status).toBe(200);
+    expect(searched.status).toBe(200);
+    const listedBody = (await listed.json()) as { items: Array<{ title: string }> };
+    const searchedBody = (await searched.json()) as { items: Array<{ title: string }> };
+    expect(listedBody.items.map((issue) => issue.title)).toEqual(["Date Tomorrow", "Date Seventh"]);
+    expect(searchedBody.items.map((issue) => issue.title)).toEqual([
+      "Date Tomorrow",
+      "Date Seventh",
+    ]);
+  });
+
   it("[境界値] 東京01時のtodayはサーバーUTCの前日ではなく本人の暦日になる", () => {
     vi.stubEnv("TZ", "UTC");
     const store = setup(Date.UTC(2026, 9, 1, 16));

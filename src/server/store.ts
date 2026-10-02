@@ -3132,6 +3132,10 @@ export class OrbitStore {
     this.assertOwner(userId);
     this.ensureUpcomingCycles(userId);
     const active = this.currentRun(userId);
+    const lastRun = [...this.runs.values()]
+      .reverse()
+      .filter((run) => run.user_id === userId)
+      .sort((left, right) => right.requested_at - left.requested_at)[0];
     return {
       me: this.users.get(userId)!,
       preferences: this.preferences.get(userId)!,
@@ -3146,7 +3150,10 @@ export class OrbitStore {
       views: this.listViews(userId),
       projectDisplayPreferences: this.listProjectDisplayPreferences(userId),
       notifications: this.listNotifications(userId),
-      background: { run: active ? this.publicRun(active) : null },
+      background: {
+        run: active ? this.publicRun(active) : null,
+        lastRun: lastRun ? this.publicRun(lastRun) : null,
+      },
     };
   }
 
@@ -3571,7 +3578,8 @@ export class OrbitStore {
   private purgeTargets(
     userId: string,
   ): Array<{ type: "issue" | "project" | "receipt"; id: string }> {
-    const threshold = this.clock() - THIRTY_DAYS;
+    const now = this.clock();
+    const threshold = now - THIRTY_DAYS;
     return [
       ...[...this.issues.values()]
         .filter(
@@ -3588,7 +3596,7 @@ export class OrbitStore {
         )
         .map((project) => ({ type: "project" as const, id: project.id })),
       ...[...this.receipts.entries()]
-        .filter(([, receipt]) => receipt.userId === userId && receipt.expiresAt < threshold)
+        .filter(([, receipt]) => receipt.userId === userId && receipt.expiresAt < now)
         .map(([id]) => ({ type: "receipt" as const, id })),
     ];
   }

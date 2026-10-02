@@ -6,6 +6,11 @@ import type {
 } from "../shared/view-models";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 import { sortIssues } from "./issue-list";
+import {
+  calendarDateKeyInTimeZone,
+  issueDueDateKey,
+  matchesIssueDueDate,
+} from "../shared/issue-dates";
 
 export interface HomeSummary {
   activeCycle: Cycle | null;
@@ -19,30 +24,11 @@ export interface HomeSummary {
   activeProjectCount: number;
 }
 
-function dateParts(value: number, timeZone: string): Record<string, string> {
-  return Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      calendar: "gregory",
-      numberingSystem: "latn",
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .formatToParts(new Date(value))
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value]),
-  );
-}
-
-export function dateKeyInTimeZone(value: number, timeZone: string): string {
-  const parts = dateParts(value, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
+export const dateKeyInTimeZone = calendarDateKeyInTimeZone;
 
 function addCalendarDays(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split("-").map(Number);
-  return dateKeyInTimeZone(Date.UTC(year, month - 1, day + days), "UTC");
+  return issueDueDateKey(Date.UTC(year, month - 1, day + days));
 }
 
 function issueCategory(issue: Issue, workflowStates: readonly WorkflowState[]): string | undefined {
@@ -66,14 +52,14 @@ export function buildHomeSummary(data: BootstrapViewModel, now: number): HomeSum
   const openIssues = activeIssues.filter((issue) => isOpenIssue(issue, data.workflowStates));
   const withDueDate = openIssues.filter((issue) => issue.dueAt !== null);
   const overdue = sortByDue(
-    withDueDate.filter((issue) => dateKeyInTimeZone(issue.dueAt!, timezone) < today),
+    withDueDate.filter((issue) => matchesIssueDueDate(issue.dueAt, "overdue", now, timezone)),
   );
   const dueToday = sortByDue(
-    withDueDate.filter((issue) => dateKeyInTimeZone(issue.dueAt!, timezone) === today),
+    withDueDate.filter((issue) => matchesIssueDueDate(issue.dueAt, "today", now, timezone)),
   );
   const dueSoon = sortByDue(
     withDueDate.filter((issue) => {
-      const due = dateKeyInTimeZone(issue.dueAt!, timezone);
+      const due = issueDueDateKey(issue.dueAt!);
       return due > today && due <= sevenDaysLater;
     }),
   );
@@ -116,7 +102,7 @@ export function homeDateLabel(value: number, timeZone: string): string {
 }
 
 export function homeRelativeDay(value: number, now: number, timeZone: string): string {
-  const valueKey = dateKeyInTimeZone(value, timeZone);
+  const valueKey = issueDueDateKey(value);
   const todayKey = dateKeyInTimeZone(now, timeZone);
   if (valueKey < todayKey) return "期限超過";
   if (valueKey === todayKey) return "今日";

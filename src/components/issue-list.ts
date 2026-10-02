@@ -8,6 +8,7 @@ import type {
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
 import { NO_PROJECT_OPTION } from "./issue-project";
+import { calendarDateKeyInTimeZone, matchesIssueDueDate } from "../shared/issue-dates";
 
 export type IssueSort =
   | "manual"
@@ -67,26 +68,7 @@ export function filterIssuesByProject(issues: readonly Issue[], projectFilter: s
   return issues.filter((issue) => issue.projectId === projectFilter);
 }
 
-function dateParts(value: number, timeZone: string): Record<string, string> {
-  return Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      calendar: "gregory",
-      numberingSystem: "latn",
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .formatToParts(new Date(value))
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value]),
-  );
-}
-
-export function issueDateKeyInTimeZone(value: number, timeZone: string): string {
-  const parts = dateParts(value, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
+export const issueDateKeyInTimeZone = calendarDateKeyInTimeZone;
 
 export function filterIssuesByDue(
   issues: readonly Issue[],
@@ -95,15 +77,7 @@ export function filterIssuesByDue(
   timeZone: string,
 ): Issue[] {
   if (dueFilter === "all") return [...issues];
-  if (dueFilter === "none") return issues.filter((issue) => issue.dueAt === null);
-  const today = issueDateKeyInTimeZone(now, timeZone);
-  return issues.filter((issue) => {
-    if (issue.dueAt === null) return false;
-    const due = issueDateKeyInTimeZone(issue.dueAt, timeZone);
-    if (dueFilter === "overdue") return due < today;
-    if (dueFilter === "today") return due === today;
-    return due > today;
-  });
+  return issues.filter((issue) => matchesIssueDueDate(issue.dueAt, dueFilter, now, timeZone));
 }
 
 export function filterIssues(

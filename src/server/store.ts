@@ -60,6 +60,7 @@ import {
   workflowStateNameSchema,
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
+import { matchesIssueDueDate } from "../shared/issue-dates";
 import type { CycleHistoryViewModel } from "../shared/view-models";
 import { cycleEndAt, localDateAtMidnight, nextCycleStartAt } from "./cycle-schedule";
 
@@ -1828,18 +1829,10 @@ export class OrbitStore {
           (filter.created?.to === undefined || item.createdAt <= filter.created.to),
       );
     if (filter.due) {
-      const now = new Date(this.clock());
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const tomorrow = today + DAY;
-      items = items.filter((item) =>
-        filter.due === "none"
-          ? item.dueAt === null
-          : filter.due === "overdue"
-            ? item.dueAt !== null && item.dueAt < today
-            : filter.due === "today"
-              ? item.dueAt !== null && item.dueAt >= today && item.dueAt < tomorrow
-              : item.dueAt !== null && item.dueAt >= tomorrow,
-      );
+      const now = this.clock();
+      const timezone = this.preferences.get(userId)?.timezone ?? "UTC";
+      const due = filter.due;
+      items = items.filter((item) => matchesIssueDueDate(item.dueAt, due, now, timezone));
     }
     const priorityOrder = new Map(priorities.map((priority, index) => [priority, index]));
     items.sort((a, b) => {

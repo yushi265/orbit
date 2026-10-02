@@ -36,6 +36,7 @@
 
 ## 再利用可能な部品
 
+- Issue期限は`src/shared/issue-dates.ts`で保存値のUTC暦日を維持し、todayだけ本人Timezoneの現在暦日へ変換する。UI/service共通FilterとHome集計を使う。数値dueAtは日付carrierであり、Timezoneへ変換するtimestampではない（参照: `src/shared/issue-dates.ts`、`src/server/issue-date-filter.test.ts`、`src/components/issue-dates-runtime.test.ts`）。
 - BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
 - Maintenanceは25対象で残件がある間同じStepを継続する。opaque cursorは成功Chunkごとに更新し、失敗Chunkは既存deep Snapshotで全業務変更を復元してRun/Lockを取り直す。公開continueはOwnerを確認してから実行中だけtokenを取得し、完了再送を200 No-opへ通す（参照: `src/server/store.ts`、`src/server/api.ts`、`src/server/maintenance-integrity.test.ts`、`src/server/api-maintenance-integrity.test.ts`）。
 - Run作成で競合拒否された終端だけ、POST `/api/v1/background-runs`・423・専用dirty flagの一致時にSnapshotへ保存する。一般的な失敗Mutationの非保存は維持する。PurgeはIssue FK cascade依存を除去し、生存子の親参照を解除する（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/server/store.ts`）。
@@ -84,6 +85,6 @@
 
 - Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
 
-FIX-main-reviewのP1修正 / 2026-10-02
+FIX-main-reviewのP1/P2・期限修正 / 2026-10-02
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

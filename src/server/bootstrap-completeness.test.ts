@@ -21,6 +21,7 @@ function createIssues(store: OrbitStore, count: number, userId = "owner") {
 describe("Bootstrap Issue completeness", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.useRealTimers();
     resetOrbitStores();
   });
 
@@ -75,10 +76,14 @@ describe("Bootstrap Issue completeness", () => {
     vi.stubEnv("APP_ENV", "development");
     vi.stubEnv("ORBIT_STORAGE", "memory");
     vi.stubEnv("DEV_OWNER_USER_ID", "bootstrap-owner");
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
     const store = getOrbitStore("bootstrap-owner");
-    const projects = ["Project A", "Project B"].map((name, index) =>
-      store.createProject("bootstrap-owner", { idempotencyKey: `project-${index}`, name }),
-    );
+    // 作成時刻を分け、Projectの更新日時降順が作成順と異なる場合も全IDを確認する。
+    const projects = ["Project A", "Project B"].map((name, index) => {
+      vi.setSystemTime(1_700_000_000_000 + index);
+      return store.createProject("bootstrap-owner", { idempotencyKey: `project-${index}`, name });
+    });
     const cycles = store.bootstrap("bootstrap-owner").cycles;
     const issues = Array.from({ length: 501 }, (_, index) =>
       store.createIssue("bootstrap-owner", {
@@ -93,8 +98,8 @@ describe("Bootstrap Issue completeness", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as BootstrapPayload;
     expect(payload.issues.map((issue) => issue.id)).toEqual(issues.map((issue) => issue.id));
-    expect(payload.projects.map((project) => project.id)).toEqual(
-      projects.map((project) => project.id),
+    expect(payload.projects.map((project) => project.id).sort()).toEqual(
+      projects.map((project) => project.id).sort(),
     );
     expect(payload.issues.filter((issue) => issue.projectId === projects[0].id)).toHaveLength(167);
     expect(payload.issues.filter((issue) => issue.projectId === projects[1].id)).toHaveLength(167);

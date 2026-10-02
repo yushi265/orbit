@@ -50,6 +50,7 @@ import {
   sortIssues,
 } from "./issue-list";
 import { buildHomeSummary, homeDateLabel, homeRelativeDay } from "./home";
+import { formatIssueDueDate, issueDueDateKey } from "../shared/issue-dates";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
@@ -189,7 +190,7 @@ function formatDateOnly(value: number | null): string {
 }
 
 function dateInputValue(value: number | null): string {
-  return value === null ? "" : new Date(value).toISOString().slice(0, 10);
+  return value === null ? "" : issueDueDateKey(value);
 }
 
 function formatRange(start: number, end: number): string {
@@ -321,7 +322,18 @@ function OrbitAppInner(props: Props) {
   const toastTimerRef = useRef<number | undefined>(undefined);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
-  const [clockNow] = useState(() => Date.now());
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const updateCalendarNow = () => setClockNow(Date.now());
+    const timer = window.setInterval(updateCalendarNow, 60_000);
+    window.addEventListener("focus", updateCalendarNow);
+    window.addEventListener("online", updateCalendarNow);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", updateCalendarNow);
+      window.removeEventListener("online", updateCalendarNow);
+    };
+  }, []);
 
   function currentIssueSearch(): IssueSearch {
     return normalizeIssueSearch({
@@ -2918,8 +2930,10 @@ function IssueRow({
             disabled={pending}
             onChange={(event) => onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })}
           />
+        ) : issue.dueAt === null ? (
+          "未設定"
         ) : (
-          formatDate(issue.dueAt)
+          formatIssueDueDate(issue.dueAt)
         )}
       </span>
     </div>

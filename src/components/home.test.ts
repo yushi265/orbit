@@ -169,13 +169,13 @@ describe("Home summary", () => {
     expect(homeDateLabel(now, "Asia/Tokyo")).toContain("8月30日");
   });
 
-  it("[境界値] Timezone上の日付境界と7日目・8日目を分類する", () => {
+  it("[境界値] UTC期限日と本人todayの境界・7日目・8日目を分類する", () => {
     const boundary = buildHomeSummary(
       data([
-        issue("before-midnight", { dueAt: Date.UTC(2026, 7, 29, 14, 59) }),
-        issue("at-midnight", { dueAt: Date.UTC(2026, 7, 29, 15) }),
-        issue("day-seven", { dueAt: Date.UTC(2026, 8, 5, 15) }),
-        issue("day-eight", { dueAt: Date.UTC(2026, 8, 6, 15) }),
+        issue("before-midnight", { dueAt: Date.UTC(2026, 7, 29, 23, 59) }),
+        issue("at-midnight", { dueAt: Date.UTC(2026, 7, 30) }),
+        issue("day-seven", { dueAt: Date.UTC(2026, 8, 6, 23, 59) }),
+        issue("day-eight", { dueAt: Date.UTC(2026, 8, 7) }),
       ]),
       now,
     );

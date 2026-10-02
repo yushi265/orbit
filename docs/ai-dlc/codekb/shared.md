@@ -37,6 +37,7 @@
 ## 再利用可能な部品
 
 - BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
+- Runの復旧は`useBackgroundRun`がcurrent/start/resume/continueを直列化し、30秒・focus・onlineでServer truthを取得する。Bootstrapは初回seedのみとして古い再取得結果でcursorを戻さない（参照: `src/components/background-run.ts`）。
 - Canonical JSON / request hash: `src/shared/canonical-json.ts`
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`

@@ -309,10 +309,11 @@ describe("Cycle breakdown", () => {
     const fetchMock = vi.fn(async (input: unknown) => ({
       ok: true,
       status: 200,
-      json: async () =>
-        typeof input === "string" && input.endsWith("/api/v1/bootstrap")
-          ? payload
-          : { issueViews: [], searches: [] },
+      json: async () => {
+        if (input === "/api/v1/bootstrap") return payload;
+        if (input === "/api/v1/background-runs/current") return { run: null };
+        throw new Error(`Unexpected API request: ${String(input)}`);
+      },
     }));
     vi.stubGlobal("fetch", fetchMock);
     const dom = setupDom(`https://orbit.example/cycles/${activeCycle.id}`);
@@ -335,8 +336,11 @@ describe("Cycle breakdown", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/bootstrap");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.filter(([path]) => path === "/api/v1/bootstrap")).toHaveLength(1);
+      expect(
+        fetchMock.mock.calls.filter(([path]) => path === "/api/v1/background-runs/current"),
+      ).toHaveLength(1);
       expect(dom.window.document.querySelector('[aria-label="Cycleの内訳"]')).not.toBeNull();
       expect(
         dom.window.document.querySelector('[aria-labelledby="cycle-project-breakdown-title"]')

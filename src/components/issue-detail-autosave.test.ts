@@ -1548,10 +1548,14 @@ describe("Issue detail autosave", () => {
 
   it("[状態遷移/失敗系] Runtime lock中は自動保存をrollbackして再試行を表示する", async () => {
     const { dom, root, queryClient, onClose } = renderPanel();
+    let resolveSave!: (response: ReturnType<typeof errorResponse>) => void;
+    const saveResponse = new Promise<ReturnType<typeof errorResponse>>((resolve) => {
+      resolveSave = resolve;
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(detail))
-      .mockResolvedValueOnce(errorResponse(423, "OPERATION_IN_PROGRESS", "処理中です。"));
+      .mockImplementationOnce(() => saveResponse);
     vi.stubGlobal("fetch", fetchMock);
 
     await act(async () => {
@@ -1559,7 +1563,18 @@ describe("Issue detail autosave", () => {
         createElement(QueryClientProvider, { client: queryClient }, panelElement(onClose)),
       );
     });
-    await waitForState(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(
+      async () => {
+        await act(async () => {
+          // Allow Query's scheduled notification to commit before editing the fallback.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(queryClient.getQueryState(["issue-detail", issue.id])?.status).toBe("success");
+        expect(dom.window.document.querySelector(".detail-skeleton")).toBeNull();
+      },
+      { interval: 1, timeout: 1000 },
+    );
 
     const description = dom.window.document.querySelector(
       "#issue-description",
@@ -1572,7 +1587,16 @@ describe("Issue detail autosave", () => {
       outside.focus();
     });
 
-    await waitForState(() => expect(description.value).toBe("初期説明"));
+    await waitForState(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(description.value).toBe("ロック中の変更");
+    await act(async () => {
+      // Release HTTP completion inside act; waiting for the DOM inside one long
+      // act would defer the rollback commit until that wait has already timed out.
+      resolveSave(errorResponse(423, "OPERATION_IN_PROGRESS", "処理中です。"));
+      await saveResponse;
+    });
+    expect(description.value).toBe("初期説明");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
     expect(dom.window.document.body.textContent).toContain("処理中です。");
     expect(dom.window.document.body.textContent).toContain("説明を再試行");
 

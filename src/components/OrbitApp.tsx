@@ -60,6 +60,7 @@ import { timezoneOptionsFor } from "./preferences";
 import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
 import { queryClient } from "../lib/query";
+import { useBackgroundRun } from "./background-run";
 
 type Section =
   | "home"
@@ -283,8 +284,6 @@ function OrbitAppInner(props: Props) {
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   const [projectComposerOpen, setProjectComposerOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
-  const [run, setRun] = useState<PublicRunSummary | null>(null);
-  const [runBusy, setRunBusy] = useState(false);
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -501,10 +500,22 @@ function OrbitAppInner(props: Props) {
         .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    const current = data?.background.run ?? null;
-    setRun(current);
-  }, [data?.background.run]);
+  const {
+    run,
+    busy: runBusy,
+    start: runMaintenance,
+    resume: resumeMaintenance,
+  } = useBackgroundRun(data?.background.run, {
+    onSucceeded: () => {
+      showToast("success", "メンテナンスを完了しました");
+      void refresh();
+    },
+    onError: (error) =>
+      showToast(
+        "error",
+        error instanceof ApiError ? error.message : "バックグラウンド処理に失敗しました",
+      ),
+  });
 
   useEffect(() => {
     const shell = document.querySelector<HTMLElement>(".app-shell");
@@ -963,65 +974,6 @@ function OrbitAppInner(props: Props) {
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (rejected) throw rejected.reason;
-  }
-
-  async function continueMaintenance(initial: PublicRunSummary): Promise<PublicRunSummary> {
-    let current = initial;
-    setRun(current);
-    for (let attempt = 0; attempt < 5 && current.status === "running"; attempt += 1) {
-      const result = await apiPost<{ run: PublicRunSummary }>(
-        `/api/v1/background-runs/${current.run_id}/continue`,
-        {
-          idempotencyKey: idempotencyKey(),
-          expected_cursor: current.progress.cursor,
-        },
-      );
-      current = result.run;
-      setRun(current);
-    }
-    return current;
-  }
-
-  async function runMaintenance() {
-    if (runBusy) return;
-    setRunBusy(true);
-    try {
-      const started = await apiPost<{ run: PublicRunSummary }>("/api/v1/background-runs", {
-        kind: "maintenance",
-        idempotencyKey: idempotencyKey(),
-      });
-      const current = await continueMaintenance(started.run);
-      showToast(
-        "success",
-        current.status === "succeeded" ? "メンテナンスを完了しました" : "処理を一時停止しました",
-      );
-      await refresh();
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof ApiError ? error.message : "バックグラウンド処理に失敗しました",
-      );
-    } finally {
-      setRunBusy(false);
-    }
-  }
-
-  async function resumeMaintenance() {
-    if (!run || runBusy) return;
-    setRunBusy(true);
-    try {
-      const result = await apiPost<{ run: PublicRunSummary }>(
-        `/api/v1/background-runs/${run.run_id}/resume`,
-        { idempotencyKey: idempotencyKey() },
-      );
-      const current = await continueMaintenance(result.run);
-      showToast("success", "処理を再開しました");
-      if (current.status === "succeeded") await refresh();
-    } catch (error) {
-      showToast("error", error instanceof ApiError ? error.message : "処理の再開に失敗しました");
-    } finally {
-      setRunBusy(false);
-    }
   }
 
   function executeSearch(value: string, filtersForRequest = searchFilters) {

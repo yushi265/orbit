@@ -54,13 +54,27 @@ import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issu
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
-import { issueDetailPath, projectDetailPath } from "./navigation";
+import { projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
 import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
-import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
+import {
+  ApiError,
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  apiRequest,
+  idempotencyKey,
+} from "../lib/api-client";
 import { queryClient } from "../lib/query";
 import { useBackgroundRun } from "./background-run";
+import { useDialogBoundary } from "./dialog-boundary";
+import {
+  normalizeIssueSearch,
+  resolveIssueSearch,
+  type IssueSearch,
+} from "../lib/url-state/issues";
 
 type Section =
   | "home"
@@ -71,7 +85,13 @@ type Section =
   | "inbox"
   | "views"
   | "settings";
-type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
+type Props = {
+  initialSection?: Section;
+  issueId?: string;
+  projectId?: string;
+  cycleId?: string;
+  issueSearch?: IssueSearch;
+};
 type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
   Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
@@ -250,17 +270,20 @@ function OrbitAppInner(props: Props) {
   const [newParentId, setNewParentId] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [filterText, setFilterText] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "board">("list");
-  const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
-  const [projectFilter, setProjectFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [labelFilter, setLabelFilter] = useState("all");
-  const [dueFilter, setDueFilter] = useState<IssueDueFilter>("all");
-  const [showCompleted, setShowCompleted] = useState(true);
+  const [completedFallback, setCompletedFallback] = useState(true);
   const [showCompletedReady, setShowCompletedReady] = useState(false);
-  const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
-  const [issueScope, setIssueScope] = useState<IssueListScope>("active");
+  const {
+    filterText,
+    viewMode,
+    priorityFilter,
+    projectFilter,
+    statusFilter,
+    labelFilter,
+    dueFilter,
+    showCompleted,
+    issueSort,
+    issueScope,
+  } = resolveIssueSearch(props.issueSearch ?? {}, completedFallback);
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -284,16 +307,69 @@ function OrbitAppInner(props: Props) {
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   const [projectComposerOpen, setProjectComposerOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [projectCreateBusy, setProjectCreateBusy] = useState(false);
+  const projectCreateBusyRef = useRef(false);
+  const projectCreateRequestRef = useRef<{ name: string; key: string } | null>(null);
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkMutationKeyRef = useRef<string | null>(null);
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
+  const searchSequenceRef = useRef(0);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const toastTimerRef = useRef<number | undefined>(undefined);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
   const [clockNow] = useState(() => Date.now());
+
+  function currentIssueSearch(): IssueSearch {
+    return normalizeIssueSearch({
+      ...(section === "issues" ? props.issueSearch : {}),
+      completed: section === "issues" ? showCompleted : completedFallback,
+    });
+  }
+  function updateIssueSearch(patch: Record<string, unknown>) {
+    const search = normalizeIssueSearch({
+      ...props.issueSearch,
+      completed: showCompleted,
+      ...patch,
+    });
+    if (props.issueId)
+      void router.navigate({
+        to: "/issues/$issueId",
+        params: { issueId: props.issueId },
+        search,
+        replace: true,
+        resetScroll: false,
+      });
+    else void router.navigate({ to: "/issues", search, replace: true, resetScroll: false });
+  }
+  const setFilterText = (q: string) => updateIssueSearch({ q });
+  const setStatusFilter = (status: string) => updateIssueSearch({ status });
+  const setPriorityFilter = (priority: Issue["priority"] | "all") =>
+    updateIssueSearch({ priority });
+  const setProjectFilter = (project: string) => updateIssueSearch({ project });
+  const setLabelFilter = (label: string) => updateIssueSearch({ label });
+  const setDueFilter = (due: IssueDueFilter) => updateIssueSearch({ due });
+  const setShowCompleted = (completed: boolean) => updateIssueSearch({ completed });
+  const setIssueSort = (order: IssueSort) => updateIssueSearch({ order });
+  const setIssueScope = (scope: IssueListScope) => updateIssueSearch({ scope });
+  const setViewMode = (
+    mode: "list" | "board" | ((current: "list" | "board") => "list" | "board"),
+  ) => updateIssueSearch({ mode: typeof mode === "function" ? mode(viewMode) : mode });
+  function openIssue(issueId: string) {
+    rememberIssueFocus(issueId);
+    const search = currentIssueSearch();
+    setSection("issues");
+    setComposerOpen(true);
+    void router.navigate({
+      to: "/issues/$issueId",
+      params: { issueId },
+      search,
+      resetScroll: false,
+    });
+  }
 
   function rememberIssueFocus(issueId: string) {
     issueTriggerIdRef.current = issueId;
@@ -311,25 +387,25 @@ function OrbitAppInner(props: Props) {
   }
 
   function restoreIssueFocus() {
-    window.setTimeout(() => {
-      let issueId = issueTriggerIdRef.current;
-      try {
-        issueId ??= window.sessionStorage.getItem("orbit.issue-focus");
-      } catch {
-        // Ignore storage access failures and keep the in-memory fallback.
-      }
-      if (!issueId) return;
-      const trigger = document.querySelector<HTMLButtonElement>(
-        `button[data-issue-id="${issueId}"]`,
-      );
-      if (!trigger) return;
-      trigger.focus();
-      try {
-        window.sessionStorage.removeItem("orbit.issue-focus");
-      } catch {
-        // Ignore storage access failures after the focus was restored.
-      }
-    }, 40);
+    if (composerOpen || props.issueId) return;
+    let issueId = issueTriggerIdRef.current;
+    try {
+      issueId ??= window.sessionStorage.getItem("orbit.issue-focus");
+    } catch {
+      /* Best effort. */
+    }
+    if (!issueId) return;
+    const trigger = [...document.querySelectorAll<HTMLButtonElement>("button[data-issue-id]")].find(
+      (button) => button.dataset.issueId === issueId,
+    );
+    if (!trigger) return;
+    trigger.focus({ preventScroll: true });
+    issueTriggerIdRef.current = null;
+    try {
+      window.sessionStorage.removeItem("orbit.issue-focus");
+    } catch {
+      /* Best effort. */
+    }
   }
 
   const bootstrap = useQuery({
@@ -412,24 +488,31 @@ function OrbitAppInner(props: Props) {
   }, [visibleIssues]);
 
   useEffect(() => {
+    if (!data || !showCompletedReady || section !== "issues") return;
+    const patch: Record<string, unknown> = {};
     if (labelFilter !== "all" && !labels.some((label) => label.id === labelFilter))
-      setLabelFilter("all");
-  }, [labels, labelFilter]);
-
-  useEffect(() => {
+      patch.label = undefined;
+    if (statusFilter !== "all" && !workflowStates.some((state) => state.id === statusFilter))
+      patch.status = undefined;
     if (
       projectFilter !== "all" &&
       projectFilter !== NO_PROJECT_OPTION &&
       !projects.some((project) => project.id === projectFilter)
-    ) {
-      setProjectFilter("all");
-    }
-  }, [projects, projectFilter]);
-
-  useEffect(() => {
-    if (statusFilter !== "all" && !workflowStates.some((state) => state.id === statusFilter))
-      setStatusFilter("all");
-  }, [statusFilter, workflowStates]);
+    )
+      patch.project = undefined;
+    if (Object.keys(patch).length > 0) updateIssueSearch(patch);
+  }, [
+    data,
+    showCompletedReady,
+    section,
+    labels,
+    workflowStates,
+    projects,
+    labelFilter,
+    statusFilter,
+    projectFilter,
+    props.issueSearch,
+  ]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -437,7 +520,7 @@ function OrbitAppInner(props: Props) {
         const stored = parseShowCompletedPreference(
           window.localStorage.getItem(SHOW_COMPLETED_STORAGE_KEY),
         );
-        if (stored !== undefined) setShowCompleted(stored);
+        if (stored !== undefined) setCompletedFallback(stored);
       } catch {
         // Ignore storage access failures and keep the default visibility.
       }
@@ -518,33 +601,8 @@ function OrbitAppInner(props: Props) {
   });
 
   useEffect(() => {
-    const shell = document.querySelector<HTMLElement>(".app-shell");
-    if (!shell) return;
-    const blocking = run?.status === "pending" || run?.status === "running";
-    const content = [...shell.children].filter(
-      (element): element is HTMLElement =>
-        element instanceof HTMLElement && !element.classList.contains("run-overlay"),
-    );
-    content.forEach((element) => {
-      if (blocking) {
-        element.setAttribute("inert", "");
-        element.setAttribute("aria-hidden", "true");
-      } else {
-        element.removeAttribute("inert");
-        element.removeAttribute("aria-hidden");
-      }
-    });
-    return () => {
-      content.forEach((element) => {
-        element.removeAttribute("inert");
-        element.removeAttribute("aria-hidden");
-      });
-    };
-  }, [run?.status]);
-
-  useEffect(() => {
     if (!composerOpen && !props.issueId) restoreIssueFocus();
-  }, [composerOpen, props.issueId]);
+  }, [composerOpen, props.issueId, visibleIssues]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -558,7 +616,16 @@ function OrbitAppInner(props: Props) {
         shiftKey: event.shiftKey,
         editable: editing,
       });
-      if (!action || run?.status === "pending" || run?.status === "running") return;
+      if (
+        !action ||
+        run?.status === "pending" ||
+        run?.status === "running" ||
+        composerOpen ||
+        commandOpen ||
+        projectComposerOpen ||
+        shortcutsOpen
+      )
+        return;
       event.preventDefault();
       if (action === "command") {
         setCommandOpen(true);
@@ -568,11 +635,6 @@ function OrbitAppInner(props: Props) {
         setCommandOpen(false);
         setShortcutsOpen(false);
         if (!bulkBusy) setSelected([]);
-        if (composerOpen && props.issueId) {
-          setSection("issues");
-          void router.navigate({ to: "/issues" as never }).then(restoreIssueFocus);
-        }
-        setComposerOpen(false);
         return;
       }
       if (action === "create") {
@@ -584,6 +646,7 @@ function OrbitAppInner(props: Props) {
         return;
       }
       if (action === "toggle-board") {
+        if (section !== "issues") return;
         setViewMode((mode) => (mode === "list" ? "board" : "list"));
         return;
       }
@@ -621,7 +684,21 @@ function OrbitAppInner(props: Props) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bulkBusy, composerOpen, focusedIssueId, props.issueId, router, run?.status, section]);
+  }, [
+    bulkBusy,
+    composerOpen,
+    commandOpen,
+    projectComposerOpen,
+    shortcutsOpen,
+    focusedIssueId,
+    props.issueId,
+    router,
+    run?.status,
+    section,
+    viewMode,
+    showCompleted,
+    props.issueSearch,
+  ]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   const dismissToast = () => {
@@ -930,7 +1007,9 @@ function OrbitAppInner(props: Props) {
     setSection(next);
     setSelected([]);
     const path = next === "home" ? "/" : next === "settings" ? "/settings" : `/${next}`;
-    await router.navigate({ to: path as never });
+    if (next === "issues")
+      await router.navigate({ to: "/issues", search: { completed: completedFallback } });
+    else await router.navigate({ to: path as never });
   }
 
   function openIssueComposer(projectId = "") {
@@ -950,9 +1029,7 @@ function OrbitAppInner(props: Props) {
     await markNotificationRead(notification);
     await refresh();
     if (notification.entityType === "issue" && notification.entityId) {
-      setSection("issues");
-      setComposerOpen(true);
-      await router.navigate({ to: `/issues/${notification.entityId}` as never });
+      openIssue(notification.entityId);
     } else if (notification.entityType === "project" && notification.entityId) {
       setSection("projects");
       await router.navigate({ to: `/projects/${notification.entityId}` as never });
@@ -976,7 +1053,18 @@ function OrbitAppInner(props: Props) {
     if (rejected) throw rejected.reason;
   }
 
+  useEffect(
+    () => () => {
+      searchSequenceRef.current += 1;
+      searchAbortRef.current?.abort();
+      if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current);
+    },
+    [],
+  );
+
   function executeSearch(value: string, filtersForRequest = searchFilters) {
+    const sequence = ++searchSequenceRef.current;
+    searchAbortRef.current?.abort();
     setSearchText(value);
     setSearchError(null);
     if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current);
@@ -987,6 +1075,9 @@ function OrbitAppInner(props: Props) {
     }
     setSearchBusy(true);
     searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = undefined;
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
       const params = new URLSearchParams({ q: value.trim() });
       if (filtersForRequest.statusId !== "all") params.set("status", filtersForRequest.statusId);
       if (filtersForRequest.priority !== "all") params.set("priority", filtersForRequest.priority);
@@ -994,8 +1085,11 @@ function OrbitAppInner(props: Props) {
       if (filtersForRequest.cycleId !== "all") params.set("cycle", filtersForRequest.cycleId);
       if (filtersForRequest.labelId !== "all") params.set("label", filtersForRequest.labelId);
       if (filtersForRequest.due !== "all") params.set("due", filtersForRequest.due);
-      void apiGet<{ items: Issue[] }>(`/api/v1/search?${params.toString()}`)
+      void apiRequest<{ items: Issue[] }>(`/api/v1/search?${params.toString()}`, {
+        signal: controller.signal,
+      })
         .then((result) => {
+          if (sequence !== searchSequenceRef.current) return;
           setRemoteSearch(result.items);
           setSearchBusy(false);
           void apiPost("/api/v1/recent-searches", {
@@ -1021,6 +1115,7 @@ function OrbitAppInner(props: Props) {
             .catch(() => undefined);
         })
         .catch((error) => {
+          if (sequence !== searchSequenceRef.current) return;
           setSearchBusy(false);
           setSearchError(error instanceof ApiError ? error.message : "検索に失敗しました");
         });
@@ -1033,18 +1128,30 @@ function OrbitAppInner(props: Props) {
   }
 
   async function createProject() {
-    if (!projectName.trim()) return;
+    const name = projectName.trim();
+    if (!name || projectCreateBusyRef.current) return;
+    projectCreateBusyRef.current = true;
+    setProjectCreateBusy(true);
+    const request =
+      projectCreateRequestRef.current?.name === name
+        ? projectCreateRequestRef.current
+        : { name, key: idempotencyKey() };
+    projectCreateRequestRef.current = request;
     try {
       await apiPost("/api/v1/projects", {
-        idempotencyKey: idempotencyKey(),
-        name: projectName.trim(),
+        idempotencyKey: request.key,
+        name: request.name,
       });
+      projectCreateRequestRef.current = null;
       setProjectName("");
       setProjectComposerOpen(false);
       showToast("success", "Projectを作成しました");
       await refresh();
     } catch (error) {
       showToast("error", error instanceof ApiError ? error.message : "Projectの作成に失敗しました");
+    } finally {
+      projectCreateBusyRef.current = false;
+      setProjectCreateBusy(false);
     }
   }
 
@@ -1138,7 +1245,9 @@ function OrbitAppInner(props: Props) {
   function closeIssueDetail() {
     setSection("issues");
     setComposerOpen(false);
-    void router.navigate({ to: "/issues" }).then(restoreIssueFocus);
+    void router
+      .navigate({ to: "/issues", search: currentIssueSearch(), resetScroll: false })
+      .then(restoreIssueFocus);
   }
 
   const activeRun =
@@ -1169,7 +1278,7 @@ function OrbitAppInner(props: Props) {
               className="search-trigger"
               onClick={() => {
                 setCommandOpen(true);
-                setSearchText("");
+                executeSearch("");
               }}
             >
               <span>⌕</span>
@@ -1188,13 +1297,7 @@ function OrbitAppInner(props: Props) {
               data={data}
               onNavigate={navigate}
               onCreate={() => openIssueComposer()}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "issues" && (
@@ -1205,6 +1308,17 @@ function OrbitAppInner(props: Props) {
               setScope={setIssueScope}
               workflowStates={workflowStates}
               filterText={filterText}
+              onClearFilters={() =>
+                updateIssueSearch({
+                  q: undefined,
+                  status: undefined,
+                  priority: undefined,
+                  project: undefined,
+                  label: undefined,
+                  due: undefined,
+                  completed: true,
+                })
+              }
               setFilterText={setFilterText}
               priorityFilter={priorityFilter}
               setPriorityFilter={setPriorityFilter}
@@ -1249,12 +1363,7 @@ function OrbitAppInner(props: Props) {
                 bulkMutationKeyRef.current = null;
               }}
               onCreate={() => setComposerOpen(true)}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "cycles" && (
@@ -1321,12 +1430,7 @@ function OrbitAppInner(props: Props) {
               modifierLabel={modifierLabel}
               onCreate={() => setProjectComposerOpen(true)}
               onRefresh={refresh}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                void router.navigate({ to: issueDetailPath(issue.id) as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "search" && (
@@ -1334,13 +1438,7 @@ function OrbitAppInner(props: Props) {
               query={searchText}
               onQuery={executeSearch}
               results={remoteSearch}
-              onOpenIssueId={(issueId) => {
-                const issue = issues.find((item) => item.id === issueId);
-                if (issue) rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                void router.navigate({ to: `/issues/${issueId}` as never });
-              }}
+              onOpenIssueId={openIssue}
               searchBusy={searchBusy}
               searchError={searchError}
               onRetry={() => executeSearch(searchText)}
@@ -1353,13 +1451,7 @@ function OrbitAppInner(props: Props) {
               recentIssueViews={recentQuery.data?.issueViews ?? []}
               recentSearches={recentQuery.data?.searches ?? []}
               modifierLabel={modifierLabel}
-              onOpen={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpen={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "inbox" && (
@@ -1412,6 +1504,7 @@ function OrbitAppInner(props: Props) {
           <IssueDetailPanel
             key={props.issueId}
             issueId={props.issueId}
+            issueSearch={currentIssueSearch()}
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
             projects={projects}
@@ -1458,11 +1551,22 @@ function OrbitAppInner(props: Props) {
           <input
             id="project-name"
             className="text-input"
-            autoFocus
+            data-modal-autofocus
             value={projectName}
+            disabled={projectCreateBusy}
             onChange={(event) => setProjectName(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") void createProject();
+              if (
+                shouldSubmitIssueOnEnter({
+                  key: event.key,
+                  isComposing: event.nativeEvent.isComposing,
+                  keyCode: event.keyCode,
+                  busy: projectCreateBusyRef.current,
+                })
+              ) {
+                event.preventDefault();
+                void createProject();
+              }
             }}
             placeholder="例：Orbit MVP"
           />
@@ -1470,8 +1574,12 @@ function OrbitAppInner(props: Props) {
             <button className="button ghost" onClick={() => setProjectComposerOpen(false)}>
               キャンセル
             </button>
-            <button className="button primary" onClick={() => void createProject()}>
-              作成する
+            <button
+              className="button primary"
+              onClick={() => void createProject()}
+              disabled={projectCreateBusy || !projectName.trim()}
+            >
+              {projectCreateBusy ? "作成中…" : "作成する"}
             </button>
           </div>
         </Modal>
@@ -1496,10 +1604,7 @@ function OrbitAppInner(props: Props) {
           onOpenSelected={() => {
             if (!selectedIssue) return;
             setCommandOpen(false);
-            rememberIssueFocus(selectedIssue.id);
-            setSection("issues");
-            setComposerOpen(true);
-            void router.navigate({ to: `/issues/${selectedIssue.id}` as never });
+            openIssue(selectedIssue.id);
           }}
           onArchiveSelected={() => {
             if (!selectedIssue) return;
@@ -2009,6 +2114,7 @@ export function IssuesView({
   setScope,
   workflowStates,
   filterText,
+  onClearFilters,
   setFilterText,
   priorityFilter,
   setPriorityFilter,
@@ -2057,6 +2163,7 @@ export function IssuesView({
   setScope: (value: IssueListScope) => void;
   workflowStates: WorkflowState[];
   filterText: string;
+  onClearFilters?: () => void;
   setFilterText: (value: string) => void;
   priorityFilter: Issue["priority"] | "all";
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
@@ -2120,6 +2227,10 @@ export function IssuesView({
     dueFilter !== "all" ||
     !showCompleted;
   function clearIssueFilters() {
+    if (onClearFilters) {
+      onClearFilters();
+      return;
+    }
     setFilterText("");
     setStatusFilter("all");
     setPriorityFilter("all");
@@ -6305,10 +6416,7 @@ export function RunOverlay({
 }) {
   const blocking = ["pending", "running"].includes(run.status);
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (blocking) overlayRef.current?.focus();
-  }, [blocking]);
+  useDialogBoundary(overlayRef, { enabled: blocking, priority: 100, onEscape: () => undefined });
 
   return (
     <div
@@ -6422,6 +6530,7 @@ export function IssueCycleHistorySection({
 
 export function IssueDetailPanel({
   issueId,
+  issueSearch,
   fallbackIssue,
   knownIssues,
   projects,
@@ -6432,6 +6541,7 @@ export function IssueDetailPanel({
   onClose,
 }: {
   issueId: string;
+  issueSearch?: IssueSearch;
   fallbackIssue?: Issue;
   knownIssues: Issue[];
   projects: Project[];
@@ -6443,6 +6553,11 @@ export function IssueDetailPanel({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, {
+    initialFocus: "#issue-detail-title",
+    onEscape: () => void closePanel(),
+  });
   const detailQuery = useQuery({
     queryKey: ["issue-detail", issueId],
     queryFn: () => apiGet<IssueDetailViewModel>(`/api/v1/issues/${issueId}`),
@@ -6564,19 +6679,31 @@ export function IssueDetailPanel({
   }, [issue?.id]);
 
   function applyUpdatedIssue(updatedIssue: Issue) {
+    function syncScope(items: Issue[], scope: IssueListScope): Issue[] {
+      const belongs =
+        scope === "trash"
+          ? updatedIssue.deletedAt !== null
+          : updatedIssue.deletedAt === null &&
+            (scope === "archived"
+              ? updatedIssue.archivedAt !== null
+              : updatedIssue.archivedAt === null);
+      const exists = items.some((item) => item.id === updatedIssue.id);
+      if (!belongs) return exists ? items.filter((item) => item.id !== updatedIssue.id) : items;
+      return exists
+        ? items.map((item) => (item.id === updatedIssue.id ? updatedIssue : item))
+        : [...items, updatedIssue];
+    }
     queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
       current ? { ...current, issue: updatedIssue } : current,
     );
     queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-      current
-        ? {
-            ...current,
-            issues: current.issues.map((item) =>
-              item.id === updatedIssue.id ? updatedIssue : item,
-            ),
-          }
-        : current,
+      current ? { ...current, issues: syncScope(current.issues, "active") } : current,
     );
+    for (const scope of ["active", "archived", "trash"] as const) {
+      queryClient.setQueryData<{ items: Issue[] }>(["issues", scope], (current) =>
+        current ? { ...current, items: syncScope(current.items, scope) } : current,
+      );
+    }
   }
 
   async function saveDescription(
@@ -6649,8 +6776,10 @@ export function IssueDetailPanel({
           }
           if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
             const latest = await detailQuery.refetch();
-            if (latest.data) syncDescriptionDraft(latest.data.issue);
-            else syncDescriptionDraft(targetIssue);
+            if (latest.data) {
+              applyUpdatedIssue(latest.data.issue);
+              syncDescriptionDraft(latest.data.issue);
+            } else syncDescriptionDraft(targetIssue);
           } else if (!isValidationError) {
             syncDescriptionDraft(targetIssue);
           }
@@ -6773,7 +6902,14 @@ export function IssueDetailPanel({
   async function navigateAfterDescriptionSave(path: string) {
     await waitForParentMutation();
     if (!(await flushDescriptionAutosave())) return;
-    await router.navigate({ to: path as never });
+    if (issueSearch && path.startsWith("/issues/")) {
+      await router.navigate({
+        to: "/issues/$issueId",
+        params: { issueId: decodeURIComponent(path.slice("/issues/".length)) },
+        search: issueSearch,
+        resetScroll: false,
+      });
+    } else await router.navigate({ to: path as never });
   }
 
   async function closePanel() {
@@ -7022,16 +7158,12 @@ export function IssueDetailPanel({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop issue-detail-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="issue-detail-title"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          void closePanel();
-        }
-      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           void closePanel();
@@ -7531,8 +7663,12 @@ export function IssueComposer({
   onSubmit: () => void;
   busy: boolean;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, { initialFocus: "textarea", onEscape: onClose });
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -7698,6 +7834,8 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, { initialFocus: "input", onEscape: onClose });
   const commands = [
     { label: "新しいIssueを作成", hint: "C", action: onCreate },
     ...(
@@ -7724,7 +7862,6 @@ export function CommandPalette({
   useEffect(() => {
     setActiveIndex((current) => Math.min(Math.max(current, 0), Math.max(filtered.length - 1, 0)));
   }, [query, filtered.length]);
-  useEffect(() => inputRef.current?.focus(), []);
 
   function activate(index: number) {
     const command = filtered[index];
@@ -7734,6 +7871,8 @@ export function CommandPalette({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -7814,47 +7953,7 @@ function Modal({
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const focusable = () => [
-      ...panel.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
-      ),
-    ];
-    (focusable()[0] ?? panel).focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    panel.addEventListener("keydown", onKeyDown);
-    return () => {
-      panel.removeEventListener("keydown", onKeyDown);
-      previous?.focus?.();
-    };
-  }, []);
+  useDialogBoundary(panelRef, { initialFocus: "[data-modal-autofocus]", onEscape: onClose });
 
   return (
     <div

@@ -40,6 +40,8 @@
 - Maintenanceは25対象で残件がある間同じStepを継続する。opaque cursorは成功Chunkごとに更新し、失敗Chunkは既存deep Snapshotで全業務変更を復元してRun/Lockを取り直す。公開continueはOwnerを確認してから実行中だけtokenを取得し、完了再送を200 No-opへ通す（参照: `src/server/store.ts`、`src/server/api.ts`、`src/server/maintenance-integrity.test.ts`、`src/server/api-maintenance-integrity.test.ts`）。
 - Run作成で競合拒否された終端だけ、POST `/api/v1/background-runs`・423・専用dirty flagの一致時にSnapshotへ保存する。一般的な失敗Mutationの非保存は維持する。PurgeはIssue FK cascade依存を除去し、生存子の親参照を解除する（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/server/store.ts`）。
 - Runの復旧は`useBackgroundRun`がcurrent/start/resume/continueを直列化し、30秒・focus・onlineでServer truthを取得する。Bootstrapは初回seedのみとして古い再取得結果でcursorを戻さない（参照: `src/components/background-run.ts`）。
+- Issues一覧と詳細は同じURL validatorを使い、Route.useSearchをFilter/Mode/Orderの正本とする。参照ID補正はBootstrap取得後に一括replaceし、詳細/親子切替と閉じるでsearchを保持する（参照: `src/lib/url-state/issues.ts`、`src/routes/issues/`、`src/components/issues-url-runtime.test.ts`）。
+- Dialog境界はDocumentごとのregistryで初期Focus/Tab/Escape/復帰とinertを管理し、blocking Runを最前面にする。検索は旧応答を破棄し、Projectは即時guard/同じretryKey/IMEを扱う。Detail保存はBootstrapと既存3scope Cacheの所属まで同期する（参照: `src/components/dialog-boundary.ts`、`src/components/OrbitApp.tsx`、`src/components/review-ui-runtime.test.ts`）。
 - Canonical JSON / request hash: `src/shared/canonical-json.ts`
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`

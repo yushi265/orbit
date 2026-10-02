@@ -1605,6 +1605,137 @@ describe("Issue detail autosave", () => {
     });
   });
 
+  it("[競合/Cache同期] Autosave409の最新IssueをDetailと一覧Cacheへ反映する", async () => {
+    const { dom, root, queryClient, onClose } = renderPanel();
+    const latestIssue = {
+      ...issue,
+      title: "別端末の最新タイトル",
+      description: "別端末の説明",
+      version: 2,
+    };
+    queryClient.setQueryData(["bootstrap"], { issues: [issue] });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(errorResponse(409, "ISSUE_VERSION_CONFLICT", "競合しました。"))
+      .mockResolvedValueOnce(jsonResponse({ ...detail, issue: latestIssue }));
+    vi.stubGlobal("fetch", fetchMock);
+    await act(async () => {
+      root.render(
+        createElement(QueryClientProvider, { client: queryClient }, panelElement(onClose)),
+      );
+    });
+    await waitForState(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const title = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
+    const close = dom.window.document.querySelector(
+      '[aria-label="Issue詳細を閉じる"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      title.focus();
+      setTextareaValue(dom, title, "自分のdraft");
+      close.click();
+    });
+    await waitForState(() => {
+      expect(queryClient.getQueryData<{ issues: Issue[] }>(["bootstrap"])?.issues[0]).toEqual(
+        latestIssue,
+      );
+    });
+    expect(queryClient.getQueryData<typeof detail>(["issue-detail", issue.id])?.issue).toEqual(
+      latestIssue,
+    );
+    expect(title.value).toBe(latestIssue.title);
+    for (const scope of ["active", "archived", "trash"] as const) {
+      expect(queryClient.getQueryState(["issues", scope])).toBeUndefined();
+    }
+    expect(dom.window.document.body.textContent).toContain("説明を再試行");
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it.each(["active", "archived", "trash"] as const)(
+    "[409/Scope所属] 最新Issue=%sへ同期し他rowとCache metadataを保持する",
+    async (scope) => {
+      const { dom, root, queryClient, onClose } = renderPanel();
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 15_000 } });
+      const latest = {
+        ...issue,
+        title: "最新ライフサイクル",
+        version: 2,
+        archivedAt: scope === "active" ? null : 100,
+        deletedAt: scope === "trash" ? 200 : null,
+      };
+      const activeOther = { ...issue, id: "other-active", title: "他のActive" };
+      const archivedOther = {
+        ...issue,
+        id: "other-archived",
+        title: "他のArchived",
+        archivedAt: 100,
+      };
+      const trashOther = { ...issue, id: "other-trash", title: "他のTrash", deletedAt: 200 };
+      const original = scope === "active" ? { ...issue, archivedAt: 100 } : issue;
+      const initialActive = scope === "active" ? [activeOther] : [issue, activeOther];
+      queryClient.setQueryData(["bootstrap"], { issues: initialActive });
+      queryClient.setQueryData(["issues", "active"], {
+        items: initialActive,
+        marker: "active",
+      });
+      queryClient.setQueryData(["issues", "archived"], {
+        items: scope === "active" ? [archivedOther, original] : [archivedOther],
+        marker: "archived",
+      });
+      queryClient.setQueryData(["issues", "trash"], { items: [trashOther], marker: "trash" });
+      const fetchMock = vi.fn(async (path: string, init: RequestInit = {}) => {
+        if (path !== `/api/v1/issues/${issue.id}`) throw new Error("Unexpected Issue URL");
+        if (init.method === "PATCH")
+          return errorResponse(409, "ISSUE_VERSION_CONFLICT", "競合しました。");
+        if (init.method === undefined || init.method === "GET")
+          return jsonResponse({ ...detail, issue: latest });
+        throw new Error(`Unexpected method: ${init.method}`);
+      });
+      queryClient.setQueryData(["issue-detail", issue.id], { ...detail, issue: original });
+      vi.stubGlobal("fetch", fetchMock);
+      await act(async () =>
+        root.render(
+          createElement(QueryClientProvider, { client: queryClient }, panelElement(onClose)),
+        ),
+      );
+      const title = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
+      await act(async () => {
+        title.focus();
+        setTextareaValue(dom, title, "自分のdraft");
+        (
+          dom.window.document.querySelector('[aria-label="Issue詳細を閉じる"]') as HTMLButtonElement
+        ).click();
+      });
+      await waitForState(() =>
+        expect(
+          queryClient.getQueryData<typeof detail>(["issue-detail", issue.id])?.issue.title,
+        ).toBe(latest.title),
+      );
+      expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual([
+        "PATCH",
+        "GET",
+      ]);
+      expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string).version).toBe(1);
+      expect(queryClient.getQueryData<{ issues: Issue[] }>(["bootstrap"])?.issues).toEqual(
+        scope === "active" ? [activeOther, latest] : [activeOther],
+      );
+      expect(queryClient.getQueryData(["issues", "active"])).toEqual({
+        items: scope === "active" ? [activeOther, latest] : [activeOther],
+        marker: "active",
+      });
+      expect(queryClient.getQueryData(["issues", "archived"])).toEqual({
+        items: scope === "archived" ? [archivedOther, latest] : [archivedOther],
+        marker: "archived",
+      });
+      expect(queryClient.getQueryData(["issues", "trash"])).toEqual({
+        items: scope === "trash" ? [trashOther, latest] : [trashOther],
+        marker: "trash",
+      });
+      await act(async () => root.unmount());
+    },
+  );
+
   it("[状態遷移/失敗系] version競合時は最新値を再取得して再試行を残す", async () => {
     const { dom, root, queryClient, onClose } = renderPanel();
     const latestIssue = { ...issue, title: "他の場所のタイトル", version: 2, updatedAt: 2 };

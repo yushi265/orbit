@@ -1776,13 +1776,24 @@ export class OrbitStore {
       filter: { ...defaults.filter, ...query.filter },
       layout: { ...defaults.layout, ...query.layout },
     };
+    return this.matchingIssues(userId, resolved, scope).slice(
+      0,
+      Math.min(Math.max(resolved.limit, 1), 500),
+    );
+  }
+
+  private matchingIssues(
+    userId: string,
+    query: IssueQuery,
+    scope: IssueListScope = "active",
+  ): Issue[] {
     let items = [...this.issues.values()].filter((item) => {
       if (item.userId !== userId) return false;
       if (scope === "trash") return item.deletedAt !== null;
       if (scope === "archived") return item.deletedAt === null && item.archivedAt !== null;
       return item.deletedAt === null && item.archivedAt === null;
     });
-    const filter = resolved.filter;
+    const filter = query.filter;
     if (filter.text?.trim()) {
       const needle = filter.text.trim().toLocaleLowerCase();
       items = items.filter((item) =>
@@ -1823,19 +1834,19 @@ export class OrbitStore {
     }
     const priorityOrder = new Map(priorities.map((priority, index) => [priority, index]));
     items.sort((a, b) => {
-      if (resolved.order === "priority")
+      if (query.order === "priority")
         return (
           priorityOrder.get(a.priority)! - priorityOrder.get(b.priority)! ||
           b.updatedAt - a.updatedAt
         );
-      if (resolved.order === "updated") return b.updatedAt - a.updatedAt;
-      if (resolved.order === "created") return b.createdAt - a.createdAt;
-      if (resolved.order === "due_at")
+      if (query.order === "updated") return b.updatedAt - a.updatedAt;
+      if (query.order === "created") return b.createdAt - a.createdAt;
+      if (query.order === "due_at")
         return (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER);
-      if (resolved.order === "estimate") return (b.estimate ?? 0) - (a.estimate ?? 0);
+      if (query.order === "estimate") return (b.estimate ?? 0) - (a.estimate ?? 0);
       return a.position - b.position;
     });
-    return items.slice(0, Math.min(Math.max(resolved.limit, 1), 500));
+    return items;
   }
 
   updateIssue(userId: string, input: UpdateIssueInput, runId?: string): Issue {
@@ -3125,7 +3136,7 @@ export class OrbitStore {
       cycleSettings: this.cycleSettings.get(userId)!,
       workflowStates: this.ownedWorkflowStates(userId),
       projectStatuses: this.ownedProjectStatuses(userId),
-      issues: this.listIssues(userId),
+      issues: this.matchingIssues(userId, defaultQuery()),
       labels: this.listLabels(userId),
       projects: this.listProjects(userId),
       cycles: this.listCycles(userId),

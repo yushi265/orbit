@@ -36,6 +36,7 @@
 
 ## 再利用可能な部品
 
+- BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
 - Canonical JSON / request hash: `src/shared/canonical-json.ts`
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`
@@ -75,5 +76,7 @@
 - Node防壁・ブラウザログとnative全プロセスの通信試行監査は別物。OS遮断下の機能動作は確認済みだが、全native試行監査は現環境で陽性対照が成立せずAC-7未完了（参照: `docs/spec/FEAT-local-only/verification.md`）。
 
 ## 最終更新
+
+FIX-main-reviewのP1修正 / 2026-10-02
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

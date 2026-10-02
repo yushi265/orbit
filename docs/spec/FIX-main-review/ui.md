@@ -2,6 +2,7 @@
 
 ## 担保AC
 
+- **AC-8**: 期限を時刻を持たない日付として扱い、入力した暦日をTimezone変更後も維持する。入力・表示・UI Filter・検索APIは同じ暦日判定を行う。
 - **AC-2**: 実行中Runの再読込・通信中断後も進捗を再取得し、安全にcontinueできる。Lease失効時は再開導線が表示される。
 - **AC-3**: 有効な長いProject名を含むIssue Filterは1440px・390px幅でページ全体を横にはみ出さない。
 - **AC-4**: 390×600のComposerでタイトル・作成・キャンセルへスクロールして到達できる。
@@ -25,11 +26,15 @@
 - Detail/Composer/Commandは初期Focus・Focus trap・元要素への復帰を持つ。背景はinertとし、DetailのEscapeは保存flushを待つ。既存Run Overlayとの重なりを壊さない。
 - 検索は既存300ms debounceを維持する。発行済みrequestの応答が現在の要求と一致した場合のみ反映する。空検索とunmountで旧応答を破棄する。
 - Projectはrefによる即時重複guardと表示pendingを持つ。失敗時は再試行可能で、IME Enterは無視する。
-- Autosave競合の最新Detailを既存applyUpdatedIssueで一覧にも反映する。
+- Autosave競合の最新Detailを既存applyUpdatedIssueでActive/Archived等の既存一覧Cacheにも反映する。別操作でlifecycleが変わった場合は各scopeの所属を保ち、無関係な行を保持する。
+- Issue期限の表示/入力はUTC暦日を維持する。List/Filter/Home/relative dayだけsharedの期限日helperへ統一し、本人Timezoneのtodayと比較する。Activity・Project/Cycle等のtimestamp表示は変更しない。
+- blocking Runの視覚上のz-indexをDialog/Toastより上へ置き、Focus/inertの最前面priorityと一致させる。非blocking表示は従来の重なりを維持する。
 
 ## レスポンシブ・アクセシビリティ
 
 1440×900、1024×768、390×844、390×600、320×740を確認する。toolbarは必要時に折り返し、selectは親幅を超えない。Composerはviewport/safe area内で縦スクロールできる。Darkのhierarchyはsurface/text変数を使用する。Project actionsは縮み過ぎずTabletで折り返す。
+
+開発時のstylesheet URLはViteのreserved `v` queryを追加せず、`appCss`をそのまま使用する。現行`/src/styles.css?v=5`は`max-age=31536000,immutable`、query無しは`no-cache`であり、実測前の古いCSS残留を防ぐ。本番のhash付きasset URLとAPP_ASSET_VERSIONは維持する。
 
 ## テストケース
 

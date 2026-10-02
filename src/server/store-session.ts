@@ -31,7 +31,12 @@ export async function openStoreSession(
   if (config.storage === "memory") {
     const store = getOrbitStore(userId);
     store.ensureOwner(userId, email, userId === "dev-owner");
-    return { store, persist: async () => {}, needsInitialPersist: false };
+    store.clearRejectedRunStateChanges();
+    return {
+      store,
+      persist: async () => store.clearRejectedRunStateChanges(),
+      needsInitialPersist: false,
+    };
   }
 
   const database = env.DB;
@@ -60,6 +65,7 @@ export async function openStoreSession(
       const snapshot = store.toSnapshot();
       if (initialSnapshotJson !== null && JSON.stringify(snapshot) === initialSnapshotJson) {
         persisted = true;
+        store.clearRejectedRunStateChanges();
         return;
       }
       try {
@@ -67,6 +73,7 @@ export async function openStoreSession(
         persisted = true;
         needsInitialPersist = false;
         store.clearBackgroundStateChanges();
+        store.clearRejectedRunStateChanges();
       } catch (error) {
         if (error instanceof SnapshotVersionConflict)
           throw conflict("D1_WRITE_CONFLICT", "別の操作が先に保存されました。再試行してください。");

@@ -37,6 +37,8 @@
 ## 再利用可能な部品
 
 - BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
+- Maintenanceは25対象で残件がある間同じStepを継続する。opaque cursorは成功Chunkごとに更新し、失敗Chunkは既存deep Snapshotで全業務変更を復元してRun/Lockを取り直す。公開continueはOwnerを確認してから実行中だけtokenを取得し、完了再送を200 No-opへ通す（参照: `src/server/store.ts`、`src/server/api.ts`、`src/server/maintenance-integrity.test.ts`、`src/server/api-maintenance-integrity.test.ts`）。
+- Run作成で競合拒否された終端だけ、POST `/api/v1/background-runs`・423・専用dirty flagの一致時にSnapshotへ保存する。一般的な失敗Mutationの非保存は維持する。PurgeはIssue FK cascade依存を除去し、生存子の親参照を解除する（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/server/store.ts`）。
 - Runの復旧は`useBackgroundRun`がcurrent/start/resume/continueを直列化し、30秒・focus・onlineでServer truthを取得する。Bootstrapは初回seedのみとして古い再取得結果でcursorを戻さない（参照: `src/components/background-run.ts`）。
 - Canonical JSON / request hash: `src/shared/canonical-json.ts`
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`

@@ -299,6 +299,7 @@ export class OrbitStore {
   }> = [];
   private seededUsers = new Set<string>();
   private backgroundStateDirty = false;
+  private rejectedRunStateDirty = false;
 
   constructor(private readonly clock: () => number = nowMs) {}
 
@@ -371,39 +372,47 @@ export class OrbitStore {
       throw new Error("Invalid OrbitStore snapshot");
     const source = structuredClone(normalized);
     const store = new OrbitStore(clock);
+    store.restoreSnapshot(source);
+    return store;
+  }
+
+  private restoreSnapshot(source: OrbitStoreSnapshot): void {
     const setById = <T extends { id: string }>(target: Map<string, T>, values: T[]) => {
+      target.clear();
       values.forEach((value) => target.set(value.id, value));
     };
     const setByUserId = <T extends { userId: string }>(target: Map<string, T>, values: T[]) => {
+      target.clear();
       values.forEach((value) => target.set(value.userId, value));
     };
 
-    setById(store.users, source.users);
-    setByUserId(store.preferences, source.preferences);
-    setById(store.workflowStates, source.workflowStates);
-    setById(store.projectStatuses, source.projectStatuses);
-    setById(store.projects, source.projects);
-    setById(store.projectDisplayPreferences, source.projectDisplayPreferences);
-    setById(store.cycles, source.cycles);
-    setByUserId(store.cycleSettings, source.cycleSettings);
-    setById(store.issues, source.issues);
-    setById(store.labels, source.labels);
-    setById(store.notes, source.notes);
-    setById(store.relations, source.relations);
-    setById(store.recentIssueViews, source.recentIssueViews);
-    setById(store.recentSearches, source.recentSearches);
-    setById(store.views, source.views);
-    setById(store.notifications, source.notifications);
-    source.runs.forEach((run) => store.runs.set(run.run_id, run));
-    setByUserId(store.locks, source.locks);
-    store.activities.push(...source.activities);
-    store.outbox.push(...source.outbox);
+    setById(this.users, source.users);
+    setByUserId(this.preferences, source.preferences);
+    setById(this.workflowStates, source.workflowStates);
+    setById(this.projectStatuses, source.projectStatuses);
+    setById(this.projects, source.projects);
+    setById(this.projectDisplayPreferences, source.projectDisplayPreferences);
+    setById(this.cycles, source.cycles);
+    setByUserId(this.cycleSettings, source.cycleSettings);
+    setById(this.issues, source.issues);
+    setById(this.labels, source.labels);
+    setById(this.notes, source.notes);
+    setById(this.relations, source.relations);
+    setById(this.recentIssueViews, source.recentIssueViews);
+    setById(this.recentSearches, source.recentSearches);
+    setById(this.views, source.views);
+    setById(this.notifications, source.notifications);
+    this.runs.clear();
+    source.runs.forEach((run) => this.runs.set(run.run_id, run));
+    setByUserId(this.locks, source.locks);
+    this.activities.splice(0, this.activities.length, ...source.activities);
+    this.outbox.splice(0, this.outbox.length, ...source.outbox);
+    this.receipts.clear();
     source.receipts.forEach((receipt) =>
-      store.receipts.set(`${receipt.userId}:${receipt.idempotencyKey}`, receipt),
+      this.receipts.set(`${receipt.userId}:${receipt.idempotencyKey}`, receipt),
     );
-    store.cycleHistory.push(...source.cycleHistory);
-    store.seededUsers = new Set(source.seededUsers);
-    return store;
+    this.cycleHistory.splice(0, this.cycleHistory.length, ...source.cycleHistory);
+    this.seededUsers = new Set(source.seededUsers);
   }
 
   private static isSnapshot(value: unknown, ownerUserId?: string): value is OrbitStoreSnapshot {
@@ -1319,7 +1328,7 @@ export class OrbitStore {
     if (input.projectId && (!project || project.userId !== userId || project.deletedAt))
       throw notFound();
     const cycle = input.cycleId ? this.cycles.get(input.cycleId) : null;
-    if (cycle && cycle.userId !== userId) throw notFound();
+    if (input.cycleId && (!cycle || cycle.userId !== userId)) throw notFound();
     this.validateParent(userId, null, input.parentId);
     if (
       input.dueAt !== undefined &&
@@ -2793,9 +2802,9 @@ export class OrbitStore {
       this.createNextCycle(userId, cycle);
     cycle.status = "completed";
     cycle.completedAt = this.clock();
-    const moveable = this.listIssues(userId, {
+    const moveable = this.matchingIssues(userId, {
+      ...defaultQuery(),
       filter: { cycleIds: [cycle.id] },
-      limit: 500,
     }).filter((issue) => {
       const state = this.workflowStates.get(issue.statusId);
       return state?.category === "unstarted" || state?.category === "started";
@@ -3213,6 +3222,14 @@ export class OrbitStore {
     this.backgroundStateDirty = false;
   }
 
+  hasRejectedRunStateChanges(): boolean {
+    return this.rejectedRunStateDirty;
+  }
+
+  clearRejectedRunStateChanges(): void {
+    this.rejectedRunStateDirty = false;
+  }
+
   getRun(userId: string, runId: string): BackgroundRun {
     this.expireRunIfNeeded(userId);
     const run = this.runs.get(runId);
@@ -3262,6 +3279,7 @@ export class OrbitStore {
     if (blockingRun || (lock.status === "running" && (lock.leaseExpiresAt ?? 0) > now)) {
       const rejected: BackgroundRun = this.makeRun(userId, input, "rejected", now);
       this.runs.set(rejected.run_id, rejected);
+      this.rejectedRunStateDirty = true;
       throw locked();
     }
     const run = this.makeRun(userId, input, "running", now);
@@ -3339,7 +3357,7 @@ export class OrbitStore {
     processed_count: number;
     next: "continue" | "resume" | "none";
   } {
-    const run = this.getRun(userId, runId);
+    let run = this.getRun(userId, runId);
     if (run.status === "paused" || run.status === "failed")
       throw conflict("RUN_REQUIRES_RESUME", "このRunは再開操作が必要です。");
     if (run.status === "rejected")
@@ -3352,7 +3370,7 @@ export class OrbitStore {
         processed_count: 0,
         next: "none",
       };
-    const lock = this.locks.get(userId)!;
+    let lock = this.locks.get(userId)!;
     if (
       lock.runId !== runId ||
       lock.status !== "running" ||
@@ -3373,24 +3391,32 @@ export class OrbitStore {
         processed_count: 0,
         next: "continue",
       };
+    const beforeChunk = this.toSnapshot();
     run.stepStatuses[step] = "running";
     let processed = 0;
     try {
-      if (step === "cycle_transition") processed = this.runCycleTransition(userId, runId);
-      if (step === "purge") processed = this.runPurge(userId);
-      if (step === "outbox_retry") processed = this.runOutboxRetry(userId);
+      const chunk =
+        step === "cycle_transition"
+          ? this.runCycleTransition(userId, runId)
+          : step === "purge"
+            ? this.runPurge(userId)
+            : this.runOutboxRetry(userId);
+      processed = chunk.processed;
       run.progress.processed += processed;
-      run.progress.cursor = `${step}:${run.progress.processed}`;
+      run.progress.cursor = createId("cursor");
       run.stepCursors[step] = run.progress.cursor;
-      run.stepStatuses[step] = "succeeded";
-      run.stepIndex += 1;
-      run.progress.step_index = run.stepIndex;
-      run.progress.current_step = run.stepIndex < runSteps.length ? runSteps[run.stepIndex] : null;
-      run.progress.percent = Math.round((run.stepIndex / runSteps.length) * 100);
-      if (run.stepIndex < runSteps.length) {
-        const nextStep = runSteps[run.stepIndex];
-        run.stepStatuses[nextStep] = "running";
-        run.stepCursors[nextStep] = run.progress.cursor;
+      if (!chunk.hasRemaining) {
+        run.stepStatuses[step] = "succeeded";
+        run.stepIndex += 1;
+        run.progress.step_index = run.stepIndex;
+        run.progress.current_step =
+          run.stepIndex < runSteps.length ? runSteps[run.stepIndex] : null;
+        run.progress.percent = Math.round((run.stepIndex / runSteps.length) * 100);
+        if (run.stepIndex < runSteps.length) {
+          const nextStep = runSteps[run.stepIndex];
+          run.stepStatuses[nextStep] = "running";
+          run.stepCursors[nextStep] = run.progress.cursor;
+        }
       }
       run.heartbeat_at = this.clock();
       run.leaseExpiresAt = run.heartbeat_at + RUN_LEASE_MS;
@@ -3405,6 +3431,10 @@ export class OrbitStore {
         lock.leaseExpiresAt = null;
       }
     } catch {
+      this.restoreSnapshot(beforeChunk);
+      run = this.runs.get(runId)!;
+      lock = this.locks.get(userId)!;
+      processed = 0;
       run.status = "failed";
       run.error = {
         code: "STEP_FAILED",
@@ -3489,25 +3519,30 @@ export class OrbitStore {
     this.backgroundStateDirty = true;
   }
 
-  private runCycleTransition(userId: string, runId: string): number {
+  private nextCycleTransition(userId: string): Cycle | undefined {
     const now = this.clock();
+    const active = this.listCycles(userId).find((cycle) => cycle.status === "active");
+    if (active) return active.endsAt <= now ? active : undefined;
+    const next = this.listCycles(userId)
+      .filter((cycle) => cycle.status === "upcoming")
+      .sort((left, right) => left.number - right.number)[0];
+    return next && next.startsAt <= now ? next : undefined;
+  }
+
+  private runCycleTransition(
+    userId: string,
+    runId: string,
+  ): { processed: number; hasRemaining: boolean } {
     let processed = 0;
     while (processed < CHUNK_SIZE) {
-      const active = this.listCycles(userId).find((cycle) => cycle.status === "active");
-      if (active) {
-        if (active.endsAt > now) break;
-        this.closeCycle(userId, active.id, `run-${runId}-${active.id}`, runId);
-        processed += 1;
-        continue;
-      }
-      const next = this.listCycles(userId)
-        .filter((cycle) => cycle.status === "upcoming")
-        .sort((left, right) => left.number - right.number)[0];
-      if (!next || next.startsAt > now) break;
-      if (!this.activateScheduledCycle(userId, next, runId)) break;
+      const next = this.nextCycleTransition(userId);
+      if (!next) break;
+      if (next.status === "active")
+        this.closeCycle(userId, next.id, `run-${runId}-${next.id}`, runId);
+      else if (!this.activateScheduledCycle(userId, next, runId)) break;
       processed += 1;
     }
-    return processed;
+    return { processed, hasRemaining: this.nextCycleTransition(userId) !== undefined };
   }
 
   private activateScheduledCycle(userId: string, cycle: Cycle, runId: string): boolean {
@@ -3540,46 +3575,81 @@ export class OrbitStore {
     return true;
   }
 
-  private runPurge(userId: string): number {
+  private purgeTargets(
+    userId: string,
+  ): Array<{ type: "issue" | "project" | "receipt"; id: string }> {
     const threshold = this.clock() - THIRTY_DAYS;
-    let processed = 0;
-    for (const [id, issue] of this.issues)
-      if (
-        processed < CHUNK_SIZE &&
-        issue.userId === userId &&
-        issue.deletedAt !== null &&
-        issue.deletedAt < threshold
-      ) {
-        this.issues.delete(id);
-        processed += 1;
-      }
-    for (const [id, project] of this.projects)
-      if (
-        processed < CHUNK_SIZE &&
-        project.userId === userId &&
-        project.deletedAt !== null &&
-        project.deletedAt < threshold
-      ) {
-        this.projects.delete(id);
-        processed += 1;
-      }
-    for (const [key, receipt] of this.receipts)
-      if (processed < CHUNK_SIZE && receipt.userId === userId && receipt.expiresAt < threshold) {
-        this.receipts.delete(key);
-        processed += 1;
-      }
-    return processed;
+    return [
+      ...[...this.issues.values()]
+        .filter(
+          (issue) =>
+            issue.userId === userId && issue.deletedAt !== null && issue.deletedAt < threshold,
+        )
+        .map((issue) => ({ type: "issue" as const, id: issue.id })),
+      ...[...this.projects.values()]
+        .filter(
+          (project) =>
+            project.userId === userId &&
+            project.deletedAt !== null &&
+            project.deletedAt < threshold,
+        )
+        .map((project) => ({ type: "project" as const, id: project.id })),
+      ...[...this.receipts.entries()]
+        .filter(([, receipt]) => receipt.userId === userId && receipt.expiresAt < threshold)
+        .map(([id]) => ({ type: "receipt" as const, id })),
+    ];
   }
 
-  private runOutboxRetry(userId: string): number {
-    let processed = 0;
-    for (const event of this.outbox)
-      if (event.userId === userId && event.status === "pending" && processed < CHUNK_SIZE) {
-        event.status = "sent";
-        event.attemptCount += 1;
-        processed += 1;
+  private runPurge(userId: string): { processed: number; hasRemaining: boolean } {
+    const targets = this.purgeTargets(userId);
+    const chunk = targets.slice(0, CHUNK_SIZE);
+    for (const target of chunk) {
+      if (target.type === "issue") this.purgeIssue(userId, target.id);
+      if (target.type === "project") this.projects.delete(target.id);
+      if (target.type === "receipt") this.receipts.delete(target.id);
+    }
+    return { processed: chunk.length, hasRemaining: targets.length > chunk.length };
+  }
+
+  private purgeIssue(userId: string, issueId: string): void {
+    for (const [id, note] of this.notes) {
+      if (note.userId === userId && note.issueId === issueId) this.notes.delete(id);
+    }
+    for (const [id, relation] of this.relations) {
+      if (
+        relation.userId === userId &&
+        (relation.sourceIssueId === issueId || relation.targetIssueId === issueId)
+      )
+        this.relations.delete(id);
+    }
+    for (const [key, record] of this.recentIssueViews) {
+      if (record.userId === userId && record.issueId === issueId) this.recentIssueViews.delete(key);
+    }
+    for (let index = this.cycleHistory.length - 1; index >= 0; index -= 1) {
+      const history = this.cycleHistory[index];
+      if (history.userId === userId && history.issueId === issueId)
+        this.cycleHistory.splice(index, 1);
+    }
+    for (const child of this.issues.values()) {
+      if (child.userId === userId && child.parentId === issueId) {
+        child.parentId = null;
+        child.version += 1;
+        child.updatedAt = this.clock();
       }
-    return processed;
+    }
+    this.issues.delete(issueId);
+  }
+
+  private runOutboxRetry(userId: string): { processed: number; hasRemaining: boolean } {
+    const targets = this.outbox.filter(
+      (event) => event.userId === userId && event.status === "pending",
+    );
+    const chunk = targets.slice(0, CHUNK_SIZE);
+    for (const event of chunk) {
+      event.status = "sent";
+      event.attemptCount += 1;
+    }
+    return { processed: chunk.length, hasRemaining: targets.length > chunk.length };
   }
 
   publicRun(run: BackgroundRun): PublicRunSummary {

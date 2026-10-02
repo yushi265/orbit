@@ -21,7 +21,7 @@ main `15eb0eb` のローカルD1・ブラウザレビューで整理した19件�
 - **AC-5**: Darkの親子Issue欄はテーマに対応した背景と読める文字色を使う。
 - **AC-6**: Issue詳細・Composer・Command Paletteの初期Focus、Tab巡回、復帰とEscapeがDialogの境界を守る。
 - **AC-7**: Issue Filter・Mode・OrderをURLから復元し、詳細往復・再読込で保持する。
-- **AC-8**: 期限の入力・表示・UI Filter・検索APIが同じ暦日を扱う。既存値の意味は人間確認後に契約を確定する。
+- **AC-8**: 期限を時刻を持たない日付として扱い、入力した暦日をTimezone変更後も維持する。入力・表示・UI Filter・検索APIは同じ暦日判定を行う。
 - **AC-9**: 25件超のPurge/Outbox対象を同じRunで処理し、対象が残る間はStepを完了しない。cursor再送はNo-opである。
 - **AC-10**: Cycle完了時に501件以上のUnstarted/Startedも漏れなく次Cycleへ繰り越す。
 - **AC-11**: Purgeで対象IssueのNote/Relation/Recent等を削除し、生存する子Issueの親参照を解除する。
@@ -37,6 +37,8 @@ main `15eb0eb` のローカルD1・ブラウザレビューで整理した19件�
 ## 判断根拠・既存実装との関係
 
 既存OrbitStore/SnapshotとAPI Envelopeを維持する。表示用listIssuesのlimitを業務対象の抽出へ流用しない。Runの既存cursor・Lease・同時Request CASを再利用する。新しい外部サービス・DB Migrationは追加しない。Run進捗取得・URL状態・Focus trapは既存MVP specの契約を満たす修正とする。
+
+期限はユーザー回答「期限は日付で扱う」により、既存UIが保存してきたUTC midnightの数値を暦日のcarrierとして維持する。既存値のUTC年月日をそのまま期限日と解釈し、Migrationを行わない。今日の判定だけは本人Timezoneの現在の暦日を使う。
 
 ## テスト戦略
 

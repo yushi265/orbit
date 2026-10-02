@@ -39,6 +39,7 @@
 
 ## 再利用可能な部品
 
+- 画面の幅/高さはstyles.cssで制約する。DetailはDesktop90vw/Mobilegutter内、Dueは小幅でも2行目に表示、Sidebarは100dvh内でnavをscrollする。長いProject名は自然折返し、操作はnowrap。Darkのdetail-countとuser-card strongはテーマ変数を使う（参照: `src/styles.css`、`docs/spec/FEAT-review-followup/`）。
 - URLを含むメモ/説明は`LinkifiedText`を使い、http/httpsとReact text escaping/blank noopener noreferrerを共通化する。説明textareaの原文保存を維持し、安全URLがある場合だけPreviewを併設する（参照: `src/components/LinkifiedText.tsx`、`src/components/linkified-text.ts`）。
 - Issue期限は`src/shared/issue-dates.ts`で保存値のUTC暦日を維持し、todayだけ本人Timezoneの現在暦日へ変換する。UI/service共通FilterとHome集計を使う。数値dueAtは日付carrierであり、Timezoneへ変換するtimestampではない（参照: `src/shared/issue-dates.ts`、`src/server/issue-date-filter.test.ts`、`src/components/issue-dates-runtime.test.ts`）。
 - BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
@@ -60,6 +61,7 @@
 
 ## 既知の罠
 
+- Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
 - `pnpm format:check` はハーネス配下の既存ソースまで対象にするとoxfmtのバージョン差で失敗するため、root scriptはアプリ実装（`src public drizzle` と設定ファイル）だけを対象にする（出典: `package.json`）。
 - Cloudflare Vite pluginのSSR buildはWranglerログをユーザープリファレンスへ書こうとするため、制限環境では `WRANGLER_LOG_PATH` を明示して検証する（出典: Stage 5実行ログ）。
 - TanStack Startのproduction配信用生成物は`CLOUDFLARE_ENV=production pnpm build`で作る。通常の`pnpm build`後にWrangler dry-runを実行すると、生成された`dist/server/wrangler.json`の`APP_ENV`が`development`になる（参照: `package.json`、`dist/server/wrangler.json`）。
@@ -86,8 +88,6 @@
 - Node防壁・ブラウザログとnative全プロセスの通信試行監査は別物。OS遮断下の機能動作は確認済みだが、全native試行監査は現環境で陽性対照が成立せずAC-7未完了（参照: `docs/spec/FEAT-local-only/verification.md`）。
 
 ## 最終更新
-
-- Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
 
 FIX-main-review / FEAT-review-followup修正 / 2026-10-03
 

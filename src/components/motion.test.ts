@@ -35,27 +35,9 @@ const reducedMotionPageRule =
   "";
 const reducedMotionDeclarations = parseDeclarations(reducedMotionPageRule);
 const pageMotionDeclarations = parseDeclarations(pageMotionRule);
-const animationName = pageMotionDeclarations.get("animation")?.match(/^[\w-]+/)?.[0];
-const keyframes = animationName
-  ? styles.match(
-      new RegExp(
-        `@keyframes\\s+${escapeRegExp(animationName)}\\s*\\{\\s*from\\s*\\{([^}]*)\\}\\s*to\\s*\\{([^}]*)\\}\\s*\\}`,
-        "s",
-      ),
-    )
-  : null;
 
-describe("page entrance motion CSS contract", () => {
-  it("[代表値] .page has a one-time eased entrance animation", () => {
-    const animation = pageMotionDeclarations.get("animation") ?? "";
-    const duration = animation.match(/(?:^|\s)(\d*\.?\d+)(ms|s)(?=\s|$)/);
-    const durationMilliseconds = Number(duration?.[1]) * (duration?.[2] === "s" ? 1000 : 1);
-    const cubicBezierValues =
-      animation
-        .match(/cubic-bezier\(([^)]*)\)/)?.[1]
-        ?.split(",")
-        .map((value) => Number(value.trim())) ?? [];
-
+describe("page visibility and motion CSS contract", () => {
+  it("[代表値] keeps page content visible without replaying an entrance animation", () => {
     expect(pageRuleBlocks.length).toBeGreaterThan(0);
     expect(
       pageRuleBlocks.every(
@@ -66,32 +48,15 @@ describe("page entrance motion CSS contract", () => {
       ),
     ).toBe(true);
     expect(pageMotionDeclarations.get("position")).toBe("relative");
-    expect(animation).toMatch(/\b[\w-]+\b/);
-    expect(duration).not.toBeNull();
-    expect(durationMilliseconds).toBeGreaterThanOrEqual(700);
-    expect(cubicBezierValues).toHaveLength(4);
-    expect(cubicBezierValues.every(Number.isFinite)).toBe(true);
-    expect(cubicBezierValues[0]).toBeGreaterThanOrEqual(0);
-    expect(cubicBezierValues[0]).toBeLessThanOrEqual(1);
-    expect(cubicBezierValues[2]).toBeGreaterThanOrEqual(0);
-    expect(cubicBezierValues[2]).toBeLessThanOrEqual(1);
-    expect(cubicBezierValues[1]).toBeGreaterThanOrEqual(0.75);
-    expect(cubicBezierValues[3]).toBeGreaterThanOrEqual(cubicBezierValues[1]);
-    expect(animation.split(/\s+/)).toContain("both");
-    expect(pageMotionDeclarations.get("animation-iteration-count")).toBe("1");
-    expect(animation).not.toMatch(/\binfinite\b/);
+    expect(pageMotionDeclarations.has("animation")).toBe(false);
+    expect(pageMotionDeclarations.has("animation-iteration-count")).toBe(false);
   });
 
-  it("[状態遷移] enters from transparent and slightly below its resting position", () => {
-    const fromDeclarations = parseDeclarations(keyframes?.[1] ?? "");
-    const toDeclarations = parseDeclarations(keyframes?.[2] ?? "");
-
-    expect(animationName).toBeTruthy();
-    expect(keyframes).not.toBeNull();
-    expect(fromDeclarations.get("opacity")).toBe("0");
-    expect(parseCssPixels(fromDeclarations.get("top"))).toBeGreaterThanOrEqual(16);
-    expect(toDeclarations.get("opacity")).toBe("1");
-    expect(parseCssPixels(toDeclarations.get("top"))).toBe(0);
+  it("[状態遷移] does not hide or offset page content on route changes", () => {
+    expect(pageMotionDeclarations.has("opacity")).toBe(false);
+    expect(pageMotionDeclarations.has("top")).toBe(false);
+    expect(pageMotionDeclarations.has("transform")).toBe(false);
+    expect(styles).not.toMatch(/@keyframes\s+orbit-page-enter\b/);
   });
 
   it("[デシジョンテーブル] disables the new motion for reduced-motion users", () => {

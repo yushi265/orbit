@@ -1,6 +1,37 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import appCss from "./styles.css?url";
+import { Route } from "./routes/__root";
+
+vi.mock("./styles.css?url", () => ({ default: "/assets/styles-abc123.css" }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("root stylesheet URL", () => {
+  it("[状態遷移] developmentはViteのstylesheet URLをquery追加せず配信する", async () => {
+    vi.stubEnv("DEV", true);
+
+    const head = await Route.options.head?.({} as never);
+    const stylesheet = head?.links?.find((link) => link?.rel === "stylesheet");
+
+    expect(stylesheet?.href).toBe(appCss);
+    expect(new URL(stylesheet!.href!, "https://orbit.test").searchParams.has("v")).toBe(false);
+  });
+
+  it("[状態遷移] productionはViteのasset URLと既存versionを維持する", async () => {
+    vi.stubEnv("DEV", false);
+
+    const head = await Route.options.head?.({} as never);
+    const stylesheet = head?.links?.find((link) => link?.rel === "stylesheet");
+    const url = new URL(stylesheet!.href!, "https://orbit.test");
+
+    expect(url.pathname).toBe(new URL(appCss, "https://orbit.test").pathname);
+    expect(url.searchParams.get("v")).toBe("5");
+  });
+});
 
 describe("PWA manifest", () => {
   it("ships raster icons required by Chromium installability checks", () => {

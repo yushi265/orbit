@@ -82,6 +82,8 @@
 
 ## 最終更新
 
+- Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
+
 FIX-main-reviewのP1修正 / 2026-10-02
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

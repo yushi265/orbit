@@ -7,6 +7,7 @@ import {
 import { resolveRuntimeConfig } from "./runtime-config";
 import { conflict } from "./errors";
 import { runtimeEnv } from "./auth";
+import { decodeStoreSnapshot, encodeStoreSnapshot } from "./store-snapshot-compat";
 import { getOrbitStore, OrbitStore } from "./store";
 
 export interface StoreSession {
@@ -45,7 +46,9 @@ export async function openStoreSession(
       `${config.mode === "production" ? "Production" : "Local"} D1 binding is missing`,
     );
   const row = await readStoreSnapshot(database, userId);
-  const store = row ? OrbitStore.fromSnapshot(row.snapshot, undefined, userId) : new OrbitStore();
+  const store = row
+    ? OrbitStore.fromSnapshot(decodeStoreSnapshot(row.snapshot), undefined, userId)
+    : new OrbitStore();
   const initialSnapshotJson = row ? JSON.stringify(store.toSnapshot()) : null;
   store.ensureOwner(userId, email);
   store.ensureUpcomingCycles(userId);
@@ -69,7 +72,13 @@ export async function openStoreSession(
         return;
       }
       try {
-        await writeStoreSnapshot(database, userId, expectedVersion, snapshot, Date.now());
+        await writeStoreSnapshot(
+          database,
+          userId,
+          expectedVersion,
+          encodeStoreSnapshot(snapshot),
+          Date.now(),
+        );
         persisted = true;
         needsInitialPersist = false;
         store.clearBackgroundStateChanges();

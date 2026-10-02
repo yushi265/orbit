@@ -59,6 +59,14 @@
 - Issue experience polish: PriorityはListで`PriorityIcon`へ変換し、IME変換中のEnterは`isComposing` / `keyCode 229`でsubmitを抑止する。ColorThemeは`data-color-theme`とCSS変数へ反映し、旧Snapshotの欠落値はCoralへ補完する（参照: `src/components/issue-priority.ts`、`src/components/issue-composer.ts`、`src/components/OrbitApp.tsx`、`src/server/store.ts`）。
 - Home actionable dashboard: Home専用APIを増やさず、BootstrapのTimezone・Cycle・Project・Issueから期限超過 / 今日 / 7日以内 / Current Cycle / 最近更新を導出する。各カードは既存Issue / Cycle / Project routeへ遷移し、空状態には次の操作を示す（参照: `src/components/home.ts`、`src/components/OrbitApp.tsx`）。
 
+## Snapshotの旧版互換保存
+
+- D1 Sessionのread/write直前に`decodeStoreSnapshot` / `encodeStoreSnapshot`を挟む。domainの`OrbitStore.toSnapshot/fromSnapshot`やRun chunk復元は元のSnapshotを扱い、UI/APIへ互換metaを出さない（参照: `src/server/store-snapshot-compat.ts`、`src/server/store-session.ts`）。
+- 新Project sortと`next7`は旧enumへ投影する。`__orbitRollback`は各record siblingへ元値・投影anchor・同Owner/record/operationのReceipt keyを保存し、旧Storeの通常serializationで保持する。top-level metaやstrict settings/query内のmetaは使用しない。
+- Project/Recentのanchorまたは関連Receipt key追加は旧明示編集を優先する。Viewはqueryのlayoutを除いて比較し、rename/layout編集では新queryと現在layoutを両方維持する。queryを含むview.updateの新Receiptだけを明示query変更と数える。
+- Receipt自体のsidecarだけが元retry応答を復元する。旧Storeがresponseへcloneしたrecord sidecarは既知形式を検証してstripし、旧応答を維持する。未知version/Owner/id/schema/投影不一致は固定Errorでsessionを拒否し、D1を上書きしない。
+- 同msの同fallback再保存はReceipt追加で判断する。旧rollback中はMaintenanceを実行せず、根拠Receiptが残存する前提を守る。通常rollbackは終了Run境界でWorker Versionだけを戻し、更新後のD1をDB復元で巻き戻さない（参照: `docs/deployment.md`、`docs/spec/FIX-rollback-compatibility/service.md`）。
+
 ## 既知の罠
 
 - Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
@@ -89,6 +97,6 @@
 
 ## 最終更新
 
-FIX-main-review / FEAT-review-followup修正 / 2026-10-03
+FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

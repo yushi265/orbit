@@ -49,6 +49,7 @@ import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown"
 import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
+  countActiveIssueFilters,
   filterCompletedIssues,
   filterIssues,
   filterProjectIssues,
@@ -1807,6 +1808,7 @@ function Sidebar({
         </button>
         <button
           className={`nav-item ${section === "settings" ? "active" : ""}`}
+          aria-current={section === "settings" ? "page" : undefined}
           onClick={() => onNavigate("settings")}
         >
           <span className="nav-icon">
@@ -1827,6 +1829,8 @@ function Sidebar({
   );
 }
 
+const mobileMenuSections: Section[] = ["issues", "cycles", "projects", "views", "settings"];
+
 function MobileNav({
   section,
   unread,
@@ -1838,31 +1842,95 @@ function MobileNav({
   onNavigate: (section: Section) => void;
   onCreate: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuActive = mobileMenuSections.includes(section);
   return (
-    <nav className="mobile-nav">
-      <NavItem item="home" active={section === "home"} onClick={() => onNavigate("home")} />
-      <NavItem
-        item="inbox"
-        active={section === "inbox"}
-        onClick={() => onNavigate("inbox")}
-        badge={unread}
-      />
-      <NavItem
-        item="projects"
-        active={section === "projects"}
-        onClick={() => onNavigate("projects")}
-      />
-      <button className="mobile-create" onClick={onCreate}>
-        ＋
-      </button>
-      <NavItem item="cycles" active={section === "cycles"} onClick={() => onNavigate("cycles")} />
-      <NavItem item="search" active={section === "search"} onClick={() => onNavigate("search")} />
-      <NavItem
-        item="settings"
-        active={section === "settings"}
-        onClick={() => onNavigate("settings")}
-      />
-    </nav>
+    <>
+      <nav className="mobile-nav">
+        <NavItem item="home" active={section === "home"} onClick={() => onNavigate("home")} />
+        <NavItem
+          item="inbox"
+          active={section === "inbox"}
+          onClick={() => onNavigate("inbox")}
+          badge={unread}
+        />
+        <button className="mobile-create" aria-label="Issueを作成" onClick={onCreate}>
+          ＋
+        </button>
+        <NavItem item="search" active={section === "search"} onClick={() => onNavigate("search")} />
+        <button
+          className={`nav-item mobile-menu-tab ${menuActive ? "active" : ""}`}
+          aria-haspopup="dialog"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)}
+        >
+          <span className="nav-icon">☰</span>
+          <span>Menu</span>
+        </button>
+      </nav>
+      {menuOpen && (
+        <MobileMenuSheet
+          section={section}
+          onNavigate={onNavigate}
+          onClose={() => setMenuOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function MobileMenuSheet({
+  section,
+  onNavigate,
+  onClose,
+}: {
+  section: Section;
+  onNavigate: (section: Section) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogBoundary(ref, { initialFocus: ".nav-item", onEscape: onClose });
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const close = (event: { matches: boolean }) => {
+      if (event.matches) onClose();
+    };
+    media.addEventListener("change", close);
+    return () => media.removeEventListener("change", close);
+  }, [onClose]);
+  return (
+    <div
+      className="modal-backdrop mobile-menu-backdrop"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={ref}
+        className="mobile-menu-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label="メニュー"
+      >
+        <div className="mobile-menu-head">
+          <strong>メニュー</strong>
+          <button className="icon-button" aria-label="メニューを閉じる" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        {mobileMenuSections.map((item) => (
+          <NavItem
+            key={item}
+            item={item}
+            active={section === item}
+            onClick={() => {
+              void onNavigate(item);
+              onClose();
+            }}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1878,7 +1946,11 @@ function NavItem({
   badge?: number;
 }) {
   return (
-    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}>
+    <button
+      className={`nav-item ${active ? "active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+    >
       <span className="nav-icon">{sectionIcons[item]}</span>
       <span>{sectionLabels[item]}</span>
       {badge > 0 && <span className="nav-badge">{badge}</span>}
@@ -2349,6 +2421,36 @@ export function IssuesView({
   );
   const [bulkValue, setBulkValue] = useState("");
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const filterSheetRef = useRef<HTMLDivElement>(null);
+  const filterSheetButtonRef = useRef<HTMLButtonElement>(null);
+  const filterSheetWasOpen = useRef(false);
+  useDialogBoundary(filterSheetRef, {
+    enabled: filterSheetOpen,
+    initialFocus: "select",
+    onEscape: () => setFilterSheetOpen(false),
+  });
+  useEffect(() => {
+    if (filterSheetWasOpen.current && !filterSheetOpen) filterSheetButtonRef.current?.focus();
+    filterSheetWasOpen.current = filterSheetOpen;
+  }, [filterSheetOpen]);
+  useEffect(() => {
+    if (!filterSheetOpen) return;
+    const media = window.matchMedia("(min-width: 768px)");
+    const close = (event: { matches: boolean }) => {
+      if (event.matches) setFilterSheetOpen(false);
+    };
+    media.addEventListener("change", close);
+    return () => media.removeEventListener("change", close);
+  }, [filterSheetOpen]);
+  const activeFilterCount = countActiveIssueFilters({
+    status: statusFilter,
+    priority: priorityFilter,
+    project: showProjectFilter ? projectFilter : "all",
+    label: labelFilter,
+    due: dueFilter,
+    scope: showScopeFilter ? scope : "active",
+  });
   const [draggedIssueId, setDraggedIssueId] = useState<string | null>(null);
   const [dropTargetIssueId, setDropTargetIssueId] = useState<string | null>(null);
   const manualOrder = issueSort === "manual";
@@ -2428,120 +2530,181 @@ export function IssuesView({
           />
           <kbd>{modifierLabel} F</kbd>
         </div>
-        <select
-          className="filter-select"
-          id="issues-status-filter"
-          aria-label="Statusで絞り込む"
-          value={statusFilter}
-          disabled={displaySettingsBusy}
-          onChange={(event) => setStatusFilter(event.target.value)}
+        <button
+          ref={filterSheetButtonRef}
+          type="button"
+          className="filter-sheet-button"
+          aria-haspopup="dialog"
+          aria-expanded={filterSheetOpen}
+          onClick={() => setFilterSheetOpen(true)}
         >
-          <option value="all">すべてのStatus</option>
-          {workflowStates.map((state) => (
-            <option value={state.id} key={state.id}>
-              {state.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="filter-select"
-          id="issues-priority-filter"
-          aria-label="Priorityで絞り込む"
-          value={priorityFilter}
-          disabled={displaySettingsBusy}
-          onChange={(event) => setPriorityFilter(event.target.value as Issue["priority"] | "all")}
+          フィルター
+          {activeFilterCount > 0 && <span className="filter-count">{activeFilterCount}</span>}
+        </button>
+        <div
+          className={
+            filterSheetOpen ? "filter-fields-wrap filter-sheet-backdrop" : "filter-fields-wrap"
+          }
+          onClick={(event) => {
+            if (filterSheetOpen && event.target === event.currentTarget) setFilterSheetOpen(false);
+          }}
         >
-          <option value="all">すべてのPriority</option>
-          {Object.entries(priorityLabel).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        {showProjectFilter && (
-          <select
-            className="filter-select"
-            id="issues-project-filter"
-            aria-label="Projectで絞り込む"
-            value={projectFilter}
-            disabled={displaySettingsBusy}
-            onChange={(event) => setProjectFilter(event.target.value)}
+          <div
+            ref={filterSheetRef}
+            className={filterSheetOpen ? "filter-fields open" : "filter-fields"}
+            role={filterSheetOpen ? "dialog" : undefined}
+            aria-modal={filterSheetOpen ? true : undefined}
+            aria-label={filterSheetOpen ? "フィルター" : undefined}
           >
-            <option value="all">すべてのProject</option>
-            <option value={NO_PROJECT_OPTION}>Projectなし</option>
-            {projects.map((project) => (
-              <option value={project.id} key={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {showScopeFilter && (
-          <select
-            className="filter-select"
-            id="issues-scope-filter"
-            aria-label="Issueの表示範囲"
-            value={scope}
-            disabled={scopeLoading || displaySettingsBusy}
-            onChange={(event) => setScope(event.target.value as IssueListScope)}
-          >
-            <option value="active">Active Issues</option>
-            <option value="archived">Archived Issues</option>
-          </select>
-        )}
-        <select
-          className="filter-select"
-          aria-label="Labelで絞り込む"
-          value={labelFilter}
-          disabled={displaySettingsBusy}
-          onChange={(event) => setLabelFilter(event.target.value)}
-        >
-          <option value="all">すべてのLabel</option>
-          {labels.map((label) => (
-            <option value={label.id} key={label.id}>
-              {label.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="filter-select"
-          ref={displayInputRef}
-          id="issues-sort-select"
-          aria-label="Issueのソート"
-          value={issueSort}
-          disabled={displaySettingsBusy}
-          onChange={(event) => setIssueSort(event.target.value as IssueSort)}
-        >
-          {issueSortOptions.map((option) => (
-            <option value={option.value} key={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="filter-select"
-          id="issues-due-filter"
-          aria-label="Due dateで絞り込む"
-          value={dueFilter}
-          disabled={displaySettingsBusy}
-          onChange={(event) => setDueFilter(event.target.value as IssueDueFilter)}
-        >
-          <option value="all">すべての期限</option>
-          <option value="none">期限なし</option>
-          <option value="overdue">期限超過</option>
-          <option value="today">今日が期限</option>
-          <option value="upcoming">今後が期限</option>
-          <option value="next7">7日以内が期限</option>
-        </select>
-        <label className="completed-toggle">
-          <input
-            type="checkbox"
-            checked={showCompleted}
-            disabled={displaySettingsBusy}
-            onChange={(event) => setShowCompleted(event.target.checked)}
-          />
-          完了Issueを表示
-        </label>
+            {filterSheetOpen && <h2 className="filter-sheet-title">フィルター</h2>}
+            <label className="filter-field">
+              <span className="filter-field-label">Status</span>
+              <select
+                className="filter-select"
+                id="issues-status-filter"
+                aria-label="Statusで絞り込む"
+                value={statusFilter}
+                disabled={displaySettingsBusy}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
+                <option value="all">すべてのStatus</option>
+                {workflowStates.map((state) => (
+                  <option value={state.id} key={state.id}>
+                    {state.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-field">
+              <span className="filter-field-label">Priority</span>
+              <select
+                className="filter-select"
+                id="issues-priority-filter"
+                aria-label="Priorityで絞り込む"
+                value={priorityFilter}
+                disabled={displaySettingsBusy}
+                onChange={(event) =>
+                  setPriorityFilter(event.target.value as Issue["priority"] | "all")
+                }
+              >
+                <option value="all">すべてのPriority</option>
+                {Object.entries(priorityLabel).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {showProjectFilter && (
+              <label className="filter-field">
+                <span className="filter-field-label">Project</span>
+                <select
+                  className="filter-select"
+                  id="issues-project-filter"
+                  aria-label="Projectで絞り込む"
+                  value={projectFilter}
+                  disabled={displaySettingsBusy}
+                  onChange={(event) => setProjectFilter(event.target.value)}
+                >
+                  <option value="all">すべてのProject</option>
+                  <option value={NO_PROJECT_OPTION}>Projectなし</option>
+                  {projects.map((project) => (
+                    <option value={project.id} key={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {showScopeFilter && (
+              <label className="filter-field">
+                <span className="filter-field-label">表示範囲</span>
+                <select
+                  className="filter-select"
+                  id="issues-scope-filter"
+                  aria-label="Issueの表示範囲"
+                  value={scope}
+                  disabled={scopeLoading || displaySettingsBusy}
+                  onChange={(event) => setScope(event.target.value as IssueListScope)}
+                >
+                  <option value="active">Active Issues</option>
+                  <option value="archived">Archived Issues</option>
+                </select>
+              </label>
+            )}
+            <label className="filter-field">
+              <span className="filter-field-label">Label</span>
+              <select
+                className="filter-select"
+                aria-label="Labelで絞り込む"
+                value={labelFilter}
+                disabled={displaySettingsBusy}
+                onChange={(event) => setLabelFilter(event.target.value)}
+              >
+                <option value="all">すべてのLabel</option>
+                {labels.map((label) => (
+                  <option value={label.id} key={label.id}>
+                    {label.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-field">
+              <span className="filter-field-label">並び順</span>
+              <select
+                className="filter-select"
+                ref={displayInputRef}
+                id="issues-sort-select"
+                aria-label="Issueのソート"
+                value={issueSort}
+                disabled={displaySettingsBusy}
+                onChange={(event) => setIssueSort(event.target.value as IssueSort)}
+              >
+                {issueSortOptions.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-field">
+              <span className="filter-field-label">期限</span>
+              <select
+                className="filter-select"
+                id="issues-due-filter"
+                aria-label="Due dateで絞り込む"
+                value={dueFilter}
+                disabled={displaySettingsBusy}
+                onChange={(event) => setDueFilter(event.target.value as IssueDueFilter)}
+              >
+                <option value="all">すべての期限</option>
+                <option value="none">期限なし</option>
+                <option value="overdue">期限超過</option>
+                <option value="today">今日が期限</option>
+                <option value="upcoming">今後が期限</option>
+                <option value="next7">7日以内が期限</option>
+              </select>
+            </label>
+            <label className="completed-toggle">
+              <input
+                type="checkbox"
+                checked={showCompleted}
+                disabled={displaySettingsBusy}
+                onChange={(event) => setShowCompleted(event.target.checked)}
+              />
+              完了Issueを表示
+            </label>
+            {filterSheetOpen && (
+              <button
+                type="button"
+                className="filter-sheet-done"
+                onClick={() => setFilterSheetOpen(false)}
+              >
+                完了
+              </button>
+            )}
+          </div>
+        </div>
         <div className="toolbar-spacer" />
         <div className="view-toggle-group">
           <button

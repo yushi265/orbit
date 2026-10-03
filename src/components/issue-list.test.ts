@@ -6,6 +6,7 @@ import type {
 import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
+  countActiveIssueFilters,
   filterCompletedIssues,
   filterIssuesByProject,
   issueSortOptions,
@@ -375,4 +376,43 @@ describe("Issue list controls", () => {
       expect(issues.map((item) => item.id)).toEqual(["evening-old", "morning-new"]);
     },
   );
+});
+
+describe("countActiveIssueFilters", () => {
+  const none = {
+    status: "all",
+    priority: "all",
+    project: "all",
+    label: "all",
+    due: "all",
+  } as const;
+  it("[デシジョンテーブル] すべて all は 0、scope が active または省略でも 0", () => {
+    expect(countActiveIssueFilters(none)).toBe(0);
+    expect(countActiveIssueFilters({ ...none, scope: "active" })).toBe(0);
+  });
+  it.each([
+    ["status", "todo"],
+    ["priority", "high"],
+    ["project", "project-1"],
+    ["label", "label-1"],
+    ["due", "overdue"],
+  ] as const)("[デシジョンテーブル] %s だけ変えると 1", (key, value) => {
+    expect(countActiveIssueFilters({ ...none, [key]: value })).toBe(1);
+  });
+  it("[デシジョンテーブル] scope が archived で 1、project 省略は 0、全部指定で 6", () => {
+    expect(countActiveIssueFilters({ ...none, scope: "archived" })).toBe(1);
+    expect(
+      countActiveIssueFilters({ status: "all", priority: "all", label: "all", due: "all" }),
+    ).toBe(0);
+    expect(
+      countActiveIssueFilters({
+        status: "todo",
+        priority: "high",
+        project: "project-1",
+        label: "label-1",
+        due: "overdue",
+        scope: "archived",
+      }),
+    ).toBe(6);
+  });
 });

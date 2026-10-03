@@ -60,7 +60,7 @@ flowchart TD
 - HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。手動RunnerはHTTPで認証した`user_id`をRunへ保存し、各Chunkで所有者境界を再検証する。actorは`user` / `system:manual-run`として監査へ記録する。
 - 初回Deploy時にUUID v7の唯一の`users`行をBootstrapし、そのIDを`OWNER_USER_ID`へ設定する。Binding未設定、UUID不正、対応行なし、Access JWTの本人識別子が所有者と対応しない場合はFail closedとする。
 - D1 Outboxは同じWorkerのChunk処理で再送し、外部配送基盤や常駐Consumerには依存しない。未完了EventはRunのcursorとdedupe台帳で再処理する。
-- Accessセッション失効時は共通Fetch層で401を検知し、Client Routerではなく現在URLをTop-levelで再読込する。Window focus復帰時・Network再接続時・30秒周期にもServer stateを再検証する。
+- Accessセッション失効時は共通Fetch層で401を検知し、Client Routerではなく現在URLをTop-levelで再読込する。Window focus復帰時・タブの表示復帰時・Network再接続時・30秒周期にもServer stateを再検証する。Background Runの30秒周期は、タブが非表示で、進行中または再開待ちのRunを把握していない間は停止する。
 
 ## 9.3 API方針
 

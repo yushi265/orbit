@@ -45,6 +45,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(Date.UTC(2026, 9, 2, 3));
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/" });
+  // 表示中タブを模す。非表示タブは終端Runの定期再検証をスキップするため。
+  Object.defineProperty(dom.window.document, "hidden", { configurable: true, get: () => false });
   Object.defineProperty(dom.window, "matchMedia", {
     value: () => ({
       matches: false,

@@ -42,7 +42,7 @@ Issue Detail は専用 URL を正本とし、Desktop では Modal / Split view �
 | Issue 詳細 | `['issue', issueId]` → `issue.get` | detail を cache | 404 は Not Found、401 は Deep link を保持して再認証。 |
 | Cycle / Project / View | `['cycles', tab]` 等 → 各 Server Function | URL と Query cache を同期 | 423 は入力を確定せず、409 は再取得。 |
 | Issue Mutation | `issue.create / update / bulkUpdate` | `onMutate` で先行反映し、成功 Response で確定 | 409 は最新値再取得、423 は rollback せず処理中状態を維持、その他は snapshot rollback。 |
-| Background status | `['background-run', 'current']` → `GET /current` | 30 秒周期・focus 復帰・Network 再接続で再検証 | 401 は再認証、404 は current null と同じ安全な表示。 |
+| Background status | `['background-run', 'current']` → `GET /current` | 30 秒周期（非表示タブで非終端 Run を把握していない間は停止）・focus 復帰・表示復帰・Network 再接続で再検証 | 401 は再認証、404 は current null と同じ安全な表示。 |
 | Background continue | `POST /:id/continue` | `next = continue` の間だけ次呼出。terminal で停止 | expected cursor の敗者は現在進捗を採用、409 は Resume Card、423 は競合表示。 |
 
 検索入力は最大 300ms debounce 後に `search.issues` を呼び、検索 API p95 800ms 以下を Preview の性能検証で確認する。通常 API p95 は 500ms 以下を目標にする。

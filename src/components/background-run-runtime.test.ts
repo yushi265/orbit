@@ -109,6 +109,8 @@ beforeEach(() => {
   dom = new JSDOM("<!doctype html><div id='root'></div>", {
     url: "https://orbit.example/settings",
   });
+  // 既定は表示中タブ。jsdomは既定でdocument.hiddenがtrueのため、定期再検証の経路を通すには明示が要る。
+  Object.defineProperty(dom.window.document, "hidden", { configurable: true, get: () => false });
   vi.stubGlobal("window", dom.window);
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
@@ -426,5 +428,101 @@ describe("Background Run browser recovery", () => {
     await act(async () => finishStart(response({ run: runAt(10, "failed") })));
     expect(dom.window.document.body.textContent).toContain("処理の再開が必要です");
     expect(success).not.toHaveBeenCalled();
+  });
+
+  describe("非表示タブの定期再検証", () => {
+    function setHidden(hidden: boolean) {
+      Object.defineProperty(dom.window.document, "hidden", {
+        configurable: true,
+        get: () => hidden,
+      });
+    }
+    const visibilityChange = () =>
+      act(
+        async () =>
+          void dom.window.document.dispatchEvent(new dom.window.Event("visibilitychange")),
+      );
+    const currentCalls = (fetch: ReturnType<typeof stubApi>) =>
+      fetch.mock.calls.filter(([path]) => path === endpoints.current.path).length;
+    const settledApi = (run: PublicRunViewModel | null) =>
+      stubApi({
+        current: () =>
+          response({
+            run:
+              run && ["pending", "running", "paused", "failed"].includes(run.status) ? run : null,
+          }),
+        continue: () => response({ run: run!, next: "none" }),
+      });
+
+    it.each([
+      [true, "none", false],
+      [true, "succeeded", false],
+      [true, "rejected", false],
+      [true, "pending", true],
+      [true, "running", true],
+      [true, "paused", true],
+      [true, "failed", true],
+      [false, "none", true],
+      [false, "succeeded", true],
+      [false, "rejected", true],
+      [false, "pending", true],
+      [false, "running", true],
+      [false, "paused", true],
+      [false, "failed", true],
+    ] as const)(
+      "[デシジョンテーブル] hidden=%s かつ Run=%s の30秒経過時、current再検証は発生=%s",
+      async (hidden, status, polls) => {
+        const known = status === "none" ? null : runAt(50, status);
+        const fetch = settledApi(known);
+        setHidden(hidden);
+        await render(known);
+        await advance(1_000);
+        const before = currentCalls(fetch);
+        await advance(30_000);
+        expect(currentCalls(fetch) - before).toBe(polls ? 1 : 0);
+      },
+    );
+
+    it("[状態遷移] 非表示で停止し、表示に戻ると1回だけ再検証して以後30秒ごとに再開する", async () => {
+      const fetch = settledApi(null);
+      setHidden(true);
+      await render(null);
+      await advance(1_000);
+      const base = currentCalls(fetch);
+      await advance(90_000);
+      expect(currentCalls(fetch)).toBe(base);
+      setHidden(false);
+      await visibilityChange();
+      expect(currentCalls(fetch)).toBe(base + 1);
+      await advance(30_000);
+      expect(currentCalls(fetch)).toBe(base + 2);
+      await advance(30_000);
+      expect(currentCalls(fetch)).toBe(base + 3);
+    });
+
+    it("[代表値] 非表示になるvisibilitychangeでは再検証しない", async () => {
+      const fetch = settledApi(null);
+      setHidden(false);
+      await render(null);
+      await advance(1_000);
+      const base = currentCalls(fetch);
+      setHidden(true);
+      await visibilityChange();
+      expect(currentCalls(fetch)).toBe(base);
+    });
+
+    it("[代表値] unmount後のvisibilitychangeでは再検証しない", async () => {
+      const fetch = settledApi(null);
+      setHidden(true);
+      await render(null);
+      await advance(1_000);
+      const base = currentCalls(fetch);
+      const removeListener = vi.spyOn(dom.window.document, "removeEventListener");
+      await act(async () => root.unmount());
+      expect(removeListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+      setHidden(false);
+      await visibilityChange();
+      expect(currentCalls(fetch)).toBe(base);
+    });
   });
 });

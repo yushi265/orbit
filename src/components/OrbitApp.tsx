@@ -64,6 +64,7 @@ import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issu
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
+import { isImeComposing } from "./ime";
 import { projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
@@ -673,6 +674,7 @@ function OrbitAppInner(props: Props) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isImeComposing(event)) return;
       const target = event.target as HTMLElement;
       const editing =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
@@ -3655,6 +3657,7 @@ export function CyclesView({
   }
 
   function handleMetadataKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       cancelMetadataEdit();
@@ -3662,6 +3665,7 @@ export function CyclesView({
   }
 
   function handleScheduleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       cancelScheduleEdit();
@@ -4688,6 +4692,7 @@ export function ProjectsView({
               value={targetDraft}
               onChange={setTargetDraft}
               onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === "Escape") cancelEdit();
               }}
               disabled={saving}
@@ -4934,6 +4939,7 @@ export function SearchView({
             query && results[activeIndex] ? `search-result-${results[activeIndex].id}` : undefined
           }
           onKeyDown={(event) => {
+            if (isImeComposing(event)) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               setActiveIndex((current) => nextCommandIndex(results.length, current, 1));
@@ -6683,6 +6689,7 @@ export function SettingsView({
               value={labelName}
               onChange={(event) => setLabelName(event.target.value)}
               onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === "Escape") cancelLabelEdit();
                 if (event.key === "Enter") void saveLabel();
               }}
@@ -6695,6 +6702,7 @@ export function SettingsView({
               value={labelColor}
               onChange={(event) => setLabelColor(event.target.value)}
               onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === "Escape") cancelLabelEdit();
                 if (event.key === "Enter") void saveLabel();
               }}
@@ -6946,6 +6954,7 @@ function WorkflowSettingsCard({
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
           onKeyDown={(event) => {
+            if (isImeComposing(event)) return;
             if (event.key === "Enter") void createState();
           }}
           placeholder="例：Review"
@@ -8734,6 +8743,7 @@ export function CommandPalette({
               filtered[activeIndex] ? `command-option-${activeIndex}` : undefined
             }
             onKeyDown={(event) => {
+              if (isImeComposing(event)) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setActiveIndex((current) => nextCommandIndex(filtered.length, current, 1));

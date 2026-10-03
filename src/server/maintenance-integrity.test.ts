@@ -445,7 +445,8 @@ describe("Maintenance integrity", () => {
     );
     expect(store.cycleHistory.map((history) => history.issueId)).toEqual([child.id]);
     expect(child).toMatchObject({ parentId: null, version: childVersion + 1, updatedAt: now() });
-    expect(store.activities.filter((event) => event.entityId === parent.id)).toEqual(parentAudit);
+    expect(parentAudit.length).toBeGreaterThan(0);
+    expect(store.activities.filter((event) => event.entityId === parent.id)).toEqual([]);
     expect(store.outbox.filter((event) => event.payload.issueId === parent.id)).toEqual(
       parentOutbox,
     );

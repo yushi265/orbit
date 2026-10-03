@@ -169,7 +169,7 @@ MVP推奨ショートカット:
 - JSONまたはCSVでIssueをExportできる（Phase 2）
 - Issue、Project、通知、メモ、Saved Viewの削除は原則論理削除とし、Trashから30日以内に復元できる
 - `deleted_at`から30日を超えたデータは、MVPでは手動RunがD1をChunk処理して依存データとともに物理削除する。Jobは冪等とし、実行結果を監査イベントへ記録する
-- Mutation receiptは作成から30日後を`expires_at`とし、MVPでは手動RunがD1をChunk処理して物理削除する。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う
+- Mutation receiptは作成から24時間後を`expires_at`とし、Snapshot保存時に期限切れを自動で物理削除する（手動Runも`expires_at`超過分を削除する）。`expires_at`は削除対象になる時刻であり、期限到達後も物理削除までは同じ`idempotencyKey`を予約して保存済み応答またはKey再利用エラーを返す。削除後は新しいMutationとして扱う
 - D1 Time TravelおよびBackup上の保持は、アプリ内の30日復元期限には含めない
 
 ## 6.10 バックグラウンド処理

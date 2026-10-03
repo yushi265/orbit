@@ -72,6 +72,7 @@ import { queryClient } from "../lib/query";
 import { useBackgroundRun } from "./background-run";
 import { useDialogBoundary } from "./dialog-boundary";
 import { LinkifiedText } from "./LinkifiedText";
+import { OrbitDatePicker } from "./orbit-date-picker";
 import { linkifyText } from "./linkified-text";
 import {
   normalizeIssueSearch,
@@ -79,6 +80,17 @@ import {
   type IssueSearch,
   type ProjectSearch,
 } from "../lib/url-state/issues";
+
+function dismissOpenCalendar(container: HTMLElement | null): boolean {
+  const trigger = container
+    ?.querySelector(".orbit-calendar")
+    ?.closest(".orbit-date-picker")
+    ?.querySelector<HTMLButtonElement>(".orbit-calendar-trigger");
+  if (!trigger) return false;
+  trigger.click();
+  trigger.focus();
+  return true;
+}
 
 type Section =
   | "home"
@@ -3066,12 +3078,11 @@ function IssueRow({
             復元
           </button>
         ) : onUpdate && !compact ? (
-          <input
-            type="date"
-            aria-label={`${issue.identifier}のDue date`}
+          <OrbitDatePicker
+            label={`${issue.identifier}のDue date`}
             value={dateInputValue(issue.dueAt)}
             disabled={pending}
-            onChange={(event) => onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })}
+            onChange={(value) => onUpdate(issue, { dueAt: dateInputToUnix(value) })}
           />
         ) : issue.dueAt === null ? (
           "未設定"
@@ -3738,19 +3749,17 @@ export function CyclesView({
                   <label className="field-label" htmlFor="cycle-start-date">
                     開始日
                   </label>
-                  <input
+                  <OrbitDatePicker
                     id="cycle-start-date"
-                    className="text-input"
-                    type="date"
-                    aria-label="Cycle開始日"
-                    aria-invalid={Boolean(scheduleFieldErrors?.startDate)}
-                    aria-describedby={
+                    label="Cycle開始日"
+                    ariaInvalid={Boolean(scheduleFieldErrors?.startDate)}
+                    ariaDescribedBy={
                       scheduleFieldErrors?.startDate ? "cycle-start-date-error" : undefined
                     }
                     value={startDateDraft}
                     disabled={scheduleSaving}
-                    onChange={(event) => setStartDateDraft(event.target.value)}
-                    onInput={(event) => setStartDateDraft(event.currentTarget.value)}
+                    onChange={setStartDateDraft}
+                    onInput={setStartDateDraft}
                   />
                   {scheduleFieldErrors?.startDate && (
                     <span id="cycle-start-date-error" className="setting-field-error" role="alert">
@@ -3762,19 +3771,17 @@ export function CyclesView({
                   <label className="field-label" htmlFor="cycle-end-date">
                     終了日
                   </label>
-                  <input
+                  <OrbitDatePicker
                     id="cycle-end-date"
-                    className="text-input"
-                    type="date"
-                    aria-label="Cycle終了日"
-                    aria-invalid={Boolean(scheduleFieldErrors?.endDate)}
-                    aria-describedby={
+                    label="Cycle終了日"
+                    ariaInvalid={Boolean(scheduleFieldErrors?.endDate)}
+                    ariaDescribedBy={
                       scheduleFieldErrors?.endDate ? "cycle-end-date-error" : undefined
                     }
                     value={endDateDraft}
                     disabled={scheduleSaving}
-                    onChange={(event) => setEndDateDraft(event.target.value)}
-                    onInput={(event) => setEndDateDraft(event.currentTarget.value)}
+                    onChange={setEndDateDraft}
+                    onInput={setEndDateDraft}
                   />
                   {scheduleFieldErrors?.endDate && (
                     <span id="cycle-end-date-error" className="setting-field-error" role="alert">
@@ -4463,13 +4470,14 @@ export function ProjectsView({
             <label className="field-label" htmlFor="project-target-detail">
               Target date
             </label>
-            <input
+            <OrbitDatePicker
               id="project-target-detail"
-              className="text-input"
-              type="date"
+              label="Target date"
               value={targetDraft}
-              onChange={(event) => setTargetDraft(event.target.value)}
-              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              onChange={setTargetDraft}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") cancelEdit();
+              }}
               disabled={saving}
             />
             <button className="button primary" onClick={() => void saveProject()} disabled={saving}>
@@ -6137,7 +6145,7 @@ export function SettingsView({
             実行中はIssue、Cycle、Projectの変更が一時的にロックされます。読み取りと再認証は利用できます。
           </p>
         </section>
-        <section className="settings-card labels-settings-card">
+        <section id="settings-labels" className="settings-card labels-settings-card">
           <div className="settings-card-title">
             <span className="settings-icon purple">●</span>
             <div>
@@ -6727,7 +6735,9 @@ export function IssueDetailPanel({
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogBoundary(dialogRef, {
     initialFocus: "#issue-detail-title",
-    onEscape: () => void closePanel(),
+    onEscape: () => {
+      if (!dismissOpenCalendar(dialogRef.current)) void closePanel();
+    },
   });
   const detailQuery = useQuery({
     queryKey: ["issue-detail", issueId],
@@ -7086,6 +7096,13 @@ export function IssueDetailPanel({
         resetScroll: false,
       });
     } else await router.navigate({ to: path as never });
+  }
+
+  async function openLabelSettings() {
+    await navigateAfterDescriptionSave("/settings");
+    window.requestAnimationFrame(() =>
+      document.getElementById("settings-labels")?.scrollIntoView({ block: "start" }),
+    );
   }
 
   async function closePanel() {
@@ -7511,52 +7528,26 @@ export function IssueDetailPanel({
                 <label className="field-label" htmlFor="issue-due-date">
                   Due date
                 </label>
-                <input
+                <OrbitDatePicker
                   id="issue-due-date"
-                  type="date"
-                  aria-label="IssueのDue date"
+                  label="IssueのDue date"
                   value={dateInputValue(issue.dueAt)}
                   disabled={pending || saving}
-                  onChange={(event) =>
+                  onChange={(value) =>
                     void updateIssueAfterDescriptionSave({
-                      dueAt: dateInputToUnix(event.target.value),
+                      dueAt: dateInputToUnix(value),
                     })
                   }
                 />
-                <label className="field-label" htmlFor="issue-parent">
-                  Parent Issue
-                </label>
-                <select
-                  id="issue-parent"
-                  aria-label="IssueのParent"
-                  value={issue.parentId ?? ""}
-                  disabled={pending || saving}
-                  onChange={(event) =>
-                    void updateIssueAfterDescriptionSave({
-                      parentId: event.target.value || null,
-                    })
-                  }
-                >
-                  <option value="">Parentなし</option>
-                  {knownIssues
-                    .filter(
-                      (candidate) =>
-                        candidate.id !== issue.id &&
-                        candidate.deletedAt === null &&
-                        candidate.archivedAt === null,
-                    )
-                    .map((candidate) => (
-                      <option value={candidate.id} key={candidate.id}>
-                        {candidate.identifier} · {candidate.title}
-                      </option>
-                    ))}
-                </select>
               </div>
               <fieldset
                 className="detail-label-editor"
                 disabled={pending || saving || propertySaving}
               >
                 <legend className="field-label">Labels</legend>
+                {labels.some((label) => label.userId === issue.userId) && (
+                  <span className="detail-label-hint">選択すると自動保存します</span>
+                )}
                 {labels
                   .filter((label) => label.userId === issue.userId)
                   .map((label) => (
@@ -7579,54 +7570,19 @@ export function IssueDetailPanel({
                     </label>
                   ))}
                 {labels.filter((label) => label.userId === issue.userId).length === 0 && (
-                  <span className="detail-empty">Labelはありません。</span>
+                  <span className="detail-label-empty">
+                    <span>Labelはまだありません。</span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      aria-label="Label設定を開く"
+                      onClick={() => void openLabelSettings()}
+                    >
+                      Labelを作成する →
+                    </button>
+                  </span>
                 )}
               </fieldset>
-              {detail && (
-                <section className="issue-hierarchy" aria-label="親子Issue">
-                  <div className="detail-section-heading">
-                    <div>
-                      <span className="eyebrow">HIERARCHY</span>
-                      <h3>親子Issue</h3>
-                    </div>
-                    <span className="detail-count">{detail.children.length}</span>
-                  </div>
-                  {detail.parent && (
-                    <button
-                      className="text-button hierarchy-parent"
-                      onClick={() =>
-                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
-                      }
-                    >
-                      ↑ {detail.parent.identifier} · {detail.parent.title}
-                    </button>
-                  )}
-                  <p className="child-progress-summary">
-                    子Issue {detail.childProgress.completed} / {detail.childProgress.total} 完了 （
-                    {detail.childProgress.progressPercent}%）
-                  </p>
-                  <div className="child-issue-list">
-                    {detail.children.map((child) => (
-                      <button
-                        className="text-button child-issue-link"
-                        key={child.id}
-                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
-                      >
-                        {child.identifier} · {child.title}
-                      </button>
-                    ))}
-                    {detail.children.length === 0 && (
-                      <p className="detail-empty">Sub-issueはまだありません。</p>
-                    )}
-                  </div>
-                </section>
-              )}
-              {detail && (
-                <IssueCycleHistorySection
-                  cycleHistory={detail.cycleHistory}
-                  carryoverCount={detail.carryoverCount}
-                />
-              )}
               <label className="detail-label" htmlFor="issue-description">
                 Description
               </label>
@@ -7759,6 +7715,81 @@ export function IssueDetailPanel({
                   )}
                 </div>
               </section>
+              <div className="detail-property-editor issue-parent-editor">
+                <label className="field-label" htmlFor="issue-parent">
+                  Parent Issue
+                </label>
+                <select
+                  id="issue-parent"
+                  aria-label="IssueのParent"
+                  value={issue.parentId ?? ""}
+                  disabled={pending || saving}
+                  onChange={(event) =>
+                    void updateIssueAfterDescriptionSave({
+                      parentId: event.target.value || null,
+                    })
+                  }
+                >
+                  <option value="">Parentなし</option>
+                  {knownIssues
+                    .filter(
+                      (candidate) =>
+                        candidate.id !== issue.id &&
+                        candidate.deletedAt === null &&
+                        candidate.archivedAt === null,
+                    )
+                    .map((candidate) => (
+                      <option value={candidate.id} key={candidate.id}>
+                        {candidate.identifier} · {candidate.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              {detail && (
+                <section className="issue-hierarchy" aria-label="親子Issue">
+                  <div className="detail-section-heading">
+                    <div>
+                      <span className="eyebrow">HIERARCHY</span>
+                      <h3>親子Issue</h3>
+                    </div>
+                    <span className="detail-count">{detail.children.length}</span>
+                  </div>
+                  {detail.parent && (
+                    <button
+                      className="text-button hierarchy-parent"
+                      onClick={() =>
+                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
+                      }
+                    >
+                      ↑ {detail.parent.identifier} · {detail.parent.title}
+                    </button>
+                  )}
+                  <p className="child-progress-summary">
+                    子Issue {detail.childProgress.completed} / {detail.childProgress.total} 完了 （
+                    {detail.childProgress.progressPercent}%）
+                  </p>
+                  <div className="child-issue-list">
+                    {detail.children.map((child) => (
+                      <button
+                        className="text-button child-issue-link"
+                        key={child.id}
+                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
+                      >
+                        {child.identifier} · {child.title}
+                      </button>
+                    ))}
+                    {detail.children.length === 0 && (
+                      <p className="detail-empty">Sub-issueはまだありません。</p>
+                    )}
+                  </div>
+                </section>
+              )}
+              {detail && (
+                <IssueCycleHistorySection
+                  cycleHistory={detail.cycleHistory}
+                  carryoverCount={detail.carryoverCount}
+                />
+              )}
               <section className="detail-section">
                 <div className="detail-section-heading">
                   <div>
@@ -7938,7 +7969,12 @@ export function IssueComposer({
   busy: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogBoundary(dialogRef, { initialFocus: "textarea", onEscape: onClose });
+  useDialogBoundary(dialogRef, {
+    initialFocus: "textarea",
+    onEscape: () => {
+      if (!dismissOpenCalendar(dialogRef.current)) onClose();
+    },
+  });
   return (
     <div
       ref={dialogRef}
@@ -8033,13 +8069,11 @@ export function IssueComposer({
             <label className="field-label" htmlFor="new-issue-due-date">
               Due date
             </label>
-            <input
+            <OrbitDatePicker
               id="new-issue-due-date"
-              type="date"
-              aria-label="新しいIssueのDue date"
-              className="text-input"
+              label="新しいIssueのDue date"
               value={dateInputValue(dueAt)}
-              onChange={(event) => setDueAt(dateInputToUnix(event.target.value))}
+              onChange={(value) => setDueAt(dateInputToUnix(value))}
             />
             <label className="field-label" htmlFor="new-issue-parent">
               Parent Issue

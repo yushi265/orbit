@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 const orbitApp = readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
+const datePicker = readFileSync(
+  resolve(process.cwd(), "src/components/orbit-date-picker.tsx"),
+  "utf8",
+);
 
 describe("responsive issue layout contract", () => {
   it("[境界値] mobileのIssue一覧は本文幅を確保し期限を2行目で編集できる", () => {
@@ -41,6 +45,13 @@ describe("responsive issue layout contract", () => {
     );
   });
 
+  it("[境界値] 詳細の閉じる操作は固定し、Composerは画面幅に応じて広がる", () => {
+    expect(styles).toContain(".composer.modal-panel { width: 90vw;");
+    expect(styles).toContain(".detail-header { position: sticky; top: 0;");
+    expect(styles).toContain(".detail-close { flex: 0 0 44px;");
+    expect(styles).toContain("@media (max-width: 767px) { .composer.modal-panel { width: 100%; }");
+  });
+
   it("[境界値] Cycle日付編集はmobileで1列へ縮退し固定幅を持たない", () => {
     expect(styles).toContain(
       ".cycle-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));",
@@ -48,8 +59,8 @@ describe("responsive issue layout contract", () => {
     expect(styles).toContain(
       "@media (max-width: 767px) { .cycle-schedule-fields { grid-template-columns: minmax(0, 1fr); } }",
     );
-    expect(orbitApp).toContain('type="date"');
-    expect(orbitApp).toContain('aria-label="Cycle開始日"');
-    expect(orbitApp).toContain('aria-label="Cycle終了日"');
+    expect(datePicker).toContain('type="date"');
+    expect(orbitApp).toContain('label="Cycle開始日"');
+    expect(orbitApp).toContain('label="Cycle終了日"');
   });
 });

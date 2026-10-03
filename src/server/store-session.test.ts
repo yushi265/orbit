@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { readStoreSnapshot, writeStoreSnapshot } from "../db/repositories/store-snapshot";
 import { ServiceError } from "./errors";
 import { withOwner, json } from "./http";
+import { defaultProjectIssueDisplaySettings } from "../shared/contracts/project-display";
+import { encodeStoreSnapshot } from "./store-snapshot-compat";
 import { openStoreSession } from "./store-session";
 import { OrbitStore, resetOrbitStores, type OrbitStoreSnapshot } from "./store";
 
@@ -673,3 +675,123 @@ it("[同値分割] localのDB欠落・不正JSON・不正Snapshot・書込例外
     consoleError.mockRestore();
   }
 });
+
+it.each(["local", "production"])(
+  "[レイヤー内結合] %s D1 stores legacy settings but bootstrap and retries restore new settings without metadata",
+  async (APP_ENV) => {
+    const database = new FakeD1() as unknown as D1Database;
+    const environment = { APP_ENV, ORBIT_STORAGE: "d1", DB: database };
+    const owner = "owner-compat-session";
+    const first = await openStoreSession(owner, "compat@example.com", environment);
+    const project = first.store.createProject(owner, {
+      idempotencyKey: "compat-project",
+      name: "Compatibility",
+    });
+    const input = {
+      idempotencyKey: "compat-settings",
+      displayPreferences: {
+        ...defaultProjectIssueDisplaySettings(),
+        order: "priority_asc" as const,
+        dueFilter: "next7" as const,
+      },
+    };
+    const updated = first.store.updateProjectDisplayPreferences(owner, project.id, input);
+    first.store.createIssue(owner, {
+      idempotencyKey: "compat-issue",
+      title: "Date carrier",
+      dueAt: 1_800_007_200_000,
+    });
+    await first.persist();
+    const persisted = await readStoreSnapshot(database, owner);
+    expect(
+      (persisted!.snapshot as OrbitStoreSnapshot).projectDisplayPreferences[0].settings,
+    ).toMatchObject({ order: "priority_desc", dueFilter: "upcoming" });
+    expect(persisted!.version).toBe(1);
+    const second = await openStoreSession(owner, "compat@example.com", environment);
+    expect(second.needsInitialPersist).toBe(false);
+    expect(second.store.updateProjectDisplayPreferences(owner, project.id, input)).toEqual(updated);
+    expect(second.store.bootstrap(owner).projectDisplayPreferences[0].settings).toMatchObject({
+      order: "priority_asc",
+      dueFilter: "next7",
+    });
+    expect(second.store.listIssues(owner)[0].dueAt).toBe(1_800_007_200_000);
+    expect(JSON.stringify(second.store.toSnapshot())).not.toContain("__orbitRollback");
+    expect(JSON.stringify(second.store.bootstrap(owner))).not.toContain("__orbitRollback");
+    await second.persist();
+    expect((await readStoreSnapshot(database, owner))!.version).toBe(1);
+    expect(() =>
+      second.store.updateProjectDisplayPreferences(owner, project.id, {
+        ...input,
+        displayPreferences: { ...input.displayPreferences, order: "priority_desc" },
+      }),
+    ).toThrowError(expect.objectContaining({ code: "IDEMPOTENCY_KEY_REUSED" }));
+  },
+);
+it.each(["local", "production"])(
+  "[同値分割] %s rejects corrupt compatibility metadata before opening or overwriting its D1 row",
+  async (APP_ENV) => {
+    const database = new FakeD1() as unknown as D1Database;
+    const owner = "owner-corrupt-meta";
+    const store = new OrbitStore(() => 1_800_000_000_000);
+    store.ensureOwner(owner, "compat@example.com");
+    store.ensureUpcomingCycles(owner);
+    const project = store.createProject(owner, {
+      idempotencyKey: "corrupt-project",
+      name: "Corruption",
+    });
+    store.updateProjectDisplayPreferences(owner, project.id, {
+      idempotencyKey: "corrupt-settings",
+      displayPreferences: { ...defaultProjectIssueDisplaySettings(), order: "created_asc" },
+    });
+    const saved = encodeStoreSnapshot(store.toSnapshot()) as OrbitStoreSnapshot;
+    const item = saved.projectDisplayPreferences[0] as unknown as Record<string, unknown>;
+    (item.__orbitRollback as Record<string, unknown>).version = 999;
+    await writeStoreSnapshot(database, owner, 0, saved, 1_800_000_000_000);
+    const before = await readStoreSnapshot(database, owner);
+    await expect(
+      openStoreSession(owner, "compat@example.com", { APP_ENV, ORBIT_STORAGE: "d1", DB: database }),
+    ).rejects.toThrow("Invalid OrbitStore rollback metadata");
+    expect(await readStoreSnapshot(database, owner)).toEqual(before);
+  },
+);
+
+it.each([
+  ["local", "version"],
+  ["local", "owner"],
+  ["production", "version"],
+  ["production", "owner"],
+] as const)(
+  "[同値分割] %s does not overwrite a row with invalid old Receipt inner metadata (%s)",
+  async (APP_ENV, fault) => {
+    const database = new FakeD1() as unknown as D1Database;
+    const owner = "owner-corrupt-inner-meta";
+    const store = new OrbitStore(() => 1_800_000_000_000);
+    store.ensureOwner(owner, "compat@example.com");
+    store.ensureUpcomingCycles(owner);
+    const project = store.createProject(owner, { idempotencyKey: "inner-project", name: "Inner" });
+    store.updateProjectDisplayPreferences(owner, project.id, {
+      idempotencyKey: "inner-settings",
+      displayPreferences: { ...defaultProjectIssueDisplaySettings(), order: "created_asc" },
+    });
+    const saved = encodeStoreSnapshot(store.toSnapshot()) as OrbitStoreSnapshot;
+    const old = structuredClone(
+      saved.receipts.find((item) => item.operation === "project.displayPreferences.update")!,
+    );
+    old.idempotencyKey = "legacy-inner";
+    delete (old as unknown as Record<string, unknown>).__orbitRollback;
+    old.response = structuredClone(saved.projectDisplayPreferences[0]);
+    const inner = (old.response as Record<string, unknown>).__orbitRollback as Record<
+      string,
+      unknown
+    >;
+    if (fault === "version") inner.version = 2;
+    else inner.userId = "different-owner";
+    saved.receipts.push(old);
+    await writeStoreSnapshot(database, owner, 0, saved, 1_800_000_000_000);
+    const before = await readStoreSnapshot(database, owner);
+    await expect(
+      openStoreSession(owner, "compat@example.com", { APP_ENV, ORBIT_STORAGE: "d1", DB: database }),
+    ).rejects.toThrow("Invalid OrbitStore rollback metadata");
+    expect(await readStoreSnapshot(database, owner)).toEqual(before);
+  },
+);

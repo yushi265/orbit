@@ -6,13 +6,26 @@ export const projectIssueDisplayModeSchema = z.enum(["list", "board"]);
 export const projectIssueDisplayOrderSchema = z.enum([
   "manual",
   "updated_desc",
+  "updated_asc",
   "created_desc",
+  "created_asc",
   "title_asc",
+  "title_desc",
   "status_asc",
+  "status_desc",
   "priority_desc",
+  "priority_asc",
   "due_asc",
+  "due_desc",
 ]);
-export const projectIssueDueFilterSchema = z.enum(["all", "none", "overdue", "today", "upcoming"]);
+export const projectIssueDueFilterSchema = z.enum([
+  "all",
+  "none",
+  "overdue",
+  "today",
+  "upcoming",
+  "next7",
+]);
 
 const displaySelectionSchema = z.string().min(1);
 

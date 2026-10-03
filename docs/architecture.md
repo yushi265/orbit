@@ -31,6 +31,8 @@ MVPではSettingsのManual Runから冪等なservice処理を呼び出し、実�
 
 ## 依存方向
 
+Issue期限は日付のみとして扱う。`src/shared/issue-dates.ts`の共通判定をUI/serviceから利用し、保存値のUTC年月日を維持する。`dueAt`の数値型は既存互換のcarrierであり、Timezoneへ変換する時刻ではない。今日との比較は本人Timezoneの現在暦日で行う。
+
 ```
 ui  →  shared ← service → data
                    └── Manual Chunk Runner

@@ -1,5 +1,7 @@
 # FEAT-home-project-inbox-ux: ui 詳細設計
 
+> 2026-10-02の追加依頼で、Homeの表示名入り挨拶を除去し、主要カードの遷移条件を[FEAT-review-followup AC-1 / AC-8](../FEAT-review-followup/index.md)へ更新する。以下は初回実装時の記録。
+
 ## 担保 AC（[index.md](./index.md) の AC からの引用）
 
 - **AC-1**: Homeは本人の表示名と本人のTimezoneに基づく日付を表示し、期限超過、今日が期限、今日から7日以内が期限、Current Cycleの未完了Issue、更新日時順の最近更新Issueを、該当するものから確認できる。各Issueと主要カードからIssue一覧、Issue詳細、Cycle、Projectへ移動でき、該当0件の状態では次の操作を案内する。

@@ -2,21 +2,20 @@ import type { Priority } from "../shared/contracts";
 import type {
   ProjectIssueDisplaySettings,
   ProjectIssueDueFilter,
+  ProjectIssueDisplayOrder,
 } from "../shared/contracts/project-display";
 import type {
   IssueViewModel as Issue,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
 import { NO_PROJECT_OPTION } from "./issue-project";
+import {
+  calendarDateKeyInTimeZone,
+  issueDueDateKey,
+  matchesIssueDueDate,
+} from "../shared/issue-dates";
 
-export type IssueSort =
-  | "manual"
-  | "updated_desc"
-  | "created_desc"
-  | "title_asc"
-  | "status_asc"
-  | "priority_desc"
-  | "due_asc";
+export type IssueSort = ProjectIssueDisplayOrder;
 
 export type IssueDueFilter = ProjectIssueDueFilter;
 
@@ -32,11 +31,17 @@ export interface IssueFilterState {
 export const issueSortOptions: ReadonlyArray<{ value: IssueSort; label: string }> = [
   { value: "manual", label: "手動" },
   { value: "updated_desc", label: "更新日（新しい順）" },
+  { value: "updated_asc", label: "更新日（古い順）" },
   { value: "created_desc", label: "作成日（新しい順）" },
+  { value: "created_asc", label: "作成日（古い順）" },
   { value: "title_asc", label: "タイトル（昇順）" },
+  { value: "title_desc", label: "タイトル（降順）" },
   { value: "status_asc", label: "ステータス順" },
+  { value: "status_desc", label: "ステータス（逆順）" },
   { value: "priority_desc", label: "優先度（Urgent順）" },
+  { value: "priority_asc", label: "優先度（No priority順）" },
   { value: "due_asc", label: "期限（近い順）" },
+  { value: "due_desc", label: "期限（遠い順）" },
 ];
 
 const priorityRank: Record<Priority, number> = {
@@ -67,26 +72,7 @@ export function filterIssuesByProject(issues: readonly Issue[], projectFilter: s
   return issues.filter((issue) => issue.projectId === projectFilter);
 }
 
-function dateParts(value: number, timeZone: string): Record<string, string> {
-  return Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      calendar: "gregory",
-      numberingSystem: "latn",
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .formatToParts(new Date(value))
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value]),
-  );
-}
-
-export function issueDateKeyInTimeZone(value: number, timeZone: string): string {
-  const parts = dateParts(value, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
+export const issueDateKeyInTimeZone = calendarDateKeyInTimeZone;
 
 export function filterIssuesByDue(
   issues: readonly Issue[],
@@ -95,15 +81,7 @@ export function filterIssuesByDue(
   timeZone: string,
 ): Issue[] {
   if (dueFilter === "all") return [...issues];
-  if (dueFilter === "none") return issues.filter((issue) => issue.dueAt === null);
-  const today = issueDateKeyInTimeZone(now, timeZone);
-  return issues.filter((issue) => {
-    if (issue.dueAt === null) return false;
-    const due = issueDateKeyInTimeZone(issue.dueAt, timeZone);
-    if (dueFilter === "overdue") return due < today;
-    if (dueFilter === "today") return due === today;
-    return due > today;
-  });
+  return issues.filter((issue) => matchesIssueDueDate(issue.dueAt, dueFilter, now, timeZone));
 }
 
 export function filterIssues(
@@ -168,11 +146,13 @@ function tieBreak(left: Issue, right: Issue): number {
   );
 }
 
-function compareDue(left: Issue, right: Issue): number {
+function compareDue(left: Issue, right: Issue, direction = 1): number {
   if (left.dueAt === null && right.dueAt !== null) return 1;
   if (left.dueAt !== null && right.dueAt === null) return -1;
-  if (left.dueAt !== null && right.dueAt !== null && left.dueAt !== right.dueAt)
-    return left.dueAt - right.dueAt;
+  if (left.dueAt !== null && right.dueAt !== null) {
+    const dateOrder = issueDueDateKey(left.dueAt).localeCompare(issueDueDateKey(right.dueAt));
+    if (dateOrder) return dateOrder * direction;
+  }
   return tieBreak(left, right);
 }
 
@@ -184,17 +164,29 @@ export function sortIssues(
   const statusRank = new Map(workflowStates.map((state) => [state.id, state.position]));
   return [...issues].sort((left, right) => {
     if (sort === "manual") return left.position - right.position || tieBreak(left, right);
+    if (sort === "updated_asc") return left.updatedAt - right.updatedAt || tieBreak(left, right);
+    if (sort === "created_asc") return left.createdAt - right.createdAt || tieBreak(left, right);
     if (sort === "created_desc") return right.createdAt - left.createdAt || tieBreak(left, right);
     if (sort === "title_asc")
       return left.title.localeCompare(right.title, "ja") || tieBreak(left, right);
+    if (sort === "title_desc")
+      return right.title.localeCompare(left.title, "ja") || tieBreak(left, right);
     if (sort === "status_asc")
       return (
         (statusRank.get(left.statusId) ?? Number.MAX_SAFE_INTEGER) -
           (statusRank.get(right.statusId) ?? Number.MAX_SAFE_INTEGER) || tieBreak(left, right)
       );
+    if (sort === "status_desc")
+      return (
+        (statusRank.get(right.statusId) ?? Number.MAX_SAFE_INTEGER) -
+          (statusRank.get(left.statusId) ?? Number.MAX_SAFE_INTEGER) || tieBreak(left, right)
+      );
     if (sort === "priority_desc")
       return priorityRank[left.priority] - priorityRank[right.priority] || tieBreak(left, right);
+    if (sort === "priority_asc")
+      return priorityRank[right.priority] - priorityRank[left.priority] || tieBreak(left, right);
     if (sort === "due_asc") return compareDue(left, right);
+    if (sort === "due_desc") return compareDue(left, right, -1);
     return tieBreak(left, right);
   });
 }

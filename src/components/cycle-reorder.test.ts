@@ -132,7 +132,7 @@ describe("Cycle reorder UI", () => {
     expect(markup).toContain("Board");
   });
 
-  it("[代表値] Listの上下操作はCycle scope付きreorderを呼び出す", async () => {
+  it("[代表値] ListのAlt+Arrow操作は同じCycle scope付きreorderを呼び出す", async () => {
     const first = issue();
     const last = issue({
       id: "issue-2",
@@ -146,12 +146,19 @@ describe("Cycle reorder UI", () => {
 
     await act(async () => root.render(element));
     const moveUp = dom.window.document.querySelector(
-      '[aria-label="TASK-2を上へ"]',
+      'button.drag-handle[aria-label="TASK-2の並び替え"]',
     ) as HTMLButtonElement;
     expect(moveUp).not.toBeNull();
     expect(moveUp.disabled).toBe(false);
     expect(moveUp.closest(".cycle-issue-row")?.getAttribute("draggable")).toBe("true");
-    moveUp.click();
+    moveUp.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowUp",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
 
     expect(onReorder).toHaveBeenCalledWith(last, first.id, { cycleId: cycle.id });
     await act(async () => root.unmount());
@@ -215,14 +222,48 @@ describe("Cycle reorder UI", () => {
     await act(async () => boardToggle.click());
     expect(dom.window.document.querySelector(".cycle-board-grid")).not.toBeNull();
     const moveUp = dom.window.document.querySelector(
-      '[aria-label="TASK-2を上へ"]',
+      'button.drag-handle[aria-label="TASK-2の並び替え"]',
     ) as HTMLButtonElement;
-    moveUp.click();
+    const globalKey = vi.fn();
+    dom.window.addEventListener("keydown", globalKey);
+    moveUp.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowUp",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(globalKey).not.toHaveBeenCalled();
     expect(onReorder).toHaveBeenCalledWith(last, first.id, {
       cycleId: cycle.id,
       statusId: "state-todo",
     });
     expect(dom.window.document.querySelectorAll(".cycle-board-card")).toHaveLength(3);
+    const firstHandle = dom.window.document.querySelector(
+      'button.drag-handle[aria-label="TASK-1の並び替え"]',
+    )!;
+    const singleColumnHandle = dom.window.document.querySelector(
+      'button.drag-handle[aria-label="TASK-3の並び替え"]',
+    )!;
+    firstHandle.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowUp",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    singleColumnHandle.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(onReorder).toHaveBeenCalledTimes(1);
+    expect(globalKey).not.toHaveBeenCalled();
 
     await act(async () => {
       root.render(
@@ -250,13 +291,111 @@ describe("Cycle reorder UI", () => {
 
     await act(async () => root.render(busyElement));
     const moveDown = dom.window.document.querySelector(
-      '[aria-label="TASK-1を下へ"]',
+      'button.drag-handle[aria-label="TASK-1の並び替え"]',
     ) as HTMLButtonElement;
     const row = dom.window.document.querySelector('[data-issue-id="issue-1"]') as HTMLElement;
     expect(moveDown.disabled).toBe(true);
     expect(row.getAttribute("draggable")).toBe("false");
-    moveDown.click();
+    moveDown.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
     expect(onReorder).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it.each(["List", "Board"])(
+    "[Focus/Nativeblur故障注入] Cycle %sのKeyboard保存完了後に同handleへ戻す",
+    async (mode) => {
+      const first = issue();
+      const last = issue({ id: "issue-2", identifier: "TASK-2", position: 1 });
+      const onReorder = vi.fn();
+      const { dom, root, element } = interactiveView([first, last], onReorder);
+      await act(async () => root.render(element));
+      if (mode === "Board")
+        await act(async () =>
+          [...dom.window.document.querySelectorAll("button")]
+            .find((button) => button.textContent?.includes("Board"))!
+            .click(),
+        );
+      const origin = dom.window.document.querySelector(
+        'button.drag-handle[aria-label="TASK-2の並び替え"]',
+      ) as HTMLButtonElement;
+      await act(async () => {
+        origin.focus();
+        origin.dispatchEvent(
+          new dom.window.KeyboardEvent("keydown", {
+            key: "ArrowUp",
+            altKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(onReorder).toHaveBeenCalledTimes(1);
+      await act(async () =>
+        root.render(createElement(CyclesView, { ...element.props, reorderBusy: true })),
+      );
+      expect(origin.disabled).toBe(true);
+      // JSDOM's disabled blur guard differs from Chromium's native pending blur.
+      origin.disabled = false;
+      origin.blur();
+      origin.disabled = true;
+      expect(dom.window.document.activeElement?.tagName).toBe("BODY");
+      await act(async () =>
+        root.render(
+          createElement(CyclesView, {
+            ...element.props,
+            issues: [first, { ...last, position: -1 }],
+            reorderBusy: false,
+          }),
+        ),
+      );
+      expect(dom.window.document.activeElement?.getAttribute("aria-label")).toBe(
+        "TASK-2の並び替え",
+      );
+      expect(dom.window.document.activeElement).toBe(origin);
+      await act(async () => root.unmount());
+    },
+  );
+
+  it("[Keyboard→pointer] Cycleの未完了Keyboard意図もDragstartで取り消す", async () => {
+    const first = issue();
+    const last = issue({ id: "issue-2", identifier: "TASK-2", position: 1 });
+    const onReorder = vi.fn();
+    const { dom, root, element } = interactiveView([first, last], onReorder);
+    await act(async () => root.render(element));
+    const origin = dom.window.document.querySelector(
+      'button.drag-handle[aria-label="TASK-2の並び替え"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      origin.focus();
+      origin.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    const drag = new dom.window.Event("dragstart", { bubbles: true });
+    Object.defineProperty(drag, "dataTransfer", { value: { effectAllowed: "", setData: vi.fn() } });
+    await act(async () => origin.dispatchEvent(drag));
+    await act(async () =>
+      root.render(createElement(CyclesView, { ...element.props, reorderBusy: true })),
+    );
+    origin.disabled = false;
+    origin.blur();
+    origin.disabled = true;
+    await act(async () =>
+      root.render(createElement(CyclesView, { ...element.props, reorderBusy: false })),
+    );
+    expect(dom.window.document.activeElement?.tagName).toBe("BODY");
     await act(async () => root.unmount());
   });
 
@@ -272,8 +411,9 @@ describe("Cycle reorder UI", () => {
 
     expect(markup).toContain('aria-label="Cycle Issue表示形式"');
     expect(markup).toContain('aria-pressed="true"');
-    expect(markup).toContain('aria-label="TASK-1を上へ"');
-    expect(markup).toContain('aria-label="TASK-1を下へ"');
+    expect(markup).toContain('aria-label="TASK-1の並び替え"');
+    expect(markup).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"');
+    expect(markup).not.toContain('class="reorder-button"');
     expect(styles).toContain(".cycle-issue-toolbar");
     expect(styles).toContain(".cycle-board-card");
     expect(styles).toContain("@media (max-width: 767px)");

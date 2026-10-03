@@ -92,7 +92,21 @@ export async function withOwner(
       environment,
     );
     const owner = { ...resolvedOwner, store: session.store };
-    const response = await handler({ owner, requestId: id });
+    let response: Response;
+    try {
+      response = await handler({ owner, requestId: id });
+    } catch (error) {
+      if (
+        request.method === "POST" &&
+        new URL(request.url).pathname === "/api/v1/background-runs" &&
+        error instanceof ServiceError &&
+        error.status === 423 &&
+        error.code === "OPERATION_IN_PROGRESS" &&
+        session.store.hasRejectedRunStateChanges()
+      )
+        await session.persist();
+      throw error;
+    }
     if (response.ok && (isMutation || session.needsInitialPersist)) await session.persist();
     return response;
   } catch (error) {

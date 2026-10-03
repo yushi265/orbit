@@ -2,6 +2,9 @@
 
 ## 公開インターフェース
 
+- Homeの追加FilterはIssues URLの`open=true`（Completed/Canceled除外、UIのみ）と`due=next7`（本人Timezoneの今日より後〜7暦日後、検索/保存契約も共通）、Projectsの`active=true`。旧completed=false/upcomingの意味は維持する。Project表示Orderは13選択肢で、DueはUTC日key比較・null常に最後（参照: `src/lib/url-state/issues.ts`、`src/shared/contracts/project-display.ts`、`src/shared/issue-dates.ts`、`src/components/issue-list.ts`）。
+- Bootstrap.background.lastRunは本人の最新requested_atのPublicRunを返し、同msは最新挿入順を優先する。background.run/currentは復旧可能Runだけのまま。Receipt purgeはexpiresAt<nowであり、期限から追加30日待たない（参照: `src/server/store.ts`、`src/server/review-followup-service.test.ts`）。
+- Run controllerはcurrent=nullでも既知の終端を保持する。Bootstrap再取得の失敗はCache内容と非blockingError/Retryを維持し、初回CacheなしだけをErrorScreenにする。Reorder FocusはKeyboardで実際に移動した場合だけ記録し、境界No-op/Dragstart/他入力で残存intentを解除する（参照: `src/components/background-run.ts`、`src/components/OrbitApp.tsx`、`src/components/followup-shell-runtime.test.ts`、`src/components/followup-reorder-runtime.test.ts`）。
 - `/api/v1/bootstrap`、`/api/v1/issues`、`/api/v1/projects`、`/api/v1/cycles`、`/api/v1/search`、`/api/v1/views`、`/api/v1/notifications`、`/api/v1/preferences`、`/api/v1/background-runs/*` をTanStack Start Server Routeで公開する（参照: `src/server/api.ts`、`src/routes/api/v1/`）。
 - Issue detailは `GET /api/v1/issues/:issueId` で `issue / notes / relations / activity` を返し、Notes / RelationsのMutationはIssue配下のnested Routeを使う（参照: `src/server/api.ts`、`src/routes/api/v1/issues/$issueId/`）。
 - CYC-11のCycle繰越履歴は新規endpointを作らず、Issue detailの`GET /api/v1/issues/:issueId`へ`cycleHistory`（`movedAt`降順）と`carryoverCount`、Bootstrapの`GET /api/v1/bootstrap`へOwner scopedな`cycleHistory`を追加する。投影はSnapshotの既存`cycleHistory`から行い、Cycle画面は`toCycle.id`でincoming件数、Issue detail / Cycle詳細は`fromCycle`を表示する（参照: `src/shared/view-models.ts`、`src/shared/contracts/issue-detail.ts`、`src/server/store.ts`、`src/components/OrbitApp.tsx`、`docs/spec/CYC-11-cycle-history/`）。
@@ -36,6 +39,15 @@
 
 ## 再利用可能な部品
 
+- 画面の幅/高さはstyles.cssで制約する。DetailはDesktop90vw/Mobilegutter内、Dueは小幅でも2行目に表示、Sidebarは100dvh内でnavをscrollする。長いProject名は自然折返し、操作はnowrap。Darkのdetail-countとuser-card strongはテーマ変数を使う（参照: `src/styles.css`、`docs/spec/FEAT-review-followup/`）。
+- URLを含むメモ/説明は`LinkifiedText`を使い、http/httpsとReact text escaping/blank noopener noreferrerを共通化する。説明textareaの原文保存を維持し、安全URLがある場合だけPreviewを併設する（参照: `src/components/LinkifiedText.tsx`、`src/components/linkified-text.ts`）。
+- Issue期限は`src/shared/issue-dates.ts`で保存値のUTC暦日を維持し、todayだけ本人Timezoneの現在暦日へ変換する。UI/service共通FilterとHome集計を使う。数値dueAtは日付carrierであり、Timezoneへ変換するtimestampではない（参照: `src/shared/issue-dates.ts`、`src/server/issue-date-filter.test.ts`、`src/components/issue-dates-runtime.test.ts`）。
+- BootstrapのIssueは`OrbitStore.matchingIssues`のOwner/scope/filter/order抽出を使って全件取得する。公開`listIssues`の既定100・上限500は表示用として維持し、全件を扱う業務処理へ流用しない（参照: `src/server/store.ts`、`src/server/bootstrap-completeness.test.ts`）。
+- Maintenanceは25対象で残件がある間同じStepを継続する。opaque cursorは成功Chunkごとに更新し、失敗Chunkは既存deep Snapshotで全業務変更を復元してRun/Lockを取り直す。公開continueはOwnerを確認してから実行中だけtokenを取得し、完了再送を200 No-opへ通す（参照: `src/server/store.ts`、`src/server/api.ts`、`src/server/maintenance-integrity.test.ts`、`src/server/api-maintenance-integrity.test.ts`）。
+- Run作成で競合拒否された終端だけ、POST `/api/v1/background-runs`・423・専用dirty flagの一致時にSnapshotへ保存する。一般的な失敗Mutationの非保存は維持する。PurgeはIssue FK cascade依存を除去し、生存子の親参照を解除する（参照: `src/server/http.ts`、`src/server/store-session.ts`、`src/server/store.ts`）。
+- Runの復旧は`useBackgroundRun`がcurrent/start/resume/continueを直列化し、30秒・focus・onlineでServer truthを取得する。Bootstrapは初回seedのみとして古い再取得結果でcursorを戻さない（参照: `src/components/background-run.ts`）。
+- Issues一覧と詳細は同じURL validatorを使い、Route.useSearchをFilter/Mode/Orderの正本とする。参照ID補正はBootstrap取得後に一括replaceし、詳細/親子切替と閉じるでsearchを保持する（参照: `src/lib/url-state/issues.ts`、`src/routes/issues/`、`src/components/issues-url-runtime.test.ts`）。
+- Dialog境界はDocumentごとのregistryで初期Focus/Tab/Escape/復帰とinertを管理し、blocking Runを最前面にする。検索は旧応答を破棄し、Projectは即時guard/同じretryKey/IMEを扱う。Detail保存はBootstrapと既存3scope Cacheの所属まで同期する（参照: `src/components/dialog-boundary.ts`、`src/components/OrbitApp.tsx`、`src/components/review-ui-runtime.test.ts`）。
 - Canonical JSON / request hash: `src/shared/canonical-json.ts`
 - HTTP ErrorEnvelope / Owner boundary: `src/server/http.ts`, `src/server/auth.ts`
 - QueryClient / same-origin fetch: `src/lib/query.ts`, `src/lib/api-client.ts`
@@ -47,8 +59,17 @@
 - Issue experience polish: PriorityはListで`PriorityIcon`へ変換し、IME変換中のEnterは`isComposing` / `keyCode 229`でsubmitを抑止する。ColorThemeは`data-color-theme`とCSS変数へ反映し、旧Snapshotの欠落値はCoralへ補完する（参照: `src/components/issue-priority.ts`、`src/components/issue-composer.ts`、`src/components/OrbitApp.tsx`、`src/server/store.ts`）。
 - Home actionable dashboard: Home専用APIを増やさず、BootstrapのTimezone・Cycle・Project・Issueから期限超過 / 今日 / 7日以内 / Current Cycle / 最近更新を導出する。各カードは既存Issue / Cycle / Project routeへ遷移し、空状態には次の操作を示す（参照: `src/components/home.ts`、`src/components/OrbitApp.tsx`）。
 
+## Snapshotの旧版互換保存
+
+- D1 Sessionのread/write直前に`decodeStoreSnapshot` / `encodeStoreSnapshot`を挟む。domainの`OrbitStore.toSnapshot/fromSnapshot`やRun chunk復元は元のSnapshotを扱い、UI/APIへ互換metaを出さない（参照: `src/server/store-snapshot-compat.ts`、`src/server/store-session.ts`）。
+- 新Project sortと`next7`は旧enumへ投影する。`__orbitRollback`は各record siblingへ元値・投影anchor・同Owner/record/operationのReceipt keyを保存し、旧Storeの通常serializationで保持する。top-level metaやstrict settings/query内のmetaは使用しない。
+- Project/Recentのanchorまたは関連Receipt key追加は旧明示編集を優先する。Viewはqueryのlayoutを除いて比較し、rename/layout編集では新queryと現在layoutを両方維持する。queryを含むview.updateの新Receiptだけを明示query変更と数える。
+- Receipt自体のsidecarだけが元retry応答を復元する。旧Storeがresponseへcloneしたrecord sidecarは既知形式を検証してstripし、旧応答を維持する。未知version/Owner/id/schema/投影不一致は固定Errorでsessionを拒否し、D1を上書きしない。
+- 同msの同fallback再保存はReceipt追加で判断する。旧rollback中はMaintenanceを実行せず、根拠Receiptが残存する前提を守る。通常rollbackは終了Run境界でWorker Versionだけを戻し、更新後のD1をDB復元で巻き戻さない（参照: `docs/deployment.md`、`docs/spec/FIX-rollback-compatibility/service.md`）。
+
 ## 既知の罠
 
+- Vite開発stylesheetはreserved `v` queryを付けない。query付きはViteが1年immutableを付けて古いCSSを保持する。本番のhash付きasset/versionは維持する。toolbar/Composer/hierarchyは幅・高さ・themeに合わせ、blocking Runのz-indexはDialogより高くする（参照: `src/routes/__root.tsx`、`src/pwa.test.ts`、`src/styles.css`）。
 - `pnpm format:check` はハーネス配下の既存ソースまで対象にするとoxfmtのバージョン差で失敗するため、root scriptはアプリ実装（`src public drizzle` と設定ファイル）だけを対象にする（出典: `package.json`）。
 - Cloudflare Vite pluginのSSR buildはWranglerログをユーザープリファレンスへ書こうとするため、制限環境では `WRANGLER_LOG_PATH` を明示して検証する（出典: Stage 5実行ログ）。
 - TanStack Startのproduction配信用生成物は`CLOUDFLARE_ENV=production pnpm build`で作る。通常の`pnpm build`後にWrangler dry-runを実行すると、生成された`dist/server/wrangler.json`の`APP_ENV`が`development`になる（参照: `package.json`、`dist/server/wrangler.json`）。
@@ -75,5 +96,7 @@
 - Node防壁・ブラウザログとnative全プロセスの通信試行監査は別物。OS遮断下の機能動作は確認済みだが、全native試行監査は現環境で陽性対照が成立せずAC-7未完了（参照: `docs/spec/FEAT-local-only/verification.md`）。
 
 ## 最終更新
+
+FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

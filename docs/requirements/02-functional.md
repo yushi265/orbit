@@ -36,7 +36,7 @@ LinearではIssueはTeamに必ず属するが、本アプリはTeamを持たな�
 | --- | --- | --- |
 | ISS-01 | どの主要画面からでもIssueを作成できる | PCは`C`、モバイルは中央の作成ボタンから2操作以内でComposerが開く |
 | ISS-02 | Issueはtitle、description、statusを持つ | titleは1〜255文字、descriptionはMarkdown互換Rich Textである |
-| ISS-03 | priority、due dateを設定できる | 未設定を許容し、一覧からインライン更新できる。既存Estimate値はAPI互換のため保持するが、現行UIでは扱わない |
+| ISS-03 | priority、due dateを設定できる | 未設定を許容し、一覧からインライン更新できる。期限は時刻を持たない日付とし、Timezoneを変更しても指定日を維持する。今日・期限超過・近日は本人Timezoneの現在日付と比較する。既存Estimate値はAPI互換のため保持するが、現行UIでは扱わない |
 | ISS-04 | priorityはNo priority / Low / Medium / High / Urgentを持つ | 表示、Filter、Group、Orderで同じ定義を使う |
 | ISS-05 | Labelを複数付与できる | Labelは名前と色を持つ |
 | ISS-06 | Issueを最大1 Project、最大1 Cycleへ割り当てられる | ProjectとCycleの存在および本人所有を検証する |

@@ -50,16 +50,35 @@ import {
   sortIssues,
 } from "./issue-list";
 import { buildHomeSummary, homeDateLabel, homeRelativeDay } from "./home";
+import { formatIssueDueDate, issueDueDateKey } from "../shared/issue-dates";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
-import { issueDetailPath, projectDetailPath } from "./navigation";
+import { projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
 import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
-import { ApiError, apiDelete, apiGet, apiPatch, apiPost, idempotencyKey } from "../lib/api-client";
+import {
+  ApiError,
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  apiRequest,
+  idempotencyKey,
+} from "../lib/api-client";
 import { queryClient } from "../lib/query";
+import { useBackgroundRun } from "./background-run";
+import { useDialogBoundary } from "./dialog-boundary";
+import { LinkifiedText } from "./LinkifiedText";
+import { linkifyText } from "./linkified-text";
+import {
+  normalizeIssueSearch,
+  resolveIssueSearch,
+  type IssueSearch,
+  type ProjectSearch,
+} from "../lib/url-state/issues";
 
 type Section =
   | "home"
@@ -70,7 +89,14 @@ type Section =
   | "inbox"
   | "views"
   | "settings";
-type Props = { initialSection?: Section; issueId?: string; projectId?: string; cycleId?: string };
+type Props = {
+  initialSection?: Section;
+  issueId?: string;
+  projectId?: string;
+  cycleId?: string;
+  issueSearch?: IssueSearch;
+  projectSearch?: ProjectSearch;
+};
 type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
   Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
@@ -104,7 +130,7 @@ type SearchFilters = {
   projectId: string;
   cycleId: string;
   labelId: string;
-  due: "all" | "none" | "overdue" | "today" | "upcoming";
+  due: "all" | "none" | "overdue" | "today" | "upcoming" | "next7";
 };
 
 const priorityLabel: Record<Issue["priority"], string> = {
@@ -151,6 +177,20 @@ const cycleWeekdayOptions = [
   [6, "土曜日"],
 ] as const;
 
+function settingsRunToDisplay(
+  controller: PublicRunSummary | null,
+  server: PublicRunSummary | null | undefined,
+): PublicRunSummary | null {
+  const eligible = (value: PublicRunSummary) =>
+    ["pending", "running", "paused", "failed"].includes(value.status);
+  if (controller && eligible(controller)) return controller;
+  if (!controller) return server ?? null;
+  if (!server) return controller;
+  // An earlier Bootstrap snapshot of this same Run must not regress completion.
+  if (controller.run_id === server.run_id && eligible(server)) return controller;
+  return controller.requested_at > server.requested_at ? controller : server;
+}
+
 function formatDate(value: number | null): string {
   if (!value) return "未設定";
   return new Intl.DateTimeFormat("ja-JP", { month: "short", day: "numeric" }).format(
@@ -168,7 +208,7 @@ function formatDateOnly(value: number | null): string {
 }
 
 function dateInputValue(value: number | null): string {
-  return value === null ? "" : new Date(value).toISOString().slice(0, 10);
+  return value === null ? "" : issueDueDateKey(value);
 }
 
 function formatRange(start: number, end: number): string {
@@ -249,17 +289,21 @@ function OrbitAppInner(props: Props) {
   const [newParentId, setNewParentId] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [filterText, setFilterText] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "board">("list");
-  const [priorityFilter, setPriorityFilter] = useState<Issue["priority"] | "all">("all");
-  const [projectFilter, setProjectFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [labelFilter, setLabelFilter] = useState("all");
-  const [dueFilter, setDueFilter] = useState<IssueDueFilter>("all");
-  const [showCompleted, setShowCompleted] = useState(true);
+  const [completedFallback, setCompletedFallback] = useState(true);
   const [showCompletedReady, setShowCompletedReady] = useState(false);
-  const [issueSort, setIssueSort] = useState<IssueSort>("updated_desc");
-  const [issueScope, setIssueScope] = useState<IssueListScope>("active");
+  const {
+    filterText,
+    viewMode,
+    priorityFilter,
+    projectFilter,
+    statusFilter,
+    labelFilter,
+    dueFilter,
+    showCompleted,
+    issueSort,
+    issueScope,
+  } = resolveIssueSearch(props.issueSearch ?? {}, completedFallback);
+  const openOnly = props.issueSearch?.open === true;
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -283,18 +327,80 @@ function OrbitAppInner(props: Props) {
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   const [projectComposerOpen, setProjectComposerOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
-  const [run, setRun] = useState<PublicRunSummary | null>(null);
-  const [runBusy, setRunBusy] = useState(false);
+  const [projectCreateBusy, setProjectCreateBusy] = useState(false);
+  const projectCreateBusyRef = useRef(false);
+  const projectCreateRequestRef = useRef<{ name: string; key: string } | null>(null);
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkMutationKeyRef = useRef<string | null>(null);
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
+  const searchSequenceRef = useRef(0);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const toastTimerRef = useRef<number | undefined>(undefined);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
-  const [clockNow] = useState(() => Date.now());
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const updateCalendarNow = () => setClockNow(Date.now());
+    const timer = window.setInterval(updateCalendarNow, 60_000);
+    window.addEventListener("focus", updateCalendarNow);
+    window.addEventListener("online", updateCalendarNow);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", updateCalendarNow);
+      window.removeEventListener("online", updateCalendarNow);
+    };
+  }, []);
+
+  function currentIssueSearch(): IssueSearch {
+    return normalizeIssueSearch({
+      ...(section === "issues" ? props.issueSearch : {}),
+      completed: section === "issues" ? showCompleted : completedFallback,
+    });
+  }
+  function updateIssueSearch(patch: Record<string, unknown>) {
+    const search = normalizeIssueSearch({
+      ...props.issueSearch,
+      completed: showCompleted,
+      ...patch,
+    });
+    if (props.issueId)
+      void router.navigate({
+        to: "/issues/$issueId",
+        params: { issueId: props.issueId },
+        search,
+        replace: true,
+        resetScroll: false,
+      });
+    else void router.navigate({ to: "/issues", search, replace: true, resetScroll: false });
+  }
+  const setFilterText = (q: string) => updateIssueSearch({ q });
+  const setStatusFilter = (status: string) => updateIssueSearch({ status });
+  const setPriorityFilter = (priority: Issue["priority"] | "all") =>
+    updateIssueSearch({ priority });
+  const setProjectFilter = (project: string) => updateIssueSearch({ project });
+  const setLabelFilter = (label: string) => updateIssueSearch({ label });
+  const setDueFilter = (due: IssueDueFilter) => updateIssueSearch({ due });
+  const setShowCompleted = (completed: boolean) => updateIssueSearch({ completed });
+  const setIssueSort = (order: IssueSort) => updateIssueSearch({ order });
+  const setIssueScope = (scope: IssueListScope) => updateIssueSearch({ scope });
+  const setViewMode = (
+    mode: "list" | "board" | ((current: "list" | "board") => "list" | "board"),
+  ) => updateIssueSearch({ mode: typeof mode === "function" ? mode(viewMode) : mode });
+  function openIssue(issueId: string) {
+    rememberIssueFocus(issueId);
+    const search = currentIssueSearch();
+    setSection("issues");
+    setComposerOpen(true);
+    void router.navigate({
+      to: "/issues/$issueId",
+      params: { issueId },
+      search,
+      resetScroll: false,
+    });
+  }
 
   function rememberIssueFocus(issueId: string) {
     issueTriggerIdRef.current = issueId;
@@ -312,25 +418,25 @@ function OrbitAppInner(props: Props) {
   }
 
   function restoreIssueFocus() {
-    window.setTimeout(() => {
-      let issueId = issueTriggerIdRef.current;
-      try {
-        issueId ??= window.sessionStorage.getItem("orbit.issue-focus");
-      } catch {
-        // Ignore storage access failures and keep the in-memory fallback.
-      }
-      if (!issueId) return;
-      const trigger = document.querySelector<HTMLButtonElement>(
-        `button[data-issue-id="${issueId}"]`,
-      );
-      if (!trigger) return;
-      trigger.focus();
-      try {
-        window.sessionStorage.removeItem("orbit.issue-focus");
-      } catch {
-        // Ignore storage access failures after the focus was restored.
-      }
-    }, 40);
+    if (composerOpen || props.issueId) return;
+    let issueId = issueTriggerIdRef.current;
+    try {
+      issueId ??= window.sessionStorage.getItem("orbit.issue-focus");
+    } catch {
+      /* Best effort. */
+    }
+    if (!issueId) return;
+    const trigger = [...document.querySelectorAll<HTMLButtonElement>("button[data-issue-id]")].find(
+      (button) => button.dataset.issueId === issueId,
+    );
+    if (!trigger) return;
+    trigger.focus({ preventScroll: true });
+    issueTriggerIdRef.current = null;
+    try {
+      window.sessionStorage.removeItem("orbit.issue-focus");
+    } catch {
+      /* Best effort. */
+    }
   }
 
   const bootstrap = useQuery({
@@ -385,7 +491,18 @@ function OrbitAppInner(props: Props) {
       data?.preferences.timezone ?? "UTC",
     );
     return sortIssues(
-      filterCompletedIssues(filtered, workflowStates, showCompleted),
+      filterCompletedIssues(
+        openOnly
+          ? filtered.filter((issue) => {
+              const category = workflowStates.find(
+                (state) => state.id === issue.statusId,
+              )?.category;
+              return category !== "completed" && category !== "canceled";
+            })
+          : filtered,
+        workflowStates,
+        showCompleted,
+      ),
       issueSort,
       workflowStates,
     );
@@ -399,6 +516,7 @@ function OrbitAppInner(props: Props) {
     dueFilter,
     workflowStates,
     showCompleted,
+    openOnly,
     issueSort,
     clockNow,
     data?.preferences.timezone,
@@ -413,24 +531,31 @@ function OrbitAppInner(props: Props) {
   }, [visibleIssues]);
 
   useEffect(() => {
+    if (!data || !showCompletedReady || section !== "issues") return;
+    const patch: Record<string, unknown> = {};
     if (labelFilter !== "all" && !labels.some((label) => label.id === labelFilter))
-      setLabelFilter("all");
-  }, [labels, labelFilter]);
-
-  useEffect(() => {
+      patch.label = undefined;
+    if (statusFilter !== "all" && !workflowStates.some((state) => state.id === statusFilter))
+      patch.status = undefined;
     if (
       projectFilter !== "all" &&
       projectFilter !== NO_PROJECT_OPTION &&
       !projects.some((project) => project.id === projectFilter)
-    ) {
-      setProjectFilter("all");
-    }
-  }, [projects, projectFilter]);
-
-  useEffect(() => {
-    if (statusFilter !== "all" && !workflowStates.some((state) => state.id === statusFilter))
-      setStatusFilter("all");
-  }, [statusFilter, workflowStates]);
+    )
+      patch.project = undefined;
+    if (Object.keys(patch).length > 0) updateIssueSearch(patch);
+  }, [
+    data,
+    showCompletedReady,
+    section,
+    labels,
+    workflowStates,
+    projects,
+    labelFilter,
+    statusFilter,
+    projectFilter,
+    props.issueSearch,
+  ]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -438,7 +563,7 @@ function OrbitAppInner(props: Props) {
         const stored = parseShowCompletedPreference(
           window.localStorage.getItem(SHOW_COMPLETED_STORAGE_KEY),
         );
-        if (stored !== undefined) setShowCompleted(stored);
+        if (stored !== undefined) setCompletedFallback(stored);
       } catch {
         // Ignore storage access failures and keep the default visibility.
       }
@@ -501,39 +626,26 @@ function OrbitAppInner(props: Props) {
         .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    const current = data?.background.run ?? null;
-    setRun(current);
-  }, [data?.background.run]);
-
-  useEffect(() => {
-    const shell = document.querySelector<HTMLElement>(".app-shell");
-    if (!shell) return;
-    const blocking = run?.status === "pending" || run?.status === "running";
-    const content = [...shell.children].filter(
-      (element): element is HTMLElement =>
-        element instanceof HTMLElement && !element.classList.contains("run-overlay"),
-    );
-    content.forEach((element) => {
-      if (blocking) {
-        element.setAttribute("inert", "");
-        element.setAttribute("aria-hidden", "true");
-      } else {
-        element.removeAttribute("inert");
-        element.removeAttribute("aria-hidden");
-      }
-    });
-    return () => {
-      content.forEach((element) => {
-        element.removeAttribute("inert");
-        element.removeAttribute("aria-hidden");
-      });
-    };
-  }, [run?.status]);
+  const {
+    run,
+    busy: runBusy,
+    start: runMaintenance,
+    resume: resumeMaintenance,
+  } = useBackgroundRun(data?.background.run, {
+    onSucceeded: () => {
+      showToast("success", "メンテナンスを完了しました");
+      void refresh();
+    },
+    onError: (error) =>
+      showToast(
+        "error",
+        error instanceof ApiError ? error.message : "バックグラウンド処理に失敗しました",
+      ),
+  });
 
   useEffect(() => {
     if (!composerOpen && !props.issueId) restoreIssueFocus();
-  }, [composerOpen, props.issueId]);
+  }, [composerOpen, props.issueId, visibleIssues]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -547,7 +659,16 @@ function OrbitAppInner(props: Props) {
         shiftKey: event.shiftKey,
         editable: editing,
       });
-      if (!action || run?.status === "pending" || run?.status === "running") return;
+      if (
+        !action ||
+        run?.status === "pending" ||
+        run?.status === "running" ||
+        composerOpen ||
+        commandOpen ||
+        projectComposerOpen ||
+        shortcutsOpen
+      )
+        return;
       event.preventDefault();
       if (action === "command") {
         setCommandOpen(true);
@@ -557,11 +678,6 @@ function OrbitAppInner(props: Props) {
         setCommandOpen(false);
         setShortcutsOpen(false);
         if (!bulkBusy) setSelected([]);
-        if (composerOpen && props.issueId) {
-          setSection("issues");
-          void router.navigate({ to: "/issues" as never }).then(restoreIssueFocus);
-        }
-        setComposerOpen(false);
         return;
       }
       if (action === "create") {
@@ -573,6 +689,7 @@ function OrbitAppInner(props: Props) {
         return;
       }
       if (action === "toggle-board") {
+        if (section !== "issues") return;
         setViewMode((mode) => (mode === "list" ? "board" : "list"));
         return;
       }
@@ -610,7 +727,21 @@ function OrbitAppInner(props: Props) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bulkBusy, composerOpen, focusedIssueId, props.issueId, router, run?.status, section]);
+  }, [
+    bulkBusy,
+    composerOpen,
+    commandOpen,
+    projectComposerOpen,
+    shortcutsOpen,
+    focusedIssueId,
+    props.issueId,
+    router,
+    run?.status,
+    section,
+    viewMode,
+    showCompleted,
+    props.issueSearch,
+  ]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   const dismissToast = () => {
@@ -919,7 +1050,9 @@ function OrbitAppInner(props: Props) {
     setSection(next);
     setSelected([]);
     const path = next === "home" ? "/" : next === "settings" ? "/settings" : `/${next}`;
-    await router.navigate({ to: path as never });
+    if (next === "issues")
+      await router.navigate({ to: "/issues", search: { completed: completedFallback } });
+    else await router.navigate({ to: path as never });
   }
 
   function openIssueComposer(projectId = "") {
@@ -939,9 +1072,7 @@ function OrbitAppInner(props: Props) {
     await markNotificationRead(notification);
     await refresh();
     if (notification.entityType === "issue" && notification.entityId) {
-      setSection("issues");
-      setComposerOpen(true);
-      await router.navigate({ to: `/issues/${notification.entityId}` as never });
+      openIssue(notification.entityId);
     } else if (notification.entityType === "project" && notification.entityId) {
       setSection("projects");
       await router.navigate({ to: `/projects/${notification.entityId}` as never });
@@ -965,66 +1096,18 @@ function OrbitAppInner(props: Props) {
     if (rejected) throw rejected.reason;
   }
 
-  async function continueMaintenance(initial: PublicRunSummary): Promise<PublicRunSummary> {
-    let current = initial;
-    setRun(current);
-    for (let attempt = 0; attempt < 5 && current.status === "running"; attempt += 1) {
-      const result = await apiPost<{ run: PublicRunSummary }>(
-        `/api/v1/background-runs/${current.run_id}/continue`,
-        {
-          idempotencyKey: idempotencyKey(),
-          expected_cursor: current.progress.cursor,
-        },
-      );
-      current = result.run;
-      setRun(current);
-    }
-    return current;
-  }
-
-  async function runMaintenance() {
-    if (runBusy) return;
-    setRunBusy(true);
-    try {
-      const started = await apiPost<{ run: PublicRunSummary }>("/api/v1/background-runs", {
-        kind: "maintenance",
-        idempotencyKey: idempotencyKey(),
-      });
-      const current = await continueMaintenance(started.run);
-      showToast(
-        "success",
-        current.status === "succeeded" ? "メンテナンスを完了しました" : "処理を一時停止しました",
-      );
-      await refresh();
-    } catch (error) {
-      showToast(
-        "error",
-        error instanceof ApiError ? error.message : "バックグラウンド処理に失敗しました",
-      );
-    } finally {
-      setRunBusy(false);
-    }
-  }
-
-  async function resumeMaintenance() {
-    if (!run || runBusy) return;
-    setRunBusy(true);
-    try {
-      const result = await apiPost<{ run: PublicRunSummary }>(
-        `/api/v1/background-runs/${run.run_id}/resume`,
-        { idempotencyKey: idempotencyKey() },
-      );
-      const current = await continueMaintenance(result.run);
-      showToast("success", "処理を再開しました");
-      if (current.status === "succeeded") await refresh();
-    } catch (error) {
-      showToast("error", error instanceof ApiError ? error.message : "処理の再開に失敗しました");
-    } finally {
-      setRunBusy(false);
-    }
-  }
+  useEffect(
+    () => () => {
+      searchSequenceRef.current += 1;
+      searchAbortRef.current?.abort();
+      if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current);
+    },
+    [],
+  );
 
   function executeSearch(value: string, filtersForRequest = searchFilters) {
+    const sequence = ++searchSequenceRef.current;
+    searchAbortRef.current?.abort();
     setSearchText(value);
     setSearchError(null);
     if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current);
@@ -1035,6 +1118,9 @@ function OrbitAppInner(props: Props) {
     }
     setSearchBusy(true);
     searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = undefined;
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
       const params = new URLSearchParams({ q: value.trim() });
       if (filtersForRequest.statusId !== "all") params.set("status", filtersForRequest.statusId);
       if (filtersForRequest.priority !== "all") params.set("priority", filtersForRequest.priority);
@@ -1042,8 +1128,11 @@ function OrbitAppInner(props: Props) {
       if (filtersForRequest.cycleId !== "all") params.set("cycle", filtersForRequest.cycleId);
       if (filtersForRequest.labelId !== "all") params.set("label", filtersForRequest.labelId);
       if (filtersForRequest.due !== "all") params.set("due", filtersForRequest.due);
-      void apiGet<{ items: Issue[] }>(`/api/v1/search?${params.toString()}`)
+      void apiRequest<{ items: Issue[] }>(`/api/v1/search?${params.toString()}`, {
+        signal: controller.signal,
+      })
         .then((result) => {
+          if (sequence !== searchSequenceRef.current) return;
           setRemoteSearch(result.items);
           setSearchBusy(false);
           void apiPost("/api/v1/recent-searches", {
@@ -1069,6 +1158,7 @@ function OrbitAppInner(props: Props) {
             .catch(() => undefined);
         })
         .catch((error) => {
+          if (sequence !== searchSequenceRef.current) return;
           setSearchBusy(false);
           setSearchError(error instanceof ApiError ? error.message : "検索に失敗しました");
         });
@@ -1081,18 +1171,30 @@ function OrbitAppInner(props: Props) {
   }
 
   async function createProject() {
-    if (!projectName.trim()) return;
+    const name = projectName.trim();
+    if (!name || projectCreateBusyRef.current) return;
+    projectCreateBusyRef.current = true;
+    setProjectCreateBusy(true);
+    const request =
+      projectCreateRequestRef.current?.name === name
+        ? projectCreateRequestRef.current
+        : { name, key: idempotencyKey() };
+    projectCreateRequestRef.current = request;
     try {
       await apiPost("/api/v1/projects", {
-        idempotencyKey: idempotencyKey(),
-        name: projectName.trim(),
+        idempotencyKey: request.key,
+        name: request.name,
       });
+      projectCreateRequestRef.current = null;
       setProjectName("");
       setProjectComposerOpen(false);
       showToast("success", "Projectを作成しました");
       await refresh();
     } catch (error) {
       showToast("error", error instanceof ApiError ? error.message : "Projectの作成に失敗しました");
+    } finally {
+      projectCreateBusyRef.current = false;
+      setProjectCreateBusy(false);
     }
   }
 
@@ -1171,7 +1273,7 @@ function OrbitAppInner(props: Props) {
         <p>Orbitを準備しています…</p>
       </div>
     );
-  if (bootstrap.error || !data)
+  if (!data)
     return (
       <div className="loading-screen error-screen">
         <div className="brand-mark">!</div>
@@ -1186,7 +1288,9 @@ function OrbitAppInner(props: Props) {
   function closeIssueDetail() {
     setSection("issues");
     setComposerOpen(false);
-    void router.navigate({ to: "/issues" }).then(restoreIssueFocus);
+    void router
+      .navigate({ to: "/issues", search: currentIssueSearch(), resetScroll: false })
+      .then(restoreIssueFocus);
   }
 
   const activeRun =
@@ -1217,7 +1321,7 @@ function OrbitAppInner(props: Props) {
               className="search-trigger"
               onClick={() => {
                 setCommandOpen(true);
-                setSearchText("");
+                executeSearch("");
               }}
             >
               <span>⌕</span>
@@ -1231,18 +1335,24 @@ function OrbitAppInner(props: Props) {
           </div>
         </header>
         <main className="content-area">
+          {bootstrap.error && (
+            <div className="detail-live-error" role="alert">
+              最新情報を取得できませんでした。表示中の情報を保持しています。
+              <button
+                className="text-button"
+                onClick={() => void bootstrap.refetch()}
+                disabled={bootstrap.isFetching}
+              >
+                再試行
+              </button>
+            </div>
+          )}
           {section === "home" && (
             <HomeView
               data={data}
               onNavigate={navigate}
               onCreate={() => openIssueComposer()}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "issues" && (
@@ -1253,6 +1363,19 @@ function OrbitAppInner(props: Props) {
               setScope={setIssueScope}
               workflowStates={workflowStates}
               filterText={filterText}
+              openOnly={openOnly}
+              onClearFilters={() =>
+                updateIssueSearch({
+                  q: undefined,
+                  status: undefined,
+                  priority: undefined,
+                  project: undefined,
+                  label: undefined,
+                  due: undefined,
+                  completed: true,
+                  open: undefined,
+                })
+              }
               setFilterText={setFilterText}
               priorityFilter={priorityFilter}
               setPriorityFilter={setPriorityFilter}
@@ -1297,12 +1420,7 @@ function OrbitAppInner(props: Props) {
                 bulkMutationKeyRef.current = null;
               }}
               onCreate={() => setComposerOpen(true)}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "cycles" && (
@@ -1337,7 +1455,11 @@ function OrbitAppInner(props: Props) {
           )}
           {section === "projects" && (
             <ProjectsView
-              projects={projects}
+              projects={
+                props.projectSearch?.active
+                  ? projects.filter((project) => !project.archivedAt && !project.deletedAt)
+                  : projects
+              }
               issues={issues}
               projectId={props.projectId}
               workflowStates={workflowStates}
@@ -1369,12 +1491,7 @@ function OrbitAppInner(props: Props) {
               modifierLabel={modifierLabel}
               onCreate={() => setProjectComposerOpen(true)}
               onRefresh={refresh}
-              onOpenIssue={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                void router.navigate({ to: issueDetailPath(issue.id) as never });
-              }}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "search" && (
@@ -1382,13 +1499,7 @@ function OrbitAppInner(props: Props) {
               query={searchText}
               onQuery={executeSearch}
               results={remoteSearch}
-              onOpenIssueId={(issueId) => {
-                const issue = issues.find((item) => item.id === issueId);
-                if (issue) rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                void router.navigate({ to: `/issues/${issueId}` as never });
-              }}
+              onOpenIssueId={openIssue}
               searchBusy={searchBusy}
               searchError={searchError}
               onRetry={() => executeSearch(searchText)}
@@ -1401,13 +1512,7 @@ function OrbitAppInner(props: Props) {
               recentIssueViews={recentQuery.data?.issueViews ?? []}
               recentSearches={recentQuery.data?.searches ?? []}
               modifierLabel={modifierLabel}
-              onOpen={(issue) => {
-                rememberIssueFocus(issue.id);
-                setSection("issues");
-                setComposerOpen(true);
-                if (typeof window !== "undefined")
-                  void router.navigate({ to: `/issues/${issue.id}` as never });
-              }}
+              onOpen={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "inbox" && (
@@ -1432,7 +1537,7 @@ function OrbitAppInner(props: Props) {
               workflowStates={workflowStates}
               labels={labels}
               onRefresh={refresh}
-              run={activeRun}
+              run={settingsRunToDisplay(run, data.background.lastRun)}
               runBusy={runBusy}
               onRun={runMaintenance}
               onResume={resumeMaintenance}
@@ -1460,9 +1565,11 @@ function OrbitAppInner(props: Props) {
           <IssueDetailPanel
             key={props.issueId}
             issueId={props.issueId}
+            issueSearch={currentIssueSearch()}
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
             projects={projects}
+            labels={labels}
             onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
             pending={pendingIssueId === props.issueId}
             workflowStates={workflowStates}
@@ -1506,11 +1613,22 @@ function OrbitAppInner(props: Props) {
           <input
             id="project-name"
             className="text-input"
-            autoFocus
+            data-modal-autofocus
             value={projectName}
+            disabled={projectCreateBusy}
             onChange={(event) => setProjectName(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") void createProject();
+              if (
+                shouldSubmitIssueOnEnter({
+                  key: event.key,
+                  isComposing: event.nativeEvent.isComposing,
+                  keyCode: event.keyCode,
+                  busy: projectCreateBusyRef.current,
+                })
+              ) {
+                event.preventDefault();
+                void createProject();
+              }
             }}
             placeholder="例：Orbit MVP"
           />
@@ -1518,8 +1636,12 @@ function OrbitAppInner(props: Props) {
             <button className="button ghost" onClick={() => setProjectComposerOpen(false)}>
               キャンセル
             </button>
-            <button className="button primary" onClick={() => void createProject()}>
-              作成する
+            <button
+              className="button primary"
+              onClick={() => void createProject()}
+              disabled={projectCreateBusy || !projectName.trim()}
+            >
+              {projectCreateBusy ? "作成中…" : "作成する"}
             </button>
           </div>
         </Modal>
@@ -1544,10 +1666,7 @@ function OrbitAppInner(props: Props) {
           onOpenSelected={() => {
             if (!selectedIssue) return;
             setCommandOpen(false);
-            rememberIssueFocus(selectedIssue.id);
-            setSection("issues");
-            setComposerOpen(true);
-            void router.navigate({ to: `/issues/${selectedIssue.id}` as never });
+            openIssue(selectedIssue.id);
           }}
           onArchiveSelected={() => {
             if (!selectedIssue) return;
@@ -1615,7 +1734,6 @@ function Sidebar({
       <div className="brand">
         <span className="brand-mark">O</span>
         <span className="brand-name">Orbit</span>
-        <span className="brand-version">MVP</span>
       </div>
       <button className="workspace-switcher">
         <span className="workspace-avatar">O</span>
@@ -1749,9 +1867,7 @@ export function HomeView({
       <div className="page-heading home-heading">
         <div>
           <span className="eyebrow home-date">{homeDateLabel(now, data.preferences.timezone)}</span>
-          <h1>
-            おかえりなさい、<em>{data.me.name}</em>
-          </h1>
+          <h1>Home</h1>
           <p className="subheading">今日やることを確認して、次の一歩を始めましょう。</p>
         </div>
         <div className="home-heading-actions">
@@ -1769,9 +1885,13 @@ export function HomeView({
             <div>
               <span className="eyebrow coral">CURRENT CYCLE</span>
               <h2>
-                {summary.activeCycle?.nameOverride ??
-                  summary.activeCycle?.name ??
-                  "Active Cycleなし"}
+                {summary.activeCycle ? (
+                  <Link to="/cycles/$cycleId" params={{ cycleId: summary.activeCycle.id }}>
+                    {summary.activeCycle.nameOverride ?? summary.activeCycle.name}
+                  </Link>
+                ) : (
+                  "Active Cycleなし"
+                )}
               </h2>
               <p>
                 {summary.activeCycle
@@ -1798,9 +1918,13 @@ export function HomeView({
                   </strong>
                   <span>完了したIssue</span>
                 </div>
-                <button className="text-button" onClick={() => onNavigate("cycles")}>
+                <Link
+                  className="text-button"
+                  to="/cycles/$cycleId"
+                  params={{ cycleId: summary.activeCycle.id }}
+                >
                   Cycle詳細 →
-                </button>
+                </Link>
               </div>
             </>
           ) : (
@@ -1813,16 +1937,20 @@ export function HomeView({
           )}
         </section>
         <section className="metric-card">
-          <span className="metric-icon purple">✦</span>
-          <span className="eyebrow">OPEN ISSUES</span>
-          <strong>{summary.openIssueCount}</strong>
-          <span className="metric-foot">未完了のIssue</span>
+          <Link className="home-metric-link" to="/issues" search={{ open: true, completed: true }}>
+            <span className="metric-icon purple">✦</span>
+            <span className="eyebrow">OPEN ISSUES</span>
+            <strong>{summary.openIssueCount}</strong>
+            <span className="metric-foot">未完了のIssue</span>
+          </Link>
         </section>
         <section className="metric-card">
-          <span className="metric-icon green">↗</span>
-          <span className="eyebrow">PROJECTS</span>
-          <strong>{summary.activeProjectCount}</strong>
-          <span className="metric-foot">進行中のProject</span>
+          <Link className="home-metric-link" to="/projects" search={{ active: true }}>
+            <span className="metric-icon green">↗</span>
+            <span className="eyebrow">PROJECTS</span>
+            <strong>{summary.activeProjectCount}</strong>
+            <span className="metric-foot">進行中のProject</span>
+          </Link>
         </section>
       </div>
       <section className="home-section">
@@ -1838,6 +1966,7 @@ export function HomeView({
         <div className="home-deadline-grid">
           <HomeIssueSection
             label="OVERDUE"
+            issueSearch={{ open: true, due: "overdue", completed: true }}
             title="期限超過"
             issues={summary.overdue}
             workflowStates={data.workflowStates}
@@ -1848,6 +1977,7 @@ export function HomeView({
           />
           <HomeIssueSection
             label="TODAY"
+            issueSearch={{ open: true, due: "today", completed: true }}
             title="今日が期限"
             issues={summary.dueToday}
             workflowStates={data.workflowStates}
@@ -1858,6 +1988,7 @@ export function HomeView({
           />
           <HomeIssueSection
             label="NEXT 7 DAYS"
+            issueSearch={{ open: true, due: "next7", completed: true }}
             title="7日以内"
             issues={summary.dueSoon}
             workflowStates={data.workflowStates}
@@ -1874,9 +2005,19 @@ export function HomeView({
             <span className="eyebrow coral">CURRENT CYCLE</span>
             <h2>Cycleの未完了Issue</h2>
           </div>
-          <button className="text-button" onClick={() => onNavigate("cycles")}>
-            Cycle詳細 →
-          </button>
+          {summary.activeCycle ? (
+            <Link
+              className="text-button"
+              to="/cycles/$cycleId"
+              params={{ cycleId: summary.activeCycle.id }}
+            >
+              Cycle詳細 →
+            </Link>
+          ) : (
+            <button className="text-button" onClick={() => onNavigate("cycles")}>
+              Cycle詳細 →
+            </button>
+          )}
         </div>
         {summary.activeCycle ? (
           <HomeIssueSection
@@ -1966,6 +2107,7 @@ export function HomeView({
 
 function HomeIssueSection({
   label,
+  issueSearch,
   title,
   issues,
   workflowStates,
@@ -1975,6 +2117,7 @@ function HomeIssueSection({
   onOpenIssue,
 }: {
   label: string;
+  issueSearch?: IssueSearch;
   title: string;
   issues: Issue[];
   workflowStates: WorkflowState[];
@@ -1985,13 +2128,23 @@ function HomeIssueSection({
 }) {
   return (
     <section className="home-issue-section">
-      <div className="home-issue-section-heading">
-        <div>
-          <span className="eyebrow">{label}</span>
-          <h3>{title}</h3>
+      {issueSearch ? (
+        <Link className="home-issue-section-heading" to="/issues" search={issueSearch}>
+          <div>
+            <span className="eyebrow">{label}</span>
+            <h3>{title}</h3>
+          </div>
+          <span className="count-pill">{issues.length}</span>
+        </Link>
+      ) : (
+        <div className="home-issue-section-heading">
+          <div>
+            <span className="eyebrow">{label}</span>
+            <h3>{title}</h3>
+          </div>
+          <span className="count-pill">{issues.length}</span>
         </div>
-        <span className="count-pill">{issues.length}</span>
-      </div>
+      )}
       <HomeIssueList
         issues={issues.slice(0, 4)}
         workflowStates={workflowStates}
@@ -2057,6 +2210,8 @@ export function IssuesView({
   setScope,
   workflowStates,
   filterText,
+  openOnly = false,
+  onClearFilters,
   setFilterText,
   priorityFilter,
   setPriorityFilter,
@@ -2105,6 +2260,8 @@ export function IssuesView({
   setScope: (value: IssueListScope) => void;
   workflowStates: WorkflowState[];
   filterText: string;
+  openOnly?: boolean;
+  onClearFilters?: () => void;
   setFilterText: (value: string) => void;
   priorityFilter: Issue["priority"] | "all";
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
@@ -2160,6 +2317,7 @@ export function IssuesView({
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
     .filter((group) => group.issues.length > 0);
   const hasIssueFilter =
+    openOnly ||
     Boolean(filterText.trim()) ||
     statusFilter !== "all" ||
     priorityFilter !== "all" ||
@@ -2168,6 +2326,10 @@ export function IssuesView({
     dueFilter !== "all" ||
     !showCompleted;
   function clearIssueFilters() {
+    if (onClearFilters) {
+      onClearFilters();
+      return;
+    }
     setFilterText("");
     setStatusFilter("all");
     setPriorityFilter("all");
@@ -2188,15 +2350,16 @@ export function IssuesView({
   }
 
   function moveIssue(issue: Issue, direction: "up" | "down") {
-    if (!manualOrder || reorderBusy) return;
+    if (!manualOrder || reorderBusy) return false;
     const index = issues.findIndex((item) => item.id === issue.id);
     const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return;
+    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return false;
     const beforeIssueId =
       allIssues.length === issues.length
         ? beforeIssueIdForMove(orderedIssues, issue.id, direction)
         : beforeIssueIdForDrop(orderedIssues, issue.id, issues[targetIndex].id);
     onReorder(issue, beforeIssueId);
+    return true;
   }
 
   return (
@@ -2328,6 +2491,7 @@ export function IssuesView({
           <option value="overdue">期限超過</option>
           <option value="today">今日が期限</option>
           <option value="upcoming">今後が期限</option>
+          <option value="next7">7日以内が期限</option>
         </select>
         <label className="completed-toggle">
           <input
@@ -2358,7 +2522,7 @@ export function IssuesView({
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
-        <p className="manual-order-hint">Issueをドラッグするか、↑↓ボタンで並び替えます。</p>
+        <p className="manual-order-hint">ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。</p>
       )}
       {selected.length > 0 && (
         <div className="bulk-bar" role="region" aria-label="Issue一括操作">
@@ -2549,11 +2713,11 @@ export function IssuesView({
                 }}
               />
             </span>
-            <span>ISSUE</span>
-            <span>STATUS</span>
-            <span>PRIORITY</span>
-            <span>PROJECT</span>
-            <span>DUE</span>
+            <span className="issue-main-heading">ISSUE</span>
+            <span className="status-cell">STATUS</span>
+            <span className="priority-cell">PRIORITY</span>
+            <span className="project-cell">PROJECT</span>
+            <span className="due-cell">DUE</span>
           </div>
           {issues.map((issue) => (
             <IssueRow
@@ -2636,6 +2800,61 @@ function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
   );
 }
 
+function useKeyboardReorderFocus(busy: boolean) {
+  const handleRef = useRef<HTMLButtonElement>(null);
+  const keyboardIntentRef = useRef(false);
+  const pendingSeenRef = useRef(false);
+  const stopMonitoringRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopMonitoringRef.current?.(), []);
+  useEffect(() => {
+    if (busy) {
+      if (keyboardIntentRef.current) pendingSeenRef.current = true;
+      return;
+    }
+    if (!pendingSeenRef.current) return;
+    pendingSeenRef.current = false;
+    stopMonitoringRef.current?.();
+    stopMonitoringRef.current = null;
+    const restore = keyboardIntentRef.current;
+    keyboardIntentRef.current = false;
+    const handle = handleRef.current;
+    if (!restore || !handle?.isConnected || handle.disabled || handle.closest("[inert]")) return;
+    const active = handle.ownerDocument.activeElement;
+    if (active === handle.ownerDocument.body || active === handle)
+      handle.focus({ preventScroll: true });
+  }, [busy]);
+  return {
+    handleRef,
+    rememberKeyboardFocus: () => {
+      stopMonitoringRef.current?.();
+      stopMonitoringRef.current = null;
+      const handle = handleRef.current;
+      keyboardIntentRef.current = !!handle && handle.ownerDocument.activeElement === handle;
+      pendingSeenRef.current = false;
+      if (!keyboardIntentRef.current || !handle) return;
+      const doc = handle.ownerDocument;
+      const onFocusIn = (event: FocusEvent) => {
+        if (event.target === handle || event.target === doc.body) return;
+        keyboardIntentRef.current = false;
+        stopMonitoringRef.current?.();
+        stopMonitoringRef.current = null;
+      };
+      const onDragStart = () => {
+        keyboardIntentRef.current = false;
+        pendingSeenRef.current = false;
+        stopMonitoringRef.current?.();
+        stopMonitoringRef.current = null;
+      };
+      doc.addEventListener("focusin", onFocusIn);
+      doc.addEventListener("dragstart", onDragStart, true);
+      stopMonitoringRef.current = () => {
+        doc.removeEventListener("focusin", onFocusIn);
+        doc.removeEventListener("dragstart", onDragStart, true);
+      };
+    },
+  };
+}
+
 function IssueRow({
   issue,
   state,
@@ -2680,9 +2899,10 @@ function IssueRow({
   onDragEnd?: () => void;
   onDragOver?: () => void;
   onDrop?: () => void;
-  onMove?: (direction: "up" | "down") => void;
+  onMove?: (direction: "up" | "down") => void | boolean;
   reorderBusy?: boolean;
 }) {
+  const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(pending || reorderBusy);
   return (
     <div
       className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
@@ -2716,26 +2936,24 @@ function IssueRow({
     >
       {manualOrder && (
         <span className="reorder-cell">
-          <span className="drag-handle" aria-hidden="true">
-            ⠿
-          </span>
           <button
             type="button"
-            className="reorder-button"
-            aria-label={`${issue.identifier}を上へ移動`}
+            ref={handleRef}
+            className="drag-handle"
+            aria-label={`${issue.identifier}の並び替え`}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            title="ドラッグ、またはAlt+↑ / Alt+↓で並べ替え"
             disabled={pending || reorderBusy}
-            onClick={() => onMove?.("up")}
+            onKeyDown={(event) => {
+              if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (pending || reorderBusy) return;
+              if (onMove && onMove(event.key === "ArrowUp" ? "up" : "down") !== false)
+                rememberKeyboardFocus();
+            }}
           >
-            ↑
-          </button>
-          <button
-            type="button"
-            className="reorder-button"
-            aria-label={`${issue.identifier}を下へ移動`}
-            disabled={pending || reorderBusy}
-            onClick={() => onMove?.("down")}
-          >
-            ↓
+            <span aria-hidden="true">⠿</span>
           </button>
         </span>
       )}
@@ -2855,8 +3073,10 @@ function IssueRow({
             disabled={pending}
             onChange={(event) => onUpdate(issue, { dueAt: dateInputToUnix(event.target.value) })}
           />
+        ) : issue.dueAt === null ? (
+          "未設定"
         ) : (
-          formatDate(issue.dueAt)
+          formatIssueDueDate(issue.dueAt)
         )}
       </span>
     </div>
@@ -2913,25 +3133,33 @@ function CycleReorderControls({
   disabled: boolean;
   onMove: (direction: "up" | "down") => void;
 }) {
+  const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(disabled);
   return (
-    <div className="cycle-reorder-controls" aria-label={`${issue.identifier}の並び替え`}>
+    <div className="cycle-reorder-controls">
       <button
         type="button"
-        className="reorder-button"
-        aria-label={`${issue.identifier}を上へ`}
-        disabled={disabled || !canMoveUp}
-        onClick={() => onMove("up")}
+        ref={handleRef}
+        className="drag-handle"
+        aria-label={`${issue.identifier}の並び替え`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        title="ドラッグ、またはAlt+↑ / Alt+↓で並べ替え"
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (disabled) return;
+          if (event.key === "ArrowUp" && canMoveUp) {
+            rememberKeyboardFocus();
+            onMove("up");
+          }
+          if (event.key === "ArrowDown" && canMoveDown) {
+            rememberKeyboardFocus();
+            onMove("down");
+          }
+        }}
       >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="reorder-button"
-        aria-label={`${issue.identifier}を下へ`}
-        disabled={disabled || !canMoveDown}
-        onClick={() => onMove("down")}
-      >
-        ↓
+        <span aria-hidden="true">⠿</span>
       </button>
     </div>
   );
@@ -3684,7 +3912,9 @@ export function CyclesView({
               </button>
             </div>
             {selectedCycle.status !== "completed" && (
-              <span className="manual-order-hint">ドラッグまたは↑↓ボタンで並び替えます。</span>
+              <span className="manual-order-hint">
+                ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。
+              </span>
             )}
           </div>
           {issueViewMode === "board" ? (
@@ -5881,7 +6111,9 @@ export function SettingsView({
                         ? "一時停止中"
                         : run.status === "failed"
                           ? "復旧が必要"
-                          : "完了"
+                          : run.status === "rejected"
+                            ? "開始できませんでした"
+                            : "完了"
                   : "待機中"}
               </strong>
               <span>
@@ -6353,10 +6585,7 @@ export function RunOverlay({
 }) {
   const blocking = ["pending", "running"].includes(run.status);
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (blocking) overlayRef.current?.focus();
-  }, [blocking]);
+  useDialogBoundary(overlayRef, { enabled: blocking, priority: 100, onEscape: () => undefined });
 
   return (
     <div
@@ -6470,9 +6699,11 @@ export function IssueCycleHistorySection({
 
 export function IssueDetailPanel({
   issueId,
+  issueSearch,
   fallbackIssue,
   knownIssues,
   projects,
+  labels = [],
   onUpdate,
   pending,
   workflowStates,
@@ -6480,9 +6711,11 @@ export function IssueDetailPanel({
   onClose,
 }: {
   issueId: string;
+  issueSearch?: IssueSearch;
   fallbackIssue?: Issue;
   knownIssues: Issue[];
   projects: Project[];
+  labels?: Label[];
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   pending: boolean;
   workflowStates: WorkflowState[];
@@ -6491,6 +6724,11 @@ export function IssueDetailPanel({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, {
+    initialFocus: "#issue-detail-title",
+    onEscape: () => void closePanel(),
+  });
   const detailQuery = useQuery({
     queryKey: ["issue-detail", issueId],
     queryFn: () => apiGet<IssueDetailViewModel>(`/api/v1/issues/${issueId}`),
@@ -6508,6 +6746,8 @@ export function IssueDetailPanel({
   const [relationTargetId, setRelationTargetId] = useState("");
   const [relationType, setRelationType] = useState<IssueRelationTypeViewModel>("related");
   const [saving, setSaving] = useState(false);
+  const [propertySaving, setPropertySaving] = useState(false);
+  const propertyMutationRef = useRef(false);
   const [descriptionSaveStatus, setDescriptionSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle",
   );
@@ -6521,6 +6761,7 @@ export function IssueDetailPanel({
     title: string;
   } | null>(null);
   const [projectRetry, setProjectRetry] = useState<string | null>(null);
+  const [labelRetry, setLabelRetry] = useState<string[] | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
   const issueRef = useRef(issue);
   const draftIssueIdRef = useRef(issue?.id ?? null);
@@ -6607,24 +6848,38 @@ export function IssueDetailPanel({
 
   useEffect(() => {
     setProjectRetry(null);
+    setLabelRetry(null);
     setDescriptionRetry(null);
     setError(null);
   }, [issue?.id]);
 
   function applyUpdatedIssue(updatedIssue: Issue) {
+    issueRef.current = updatedIssue;
+    function syncScope(items: Issue[], scope: IssueListScope): Issue[] {
+      const belongs =
+        scope === "trash"
+          ? updatedIssue.deletedAt !== null
+          : updatedIssue.deletedAt === null &&
+            (scope === "archived"
+              ? updatedIssue.archivedAt !== null
+              : updatedIssue.archivedAt === null);
+      const exists = items.some((item) => item.id === updatedIssue.id);
+      if (!belongs) return exists ? items.filter((item) => item.id !== updatedIssue.id) : items;
+      return exists
+        ? items.map((item) => (item.id === updatedIssue.id ? updatedIssue : item))
+        : [...items, updatedIssue];
+    }
     queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
       current ? { ...current, issue: updatedIssue } : current,
     );
     queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-      current
-        ? {
-            ...current,
-            issues: current.issues.map((item) =>
-              item.id === updatedIssue.id ? updatedIssue : item,
-            ),
-          }
-        : current,
+      current ? { ...current, issues: syncScope(current.issues, "active") } : current,
     );
+    for (const scope of ["active", "archived", "trash"] as const) {
+      queryClient.setQueryData<{ items: Issue[] }>(["issues", scope], (current) =>
+        current ? { ...current, items: syncScope(current.items, scope) } : current,
+      );
+    }
   }
 
   async function saveDescription(
@@ -6697,8 +6952,10 @@ export function IssueDetailPanel({
           }
           if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
             const latest = await detailQuery.refetch();
-            if (latest.data) syncDescriptionDraft(latest.data.issue);
-            else syncDescriptionDraft(targetIssue);
+            if (latest.data) {
+              applyUpdatedIssue(latest.data.issue);
+              syncDescriptionDraft(latest.data.issue);
+            } else syncDescriptionDraft(targetIssue);
           } else if (!isValidationError) {
             syncDescriptionDraft(targetIssue);
           }
@@ -6821,7 +7078,14 @@ export function IssueDetailPanel({
   async function navigateAfterDescriptionSave(path: string) {
     await waitForParentMutation();
     if (!(await flushDescriptionAutosave())) return;
-    await router.navigate({ to: path as never });
+    if (issueSearch && path.startsWith("/issues/")) {
+      await router.navigate({
+        to: "/issues/$issueId",
+        params: { issueId: decodeURIComponent(path.slice("/issues/".length)) },
+        search: issueSearch,
+        resetScroll: false,
+      });
+    } else await router.navigate({ to: path as never });
   }
 
   async function closePanel() {
@@ -6883,52 +7147,100 @@ export function IssueDetailPanel({
 
   async function saveProject(nextProjectId = projectIdDraft) {
     const targetIssue = issueRef.current;
-    if (!targetIssue || saving) return;
+    if (!targetIssue || propertyMutationRef.current) return;
     if (nextProjectId === (targetIssue.projectId ?? "")) {
       setProjectRetry(null);
       return;
     }
-    await waitForParentMutation();
-    if (!(await flushDescriptionAutosave())) return;
-    const saveIssue = issueRef.current;
-    if (!saveIssue) return;
-    if (nextProjectId === (saveIssue.projectId ?? "")) {
-      setProjectRetry(null);
-      return;
-    }
-    setDetailSaving(true);
-    setError(null);
-    setProjectRetry(null);
+    propertyMutationRef.current = true;
+    setPropertySaving(true);
     try {
-      const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
-        idempotencyKey: idempotencyKey(),
-        version: saveIssue.version,
-        patch: { projectId: projectIdFromSelection(nextProjectId) },
-      });
-      applyUpdatedIssue(result.issue);
-      dirtyProjectDraftRef.current = false;
-      setProjectIdDraft(result.issue.projectId ?? "");
-      setProjectRetry(null);
-      await detailQuery.refetch();
-    } catch (caught) {
-      setProjectRetry(nextProjectId);
-      if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
-        const latest = await detailQuery.refetch();
-        if (latest.data) {
-          applyUpdatedIssue(latest.data.issue);
-          dirtyProjectDraftRef.current = false;
-          setProjectIdDraft(latest.data.issue.projectId ?? "");
-        } else {
-          dirtyProjectDraftRef.current = false;
-          setProjectIdDraft(saveIssue.projectId ?? "");
-        }
-      } else {
-        dirtyProjectDraftRef.current = false;
-        setProjectIdDraft(saveIssue.projectId ?? "");
+      await waitForParentMutation();
+      if (!(await flushDescriptionAutosave())) {
+        setProjectRetry(nextProjectId);
+        return;
       }
-      setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
+      const saveIssue = issueRef.current;
+      if (!saveIssue || saveIssue.id !== targetIssue.id) return;
+      if (nextProjectId === (saveIssue.projectId ?? "")) {
+        setProjectRetry(null);
+        return;
+      }
+      setDetailSaving(true);
+      setError(null);
+      setProjectRetry(null);
+      try {
+        const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
+          idempotencyKey: idempotencyKey(),
+          version: saveIssue.version,
+          patch: { projectId: projectIdFromSelection(nextProjectId) },
+        });
+        applyUpdatedIssue(result.issue);
+        dirtyProjectDraftRef.current = false;
+        setProjectIdDraft(result.issue.projectId ?? "");
+        setProjectRetry(null);
+        await detailQuery.refetch();
+      } catch (caught) {
+        setProjectRetry(nextProjectId);
+        if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+          const latest = await detailQuery.refetch();
+          if (latest.data) {
+            applyUpdatedIssue(latest.data.issue);
+          }
+        }
+        dirtyProjectDraftRef.current = true;
+        setProjectIdDraft(nextProjectId);
+        setError(caught instanceof ApiError ? caught.message : "Projectの保存に失敗しました。");
+      } finally {
+        setDetailSaving(false);
+      }
     } finally {
-      setDetailSaving(false);
+      propertyMutationRef.current = false;
+      setPropertySaving(false);
+    }
+  }
+
+  async function saveLabels(nextLabelIds: string[]) {
+    const targetIssue = issueRef.current;
+    if (!targetIssue || propertyMutationRef.current) return;
+    const ownedLabelIds = new Set(
+      labels.filter((label) => label.userId === targetIssue.userId).map((label) => label.id),
+    );
+    if (nextLabelIds.some((labelId) => !ownedLabelIds.has(labelId))) return;
+    propertyMutationRef.current = true;
+    setPropertySaving(true);
+    try {
+      await waitForParentMutation();
+      if (!(await flushDescriptionAutosave())) {
+        setLabelRetry(nextLabelIds);
+        return;
+      }
+      const saveIssue = issueRef.current;
+      if (!saveIssue || saveIssue.id !== targetIssue.id) return;
+      setDetailSaving(true);
+      setError(null);
+      setLabelRetry(null);
+      try {
+        const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${saveIssue.id}`, {
+          idempotencyKey: idempotencyKey(),
+          version: saveIssue.version,
+          patch: { labelIds: nextLabelIds },
+        });
+        applyUpdatedIssue(result.issue);
+        await detailQuery.refetch();
+      } catch (caught) {
+        setLabelRetry(nextLabelIds);
+        if (caught instanceof ApiError && caught.code === "ISSUE_VERSION_CONFLICT") {
+          const latest = await detailQuery.refetch();
+          if (latest.data) applyUpdatedIssue(latest.data.issue);
+        }
+        setError(caught instanceof ApiError ? caught.message : "Labelの保存に失敗しました。");
+      } finally {
+        setDetailSaving(false);
+      }
+    } finally {
+      propertyMutationRef.current = false;
+      setPropertySaving(false);
     }
   }
 
@@ -7070,16 +7382,12 @@ export function IssueDetailPanel({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop issue-detail-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="issue-detail-title"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          void closePanel();
-        }
-      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           void closePanel();
@@ -7176,12 +7484,14 @@ export function IssueDetailPanel({
                   id="issue-project"
                   aria-label="IssueのProject"
                   value={projectIdDraft}
-                  disabled={saving}
+                  disabled={pending || saving || propertySaving}
                   onChange={(event) => {
+                    if (propertyMutationRef.current) return;
                     const nextProjectId = event.target.value;
                     dirtyProjectDraftRef.current =
                       nextProjectId !== (issueRef.current?.projectId ?? "");
                     setProjectIdDraft(nextProjectId);
+                    void saveProject(nextProjectId);
                   }}
                 >
                   <option value="">Projectなし</option>
@@ -7191,13 +7501,11 @@ export function IssueDetailPanel({
                     </option>
                   ))}
                 </select>
-                <button
-                  className="button secondary"
-                  disabled={saving || projectIdDraft === (issue.projectId ?? "")}
-                  onClick={() => void saveProject()}
-                >
-                  {saving ? "保存中…" : "Projectを保存"}
-                </button>
+                {propertySaving && (
+                  <span className="detail-property-status" role="status">
+                    保存中…
+                  </span>
+                )}
               </div>
               <div className="detail-property-editor issue-core-properties">
                 <label className="field-label" htmlFor="issue-due-date">
@@ -7244,6 +7552,36 @@ export function IssueDetailPanel({
                     ))}
                 </select>
               </div>
+              <fieldset
+                className="detail-label-editor"
+                disabled={pending || saving || propertySaving}
+              >
+                <legend className="field-label">Labels</legend>
+                {labels
+                  .filter((label) => label.userId === issue.userId)
+                  .map((label) => (
+                    <label className="setting-checkbox" key={label.id}>
+                      <input
+                        type="checkbox"
+                        aria-label={label.name}
+                        checked={issue.labelIds.includes(label.id)}
+                        onChange={(event) => {
+                          if (propertyMutationRef.current) return;
+                          const current = issueRef.current;
+                          if (!current) return;
+                          const next = event.target.checked
+                            ? [...current.labelIds, label.id]
+                            : current.labelIds.filter((labelId) => labelId !== label.id);
+                          void saveLabels([...new Set(next)]);
+                        }}
+                      />
+                      <span>{label.name}</span>
+                    </label>
+                  ))}
+                {labels.filter((label) => label.userId === issue.userId).length === 0 && (
+                  <span className="detail-empty">Labelはありません。</span>
+                )}
+              </fieldset>
               {detail && (
                 <section className="issue-hierarchy" aria-label="親子Issue">
                   <div className="detail-section-heading">
@@ -7307,6 +7645,14 @@ export function IssueDetailPanel({
                 placeholder="説明を追加…"
                 rows={6}
               />
+              {linkifyText(description).some((part) => part.type === "link") && (
+                <section
+                  className="detail-description-preview description-preview"
+                  aria-label="説明のリンクPreview"
+                >
+                  <LinkifiedText text={description} className="linkified-text" />
+                </section>
+              )}
               <div className="detail-actions">
                 <span className="detail-save-status" aria-live="polite">
                   {descriptionSaveStatus === "saving"
@@ -7368,7 +7714,9 @@ export function IssueDetailPanel({
                           rows={3}
                         />
                       ) : (
-                        <p className="note-body">{note.body}</p>
+                        <p className="note-body">
+                          <LinkifiedText text={note.body} className="linkified-text" />
+                        </p>
                       )}
                       <div className="note-footer">
                         <span>
@@ -7503,9 +7851,9 @@ export function IssueDetailPanel({
             </aside>
           </div>
         )}
-        {error && (
+        {(error || projectRetry !== null || labelRetry !== null) && (
           <div className="detail-live-error" role="alert">
-            <span>{error}</span>
+            <span>{error ?? "選択した変更を再試行してください。"}</span>
             {descriptionFieldErrors && (
               <span className="detail-field-errors">
                 {Object.values(descriptionFieldErrors).flat().join(" ")}
@@ -7527,6 +7875,7 @@ export function IssueDetailPanel({
             {projectRetry !== null && (
               <button
                 className="text-button"
+                disabled={propertySaving || saving || pending}
                 onClick={() => {
                   const retry = projectRetry;
                   setProjectIdDraft(retry);
@@ -7535,6 +7884,15 @@ export function IssueDetailPanel({
                 }}
               >
                 Projectを再試行
+              </button>
+            )}
+            {labelRetry !== null && (
+              <button
+                className="text-button"
+                disabled={propertySaving || saving || pending}
+                onClick={() => void saveLabels(labelRetry)}
+              >
+                Labelを再試行
               </button>
             )}
           </div>
@@ -7579,8 +7937,12 @@ export function IssueComposer({
   onSubmit: () => void;
   busy: boolean;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, { initialFocus: "textarea", onEscape: onClose });
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -7746,6 +8108,8 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogBoundary(dialogRef, { initialFocus: "input", onEscape: onClose });
   const commands = [
     { label: "新しいIssueを作成", hint: "C", action: onCreate },
     ...(
@@ -7772,7 +8136,6 @@ export function CommandPalette({
   useEffect(() => {
     setActiveIndex((current) => Math.min(Math.max(current, 0), Math.max(filtered.length - 1, 0)));
   }, [query, filtered.length]);
-  useEffect(() => inputRef.current?.focus(), []);
 
   function activate(index: number) {
     const command = filtered[index];
@@ -7782,6 +8145,8 @@ export function CommandPalette({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
@@ -7862,47 +8227,7 @@ function Modal({
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const focusable = () => [
-      ...panel.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
-      ),
-    ];
-    (focusable()[0] ?? panel).focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    panel.addEventListener("keydown", onKeyDown);
-    return () => {
-      panel.removeEventListener("keydown", onKeyDown);
-      previous?.focus?.();
-    };
-  }, []);
+  useDialogBoundary(panelRef, { initialFocus: "[data-modal-autofocus]", onEscape: onClose });
 
   return (
     <div

@@ -63,6 +63,16 @@ function renderPanel() {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", {
+    value: function (this: HTMLElement, name: string, handler: EventListener) {
+      this.addEventListener(name.replace(/^on/, ""), handler);
+    },
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", {
+    value: function (this: HTMLElement, name: string, handler: EventListener) {
+      this.removeEventListener(name.replace(/^on/, ""), handler);
+    },
+  });
   const root = createRoot(dom.window.document.getElementById("root")!);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = vi.fn();

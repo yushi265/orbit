@@ -15,7 +15,10 @@ export const Route = createRootRoute({
       { title: "Orbit — 個人用プロジェクト管理" },
     ],
     links: [
-      { rel: "stylesheet", href: `${appCss}?v=${APP_ASSET_VERSION}` },
+      {
+        rel: "stylesheet",
+        href: import.meta.env.DEV ? appCss : `${appCss}?v=${APP_ASSET_VERSION}`,
+      },
       { rel: "manifest", href: "/manifest.webmanifest?v=4" },
       { rel: "icon", href: "/icon.svg?v=2", type: "image/svg+xml" },
       { rel: "apple-touch-icon", href: "/icon-192.png?v=4", type: "image/png" },

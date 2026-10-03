@@ -67,7 +67,7 @@ export const reorderIssueInputSchema = z
       });
   });
 
-const issueDueSchema = z.enum(["none", "overdue", "today", "upcoming"]);
+const issueDueSchema = z.enum(["none", "overdue", "today", "upcoming", "next7"]);
 const issueGroupSchema = z.enum(["status", "priority", "project", "cycle", "label"]);
 const issueOrderSchema = z.enum(["manual", "priority", "updated", "created", "due_at", "estimate"]);
 

@@ -91,6 +91,8 @@ TanStack QueryはMutation応答前にCacheを更新する楽観的更新を公�
 
 すべての主キーはUUID v7または同等の時系列ソート可能IDを使用し、日時はUTCのUnix millisecondsで保存する。個人専用でも認証境界を明確にするため、主な業務テーブルは`user_id`を持つ。
 
+Issue期限の`due_at`は時刻を持たない暦日であり、既存互換のためUTC midnightのUnix millisecondsを日付のcarrierとして保存する。旧値はUTC年月日を期限日として読み、Timezoneによる日付変換・Migrationは行わない。今日の判定に使う現在日付だけは本人Timezoneから求め、UIと検索APIで共有する。
+
 | Entity | 主な属性 |
 | --- | --- |
 | users | id, name, email, avatar_url, created_at |

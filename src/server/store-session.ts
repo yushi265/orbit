@@ -7,6 +7,7 @@ import {
 import { resolveRuntimeConfig } from "./runtime-config";
 import { conflict } from "./errors";
 import { runtimeEnv } from "./auth";
+import { decodeStoreSnapshot, encodeStoreSnapshot } from "./store-snapshot-compat";
 import { getOrbitStore, OrbitStore } from "./store";
 
 export interface StoreSession {
@@ -31,7 +32,12 @@ export async function openStoreSession(
   if (config.storage === "memory") {
     const store = getOrbitStore(userId);
     store.ensureOwner(userId, email, userId === "dev-owner");
-    return { store, persist: async () => {}, needsInitialPersist: false };
+    store.clearRejectedRunStateChanges();
+    return {
+      store,
+      persist: async () => store.clearRejectedRunStateChanges(),
+      needsInitialPersist: false,
+    };
   }
 
   const database = env.DB;
@@ -40,7 +46,9 @@ export async function openStoreSession(
       `${config.mode === "production" ? "Production" : "Local"} D1 binding is missing`,
     );
   const row = await readStoreSnapshot(database, userId);
-  const store = row ? OrbitStore.fromSnapshot(row.snapshot, undefined, userId) : new OrbitStore();
+  const store = row
+    ? OrbitStore.fromSnapshot(decodeStoreSnapshot(row.snapshot), undefined, userId)
+    : new OrbitStore();
   const initialSnapshotJson = row ? JSON.stringify(store.toSnapshot()) : null;
   store.ensureOwner(userId, email);
   store.ensureUpcomingCycles(userId);
@@ -60,13 +68,21 @@ export async function openStoreSession(
       const snapshot = store.toSnapshot();
       if (initialSnapshotJson !== null && JSON.stringify(snapshot) === initialSnapshotJson) {
         persisted = true;
+        store.clearRejectedRunStateChanges();
         return;
       }
       try {
-        await writeStoreSnapshot(database, userId, expectedVersion, snapshot, Date.now());
+        await writeStoreSnapshot(
+          database,
+          userId,
+          expectedVersion,
+          encodeStoreSnapshot(snapshot),
+          Date.now(),
+        );
         persisted = true;
         needsInitialPersist = false;
         store.clearBackgroundStateChanges();
+        store.clearRejectedRunStateChanges();
       } catch (error) {
         if (error instanceof SnapshotVersionConflict)
           throw conflict("D1_WRITE_CONFLICT", "別の操作が先に保存されました。再試行してください。");

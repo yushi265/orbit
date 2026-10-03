@@ -194,7 +194,7 @@ function projectViewElement(overrides: Partial<ProjectViewProps> = {}) {
 }
 
 describe("Home / Project / Inbox workspace UI", () => {
-  it("[代表値] Homeは今日の作業に必要な各セクションと動的な名前を表示する", () => {
+  it("[代表値] Homeは日付・控えめな見出しと今日の作業セクションを表示する", () => {
     const markup = renderToStaticMarkup(
       createElement(HomeView, {
         data: bootstrap([
@@ -207,7 +207,9 @@ describe("Home / Project / Inbox workspace UI", () => {
       }),
     );
 
-    expect(markup).toContain("太郎");
+    expect(markup).toContain("<h1>Home</h1>");
+    expect(markup).toContain("home-date");
+    expect(markup).not.toContain("おかえりなさい");
     expect(markup).toContain("期限超過");
     expect(markup).toContain("7日以内");
     expect(markup).toContain("Cycleの未完了Issue");
@@ -661,9 +663,16 @@ describe("Home / Project / Inbox workspace UI", () => {
     await act(async () => {
       (
         dom.window.document.querySelector(
-          'button[aria-label="TASK-1を下へ移動"]',
+          'button.drag-handle[aria-label="TASK-1の並び替え"]',
         ) as HTMLButtonElement
-      ).click();
+      ).dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     });
     expect(onReorderIssue).toHaveBeenCalledWith(first, null, project.id);
     await act(async () => {

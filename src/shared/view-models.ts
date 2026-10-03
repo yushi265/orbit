@@ -255,5 +255,5 @@ export interface BootstrapViewModel {
   cycleHistory: CycleHistoryViewModel[];
   views: SavedViewViewModel[];
   notifications: NotificationViewModel[];
-  background: { run: PublicRunViewModel | null };
+  background: { run: PublicRunViewModel | null; lastRun?: PublicRunViewModel | null };
 }

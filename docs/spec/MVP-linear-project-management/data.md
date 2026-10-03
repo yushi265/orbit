@@ -24,7 +24,7 @@
 |---|---|
 | 主キー | `TEXT` の UUID v7 または同等の時系列ソート可能 ID。Service が生成し、DB の一意制約で重複を拒否する。 |
 | 所有者 | `users.id`。主な業務テーブルは `user_id TEXT NOT NULL` を持ち、Repository の全メソッドが `ownerUserId` を受け取る。 |
-| 日時 | UTC Unix milliseconds の `INTEGER`。Cycle の境界計算だけ個人設定の IANA timezone へ変換する。 |
+| 日時 | UTC Unix milliseconds の `INTEGER`。Cycle境界は個人設定のIANA timezoneで計算する。Issue期限はUTC年月日の暦日carrierとして保存し、Timezone変換しない。今日との比較には本人Timezoneの現在暦日を使う。 |
 | JSON | `TEXT` として保存し、保存前に対象ドメインの構造を検証する。Token・Cookie・秘密値は保存しない。 |
 | 論理削除 | Issue、Project、Notification、Note、Saved View 等は `deleted_at` または対象固有の `archived_at` を持つ。通常 Query は未削除・未アーカイブを既定とする。 |
 | 物理削除 | `purge` Step が `deleted_at` から 30 日を超えた対象を依存順に Chunk 処理する。対象行単位の dedupe key を使い、再実行は No-op にする。 |

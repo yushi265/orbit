@@ -118,7 +118,7 @@ describe("Issue list controls", () => {
         identifier: "TASK-2",
         title: "Bravo",
         priority: "medium",
-        dueAt: 300,
+        dueAt: Date.UTC(2026, 9, 3),
         createdAt: 100,
         updatedAt: 300,
       }),
@@ -138,7 +138,7 @@ describe("Issue list controls", () => {
         title: "Charlie",
         statusId: "canceled",
         priority: "low",
-        dueAt: 200,
+        dueAt: Date.UTC(2026, 9, 2),
         createdAt: 300,
         updatedAt: 200,
       }),
@@ -147,11 +147,17 @@ describe("Issue list controls", () => {
     expect(issueSortOptions.map((option) => option.value)).toEqual([
       "manual",
       "updated_desc",
+      "updated_asc",
       "created_desc",
+      "created_asc",
       "title_asc",
+      "title_desc",
       "status_asc",
+      "status_desc",
       "priority_desc",
+      "priority_asc",
       "due_asc",
+      "due_desc",
     ]);
     expect(sortIssues(issues, "updated_desc").map((item) => item.id)).toEqual([
       "medium",
@@ -244,4 +250,129 @@ describe("Issue list controls", () => {
       "TASK-2",
     ]);
   });
+
+  it("[代表値] 更新日の古い順を選択でき、元の配列は変更しない", () => {
+    const issues = [
+      issue({ id: "latest", updatedAt: 300 }),
+      issue({ id: "earliest", updatedAt: 100 }),
+      issue({ id: "middle", updatedAt: 200 }),
+    ];
+    expect(sortIssues(issues, "updated_asc").map((item) => item.id)).toEqual([
+      "earliest",
+      "middle",
+      "latest",
+    ]);
+    expect(issues.map((item) => item.id)).toEqual(["latest", "earliest", "middle"]);
+  });
+
+  it("[代表値] 作成日の古い順は更新日と独立して並ぶ", () => {
+    const issues = [
+      issue({ id: "middle", createdAt: 200, updatedAt: 300 }),
+      issue({ id: "earliest", createdAt: 100, updatedAt: 200 }),
+      issue({ id: "latest", createdAt: 300, updatedAt: 100 }),
+    ];
+    expect(sortIssues(issues, "created_asc").map((item) => item.id)).toEqual([
+      "earliest",
+      "middle",
+      "latest",
+    ]);
+  });
+
+  it("[代表値] タイトルの降順を日本語でも選択できる", () => {
+    const issues = [
+      issue({ id: "a", title: "あいう", updatedAt: 300 }),
+      issue({ id: "sa", title: "さしす", updatedAt: 200 }),
+      issue({ id: "ka", title: "かきく", updatedAt: 100 }),
+    ];
+    expect(sortIssues(issues, "title_desc").map((item) => item.id)).toEqual(["sa", "ka", "a"]);
+  });
+
+  it("[代表値] Statusの逆順はWorkflow positionを使う", () => {
+    const issues = [
+      issue({ id: "todo", statusId: "todo", updatedAt: 300 }),
+      issue({ id: "done", statusId: "done", updatedAt: 200 }),
+      issue({ id: "canceled", statusId: "canceled", updatedAt: 100 }),
+    ];
+    expect(
+      sortIssues(issues, "status_desc", [
+        workflowStates[1],
+        workflowStates[0],
+        workflowStates[2],
+      ]).map((item) => item.id),
+    ).toEqual(["canceled", "done", "todo"]);
+  });
+
+  it("[代表値] Priority昇順はNo priorityからUrgentまで全5段階を反転する", () => {
+    const issues = ["urgent", "high", "medium", "low", "no_priority"].map((priority, index) =>
+      issue({ id: priority, priority: priority as Issue["priority"], updatedAt: 500 - index }),
+    );
+    expect(sortIssues(issues, "priority_asc").map((item) => item.id)).toEqual([
+      "no_priority",
+      "low",
+      "medium",
+      "high",
+      "urgent",
+    ]);
+  });
+
+  it("[境界値] 期限の遠い順でもnullは最後で同一期限のtie順は維持する", () => {
+    const issues = [
+      issue({ id: "none", dueAt: null, updatedAt: 500 }),
+      issue({ id: "near", dueAt: Date.UTC(2026, 9, 1), updatedAt: 400 }),
+      issue({ id: "far-old", dueAt: Date.UTC(2026, 9, 3), updatedAt: 200 }),
+      issue({ id: "far-new", dueAt: Date.UTC(2026, 9, 3), updatedAt: 300 }),
+    ];
+    expect(sortIssues(issues, "due_desc").map((item) => item.id)).toEqual([
+      "far-new",
+      "far-old",
+      "near",
+      "none",
+    ]);
+    expect(sortIssues(issues, "due_asc").map((item) => item.id)).toEqual([
+      "near",
+      "far-new",
+      "far-old",
+      "none",
+    ]);
+  });
+
+  it.each([
+    "manual",
+    "updated_desc",
+    "updated_asc",
+    "created_desc",
+    "created_asc",
+    "title_asc",
+    "title_desc",
+    "status_asc",
+    "status_desc",
+    "priority_desc",
+    "priority_asc",
+    "due_asc",
+    "due_desc",
+  ] as const)("[同値分割] %sの同値は既存identifier tie順を反転しない", (sort) => {
+    const issues = [
+      issue({ id: "second", identifier: "TASK-2", dueAt: 1000 }),
+      issue({ id: "first", identifier: "TASK-1", dueAt: 1000 }),
+    ];
+    expect(sortIssues(issues, sort, workflowStates).map((item) => item.id)).toEqual([
+      "first",
+      "second",
+    ]);
+  });
+
+  it.each(["due_asc", "due_desc"] as const)(
+    "[日付境界] %sは同UTC日non-midnightを時刻順にせず更新順でtieBreakする",
+    (sort) => {
+      const issues = [
+        issue({ id: "evening-old", dueAt: Date.UTC(2026, 9, 2, 23, 59), updatedAt: 100 }),
+        issue({ id: "morning-new", dueAt: Date.UTC(2026, 9, 2), updatedAt: 300 }),
+      ];
+      expect(sortIssues(issues, sort).map((item) => item.id)).toEqual([
+        "morning-new",
+        "evening-old",
+      ]);
+      expect(issues.map((item) => item.id)).toEqual(["evening-old", "morning-new"]);
+    },
+  );
 });

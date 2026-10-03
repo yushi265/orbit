@@ -201,6 +201,7 @@ export interface ContinueRunInput {
 
 const DAY = 24 * 60 * 60 * 1000;
 const THIRTY_DAYS = 30 * DAY;
+const RECEIPT_TTL = DAY;
 const RUN_LEASE_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const CHUNK_SIZE = 25;
@@ -1253,8 +1254,23 @@ export class OrbitStore {
       requestHash: requestHash(operation, input),
       response: structuredClone(response),
       createdAt: this.clock(),
-      expiresAt: this.clock() + THIRTY_DAYS,
+      expiresAt: this.clock() + RECEIPT_TTL,
     });
+  }
+
+  pruneExpiredReceipts(userId: string): number {
+    const now = this.clock();
+    let removed = 0;
+    for (const [key, receipt] of this.receipts) {
+      if (
+        receipt.userId === userId &&
+        Math.min(receipt.expiresAt, receipt.createdAt + RECEIPT_TTL) < now
+      ) {
+        this.receipts.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 
   private checkReceipt<T>(
@@ -2033,26 +2049,26 @@ export class OrbitStore {
     }
 
     const now = this.clock();
+    const targetBefore = { version: target.version, position: target.position };
     assignments.forEach(({ issue, position }) => {
       if (issue.position === position) return;
-      const beforeState = { version: issue.version, position: issue.position };
       issue.position = position;
       issue.version += 1;
       issue.updatedAt = now;
-      this.recordActivity(
-        userId,
-        "issue",
-        issue.id,
-        "reordered",
-        `${input.idempotencyKey}:${issue.id}`,
-        beforeState,
-        { version: issue.version, position },
-      );
-      this.recordOutbox(userId, "issue.reordered", `issue.reordered:${issue.id}:${issue.version}`, {
-        issueId: issue.id,
-        position,
-        version: issue.version,
-      });
+    });
+    this.recordActivity(
+      userId,
+      "issue",
+      target.id,
+      "reordered",
+      `${input.idempotencyKey}:${target.id}`,
+      targetBefore,
+      { version: target.version, position: target.position },
+    );
+    this.recordOutbox(userId, "issue.reordered", `issue.reordered:${target.id}:${target.version}`, {
+      issueId: target.id,
+      position: target.position,
+      version: target.version,
     });
     this.recordReceipt(userId, "issue.reorder", input.idempotencyKey, input, target);
     return target;
@@ -3637,6 +3653,11 @@ export class OrbitStore {
         child.version += 1;
         child.updatedAt = this.clock();
       }
+    }
+    for (let index = this.activities.length - 1; index >= 0; index -= 1) {
+      const activity = this.activities[index];
+      if (activity.userId === userId && activity.entityId === issueId)
+        this.activities.splice(index, 1);
     }
     this.issues.delete(issueId);
   }

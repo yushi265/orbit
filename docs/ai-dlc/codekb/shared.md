@@ -4,6 +4,7 @@
 
 - Homeの追加FilterはIssues URLの`open=true`（Completed/Canceled除外、UIのみ）と`due=next7`（本人Timezoneの今日より後〜7暦日後、検索/保存契約も共通）、Projectsの`active=true`。旧completed=false/upcomingの意味は維持する。Project表示Orderは13選択肢で、DueはUTC日key比較・null常に最後（参照: `src/lib/url-state/issues.ts`、`src/shared/contracts/project-display.ts`、`src/shared/issue-dates.ts`、`src/components/issue-list.ts`）。
 - Bootstrap.background.lastRunは本人の最新requested_atのPublicRunを返し、同msは最新挿入順を優先する。background.run/currentは復旧可能Runだけのまま。Receipt purgeはexpiresAt<nowであり、期限から追加30日待たない（参照: `src/server/store.ts`、`src/server/review-followup-service.test.ts`）。
+- Mutation Receiptの保持は作成から24時間（`RECEIPT_TTL`）。D1 Sessionの`persist()`が`toSnapshot()`直前に`OrbitStore.pruneExpiredReceipts(userId)`を呼び、`min(expiresAt, createdAt+24h) < now`の同Owner Receiptを削除する。Memory Storeと保存を伴わないGETでは削除しない。Issue並び替えのActivity / Outboxは移動した対象Issueの1件ずつだけ（ずれたIssueはposition / versionのみ更新）。Issue PurgeはそのIssueを`entityId`とするActivityも削除する。rollback互換の「根拠Receipt残存」前提とは両立する（旧版は自動削除せず、新版はSession開始時のdecodeで旧変更を判定した後、成功Mutationの保存時にだけ削除する）。D1 SessionテストのFake D1は`src/server/store-session.test-fixtures.ts`を使う（参照: `src/server/store.ts`、`src/server/store-session.ts`、`src/server/snapshot-growth.test.ts`、`docs/spec/FIX-snapshot-growth/`）。
 - Run controllerはcurrent=nullでも既知の終端を保持する。Bootstrap再取得の失敗はCache内容と非blockingError/Retryを維持し、初回CacheなしだけをErrorScreenにする。Reorder FocusはKeyboardで実際に移動した場合だけ記録し、境界No-op/Dragstart/他入力で残存intentを解除する（参照: `src/components/background-run.ts`、`src/components/OrbitApp.tsx`、`src/components/followup-shell-runtime.test.ts`、`src/components/followup-reorder-runtime.test.ts`）。
 - `/api/v1/bootstrap`、`/api/v1/issues`、`/api/v1/projects`、`/api/v1/cycles`、`/api/v1/search`、`/api/v1/views`、`/api/v1/notifications`、`/api/v1/preferences`、`/api/v1/background-runs/*` をTanStack Start Server Routeで公開する（参照: `src/server/api.ts`、`src/routes/api/v1/`）。
 - Issue detailは `GET /api/v1/issues/:issueId` で `issue / notes / relations / activity` を返し、Notes / RelationsのMutationはIssue配下のnested Routeを使う（参照: `src/server/api.ts`、`src/routes/api/v1/issues/$issueId/`）。
@@ -104,6 +105,6 @@
 
 ## 最終更新
 
-FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
+FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

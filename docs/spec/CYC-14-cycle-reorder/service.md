@@ -22,7 +22,7 @@
 2. `cycleId`ありの場合、対象Issueの`cycleId`が一致しなければ404にする。`beforeIssueId`がある場合は同じ条件を移動先にも適用する。
 3. `statusId`ありの場合、`cycleId`も必須とし、対象Issueと移動先（指定時）が同じStatusであることを検証する。Status変更は行わない。
 4. `cycleId`ありでは、OwnerのActive Issueを既存position順にした配列から、対象scopeのIssueだけを抽出する。scopeの既存position値を「slot」として保持し、対象を除外して`beforeIssueId`直前または末尾へ挿入した順序をslotへ割り当て直す。scope外Issueのpositionは変更しない。
-5. 変更対象Issueのposition / version / updatedAt、Activity、Outboxを既存reorderと同じ形式で記録し、最後に対象IssueのReceiptを記録する。validation失敗時はこの手順へ入らない。
+5. 変更対象Issueのposition / version / updatedAtを更新し、Activity、Outboxは移動した対象Issueの1件ずつだけを既存reorderと同じ形式で記録し（[FIX-snapshot-growth](../FIX-snapshot-growth/service.md)で変更）、最後に対象IssueのReceiptを記録する。validation失敗時はこの手順へ入らない。
 6. `cycleId`なしでは既存の全Active Issue再採番を維持する。
 
 ## 実装配置

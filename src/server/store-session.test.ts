@@ -6,44 +6,8 @@ import { withOwner, json } from "./http";
 import { defaultProjectIssueDisplaySettings } from "../shared/contracts/project-display";
 import { encodeStoreSnapshot } from "./store-snapshot-compat";
 import { openStoreSession } from "./store-session";
+import { FakeD1 } from "./store-session.test-fixtures";
 import { OrbitStore, resetOrbitStores, type OrbitStoreSnapshot } from "./store";
-
-class FakeD1 {
-  private readonly rows = new Map<
-    string,
-    { version: number; stateJson: string; updatedAt: number }
-  >();
-
-  prepare(_query: string) {
-    let values: unknown[] = [];
-    const statement = {
-      bind: (...nextValues: unknown[]) => {
-        values = nextValues;
-        return statement;
-      },
-      first: async <T>() => {
-        const row = this.rows.get(String(values[0]));
-        return row
-          ? ({ version: row.version, stateJson: row.stateJson, updatedAt: row.updatedAt } as T)
-          : (null as T | null);
-      },
-      run: async () => {
-        const [userId, version, stateJson, updatedAt, expectedVersion] = values as [
-          string,
-          number,
-          string,
-          number,
-          number,
-        ];
-        const current = this.rows.get(userId);
-        if (current && current.version !== expectedVersion) return { meta: { changes: 0 } };
-        this.rows.set(userId, { version, stateJson, updatedAt });
-        return { meta: { changes: 1 } };
-      },
-    };
-    return statement;
-  }
-}
 
 describe("store session", () => {
   it("[状態遷移] localはD1へ保存し、Memory Storeリセット後も空状態から作ったIssueを再読込する", async () => {

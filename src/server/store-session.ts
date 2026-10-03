@@ -65,6 +65,7 @@ export async function openStoreSession(
     },
     persist: async () => {
       if (persisted) return;
+      store.pruneExpiredReceipts(userId);
       const snapshot = store.toSnapshot();
       if (initialSnapshotJson !== null && JSON.stringify(snapshot) === initialSnapshotJson) {
         persisted = true;

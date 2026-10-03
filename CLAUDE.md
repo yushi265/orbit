@@ -12,6 +12,29 @@
 ハーネスの全体像と使い方は [`.claude/README.md`](./.claude/README.md) を参照してください。
 機能実装・修正は AI-DLC フロー（[`.claude/skills/ai-dlc-flow/SKILL.md`](./.claude/skills/ai-dlc-flow/SKILL.md)）に従います。
 
+## クイックリファレンス
+
+セットアップ手順・想定スタックの詳細は [`README.md`](./README.md) を参照。以下は `package.json` の scripts（正本）から頻用するもの。
+
+```bash
+pnpm install && pnpm dev              # 開発サーバー
+pnpm test                             # 全テスト（vitest run）
+pnpm exec vitest run <path>           # 単一ファイルのテスト
+pnpm exec vitest run -t "<name>"      # テスト名で絞り込み
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm build  # コミット前の品質ゲート
+```
+
+D1/Drizzle 関連コマンド（`db:generate` / `db:migrate` 等）は `package.json` の scripts を参照。
+
+レイヤーと配置（詳細・依存方向は [`docs/architecture.md`](./docs/architecture.md)）:
+
+| レイヤー | 配置 | 責務 |
+|---|---|---|
+| ui | `src/routes/` `src/components/` | 画面描画・入力受付・URL 状態。D1 Binding へ直接アクセスしない |
+| service | `src/server/` | Server Functions・API Routes・認証/認可・ドメイン処理 |
+| data | `src/db/` `drizzle/` | Drizzle Schema・Migration・Repository |
+| shared | `src/shared/` | ui/service 間の共有契約（Zod スキーマ・エラー Envelope・公開型） |
+
 ## 参照順序
 
 実装着手前に、関連する範囲を次の順で参照する。

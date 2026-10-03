@@ -14,7 +14,7 @@ pre-commit:
       glob: "**/*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,css,scss}"
       exclude: '(^|/)src/routeTree\.gen\.ts$'
       run: |
-        if [ -f package.json ]; then pnpm exec oxfmt --check {staged_files}; fi
+        if [ -f package.json ]; then pnpm exec oxfmt --check --no-error-on-unmatched-pattern {staged_files}; fi
     # --- AI-DLC ハーネス機構（維持を推奨）---
     # anti-tamper（advisory・非ブロック）: staged な test diff の改ざん（assertion 削除 / skip 追加等）を早期警告する。
     aidlc-anti-tamper:

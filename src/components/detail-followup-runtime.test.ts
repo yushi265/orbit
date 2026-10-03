@@ -34,8 +34,13 @@ let patches: Array<{
   response: ReturnType<typeof deferred<Response>>;
 }>;
 let unexpected: string[];
+let noLabels = false;
 function bootstrap() {
   const data = reviewBootstrap([serverIssue]);
+  if (noLabels) {
+    data.labels = [];
+    return data;
+  }
   data.labels.push({ id: "label-2", userId: "owner", name: "Label 2", color: "#ffffff" });
   data.labels.push({
     id: "foreign-label",
@@ -127,6 +132,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   root = createRoot(detailDocument.getElementById("root")!);
   serverIssue = reviewIssue();
+  noLabels = false;
   serverNotes = [];
   patches = [];
   unexpected = [];
@@ -439,6 +445,51 @@ describe("Detail follow-up runtime", () => {
     expect(
       detailDocument.querySelector<HTMLInputElement>('input[aria-label="Label 1"]')?.checked,
     ).toBe(false);
+  });
+
+  it("[空状態] Labelがない場合は作成場所へ進める", async () => {
+    noLabels = true;
+    queryClient.setQueryData(["bootstrap"], bootstrap());
+    await render();
+    expect(detailDocument.querySelector('.detail-label-editor input[type="checkbox"]')).toBeNull();
+    expect(
+      detailDocument.querySelector<HTMLButtonElement>('button[aria-label="Label設定を開く"]'),
+    ).not.toBeNull();
+  });
+
+  it("[表示順] 説明と作業メモを親子Issue・Cycle履歴より先に置く", async () => {
+    await render();
+    const selectors = [
+      "#issue-description",
+      '.detail-section:has([aria-label="新しい作業メモ"])',
+      "#issue-parent",
+      ".issue-hierarchy",
+      ".cycle-history-section",
+    ];
+    const elements = selectors.map((selector) => detailDocument.querySelector(selector));
+    expect(elements.every(Boolean)).toBe(true);
+    for (let index = 1; index < elements.length; index++) {
+      expect(Boolean(elements[index - 1]!.compareDocumentPosition(elements[index]!) & 4)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("[Dialog] カレンダー表示中のEscapeは詳細を閉じず日付選択だけ閉じる", async () => {
+    await render();
+    await act(async () =>
+      detailDocument
+        .querySelector<HTMLButtonElement>('button[aria-label="IssueのDue dateのカレンダー"]')!
+        .click(),
+    );
+    expect(detailDocument.querySelector(".orbit-calendar")).not.toBeNull();
+    await act(async () =>
+      dom.window.dispatchEvent(
+        new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    expect(detailDocument.querySelector(".orbit-calendar")).toBeNull();
+    expect(detailDocument.querySelector('[aria-label="Issue詳細を閉じる"]')).not.toBeNull();
   });
 
   it("[状態遷移] Project選択だけで自動保存し手動保存ボタンを表示しない", async () => {

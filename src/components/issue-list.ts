@@ -28,6 +28,25 @@ export interface IssueFilterState {
   dueFilter: IssueDueFilter;
 }
 
+/** Number of narrowing conditions currently applied (shown as the mobile filter button badge). */
+export function countActiveIssueFilters(input: {
+  status: string;
+  priority: string;
+  project?: string;
+  label: string;
+  due: string;
+  scope?: string;
+}): number {
+  return [
+    input.status !== "all",
+    input.priority !== "all",
+    (input.project ?? "all") !== "all",
+    input.label !== "all",
+    input.due !== "all",
+    input.scope === "archived",
+  ].filter(Boolean).length;
+}
+
 export const issueSortOptions: ReadonlyArray<{ value: IssueSort; label: string }> = [
   { value: "manual", label: "手動" },
   { value: "updated_desc", label: "更新日（新しい順）" },

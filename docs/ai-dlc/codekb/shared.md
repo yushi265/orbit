@@ -103,8 +103,10 @@
 - Saved Viewsは`/views?view=id`で選択を復元し、既存IssueQueryをclientでfilter/sort/group実行する。未知layout/created/limit/cursorは編集時保持、cursor pagingはStore同様未実行。Label条件はAND、他array条件はOR（参照: `src/components/saved-views.ts`、`src/routes/views.tsx`）。
 - Inbox通知生成はdev seedのみ。UIは既存通知read:true/falseを処理し、期限/Cycle自動配信を約束しない。日付formatterの第2引数はlocaleでありtimezoneを渡さない（参照: `src/shared/issue-dates.ts`）。
 
+- Mobile下部タブはHome / Inbox / Create / Search / Menuの5つ。`MobileMenuSheet`からIssues / Cycles / Projects / Views / Settingsへ移動する。Issue一覧のフィルター欄は1組だけ描画し、`div.filter-fields-wrap > div.filter-fields`を〜767pxでは下端シート、768px以上では`display: contents`でツールバーに並べる。`useDialogBoundary`はダイアログの兄弟を`inert`にするため、押下で閉じる背景はダイアログの祖先に置く（兄弟に置くと実ブラウザで押せない。jsdomでは検出できない）。常時マウントで`enabled`を切り替える場合、hookのフォーカス復帰先は初回描画時の要素になるので、閉じたときの復帰は明示的に行う（参照: `src/components/OrbitApp.tsx`、`src/components/issue-list.ts`、`src/styles.css`、`docs/spec/FIX-mobile-nav-filter-sheet/`）。
+
 ## 最終更新
 
-FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
+FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

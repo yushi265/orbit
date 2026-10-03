@@ -4,8 +4,74 @@ type Entry = { element: HTMLElement; priority: number; initial: () => void };
 type Registry = {
   entries: Entry[];
   saved: Map<HTMLElement, { inert: string | null; hidden: string | null }>;
+  unlockScroll?: () => void;
 };
 const registries = new WeakMap<Document, Registry>();
+function lockScroll(doc: Document) {
+  const win = doc.defaultView;
+  const x = win?.scrollX ?? 0;
+  const y = win?.scrollY ?? 0;
+  const scrollbarWidth =
+    doc.documentElement.clientWidth > 0
+      ? Math.max(0, (win?.innerWidth ?? 0) - doc.documentElement.clientWidth)
+      : 0;
+  const saved: Array<{ element: HTMLElement; property: string; value: string; priority: string }> =
+    [];
+  function set(element: HTMLElement, property: string, value: string) {
+    saved.push({
+      element,
+      property,
+      value: element.style.getPropertyValue(property),
+      priority: element.style.getPropertyPriority(property),
+    });
+    element.style.setProperty(property, value);
+  }
+  if (scrollbarWidth > 0) {
+    const padding = Number.parseFloat(win?.getComputedStyle(doc.body).paddingRight ?? "0") || 0;
+    set(doc.body, "padding-right", `${padding + scrollbarWidth}px`);
+  }
+  set(doc.documentElement, "overflow", "hidden");
+  set(doc.body, "overflow", "hidden");
+  set(doc.body, "position", "fixed");
+  set(doc.body, "top", `${-y}px`);
+  set(doc.body, "left", `${-x}px`);
+  set(doc.body, "width", "100%");
+  return () => {
+    for (const { element, property, value, priority } of saved) {
+      if (value) element.style.setProperty(property, value, priority);
+      else element.style.removeProperty(property);
+    }
+    if (x || y) win?.scrollTo(x, y);
+  };
+}
+
+/** Set the opening caret once, after asynchronous text arrives, unless editing has begun. */
+export function useInitialTextCaretEnd(
+  ref: RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  ready = true,
+) {
+  const handled = useRef(false);
+  useEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    const touched = () => {
+      handled.current = true;
+    };
+    const events = ["pointerdown", "keydown", "input", "compositionstart"];
+    events.forEach((name) => input.addEventListener(name, touched));
+    return () => events.forEach((name) => input.removeEventListener(name, touched));
+  }, [ref]);
+  useEffect(() => {
+    const input = ref.current;
+    if (handled.current || !ready || !input) return;
+    handled.current = true;
+    if (input.ownerDocument.activeElement === input) {
+      input.setSelectionRange(value.length, value.length);
+    }
+  }, [ref, ready, value]);
+}
+
 function topEntry(registry: Registry) {
   return registry.entries.reduce<Entry | undefined>(
     (top, entry) => (!top || entry.priority >= top.priority ? entry : top),
@@ -65,6 +131,15 @@ export function useDialogBoundary(
     const doc = element.ownerDocument;
     const registry: Registry = registries.get(doc) ?? { entries: [], saved: new Map() };
     registries.set(doc, registry);
+    const viewport = doc.defaultView?.visualViewport;
+    const syncViewport = () => {
+      if (!viewport) return;
+      element.style.setProperty("--dialog-viewport-height", `${viewport.height}px`);
+      element.style.setProperty("--dialog-viewport-top", `${viewport.offsetTop}px`);
+    };
+    syncViewport();
+    viewport?.addEventListener("resize", syncViewport);
+    viewport?.addEventListener("scroll", syncViewport);
     const entry: Entry = {
       element,
       priority: optionsRef.current.priority ?? 0,
@@ -79,12 +154,14 @@ export function useDialogBoundary(
         (initial ?? focusables(element)[0] ?? element).focus({ preventScroll: true });
       },
     };
+    if (registry.entries.length === 0) registry.unlockScroll = lockScroll(doc);
     registry.entries.push(entry);
     reconcile(registry);
     if (topEntry(registry) === entry) entry.initial();
     const onKeyDown = (event: KeyboardEvent) => {
       if (topEntry(registry) !== entry) return;
       if (event.key === "Escape") {
+        if (event.isComposing || event.keyCode === 229) return;
         event.preventDefault();
         event.stopPropagation();
         optionsRef.current.onEscape();
@@ -124,12 +201,20 @@ export function useDialogBoundary(
     doc.addEventListener("keydown", onKeyDown, true);
     doc.addEventListener("focusin", onFocusIn);
     return () => {
+      viewport?.removeEventListener("resize", syncViewport);
+      viewport?.removeEventListener("scroll", syncViewport);
+      element.style.removeProperty("--dialog-viewport-height");
+      element.style.removeProperty("--dialog-viewport-top");
       doc.defaultView?.removeEventListener("keydown", onKeyDown, true);
       doc.removeEventListener("keydown", onKeyDown, true);
       doc.removeEventListener("focusin", onFocusIn);
       const wasTop = topEntry(registry) === entry;
       registry.entries = registry.entries.filter((item) => item !== entry);
       reconcile(registry);
+      if (registry.entries.length === 0) {
+        registry.unlockScroll?.();
+        registry.unlockScroll = undefined;
+      }
       if (!wasTop) return;
       const previous = previousRef.current;
       const top = topEntry(registry);

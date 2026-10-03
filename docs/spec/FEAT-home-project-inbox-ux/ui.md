@@ -101,3 +101,12 @@ Inbox冒頭に次の説明を表示する。
 - [代表値] Project workspaceのStatus / Priority / Project / Due / Bulk / Reorder操作が既存Issue APIへ正しいscopeで接続する。
 - [代表値] Inbox説明、通知種別・本文・未読状態、個別既読、すべて既読、対象遷移、0件案内を表示する。
 - [アクセシビリティ] Tab / Enter / Spaceと390 / 768 / 1200pxで主要操作と横overflowなしを確認する。
+
+## Search Filter の候補表示（モバイル操作補修）
+
+- Search の Status / Priority / Project / Cycle / Label / Due の6選択は `OrbitSelect` でアプリ内描画する。既存の aria-label、値、Filter callback、検索 API 契約を維持する。
+- Trigger は選択値を示す button（select-only combobox）とし、候補は document.body の portal に fixed listbox / option で描画する。親コンテナの overflow で候補を隠さない。
+- 390pxを含む viewport 内へ左右と上下の位置を制限し、上下の空きに応じて候補を配置する。長い候補名は折り返し、候補一覧は最大320pxか表示可能高さまでで縦スクロールする。Light / Dark は既存 theme 変数を使う。
+- ArrowUp / ArrowDown、Home / End で候補を移動し、Enter / Space または Pointer で値を選ぶ。選択後と Escape は Trigger に focus を戻す。Tab は通常の focus 移動を維持して閉じ、外側 Pointer は値を変更せず閉じる。
+- [状態遷移] 候補選択で既存の Filter callback を呼ぶ。Escape / Tab / 外側 Pointer は callback を呼ばない。
+- [境界値] 390px・画面下部・多数候補で portal の表示領域が viewport を超えず、候補へスクロールして到達できる。

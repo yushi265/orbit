@@ -95,8 +95,15 @@
 - 実D1テストは公開Snapshot Repositoryを使う。テスト内の手書きCAS SQLでは本番RepositoryのWHERE条件の回帰を捕捉できない。全Snapshot配列非空と中断Runの再開は`local-repository.integration.mjs`で確認する。Notification fixtureは保存専用で通常Ownerの通知生成を意味しない（参照: `scripts/local-repository.integration.mjs`、`docs/spec/FEAT-local-only/verification.md`）。
 - Node防壁・ブラウザログとnative全プロセスの通信試行監査は別物。OS遮断下の機能動作は確認済みだが、全native試行監査は現環境で陽性対照が成立せずAC-7未完了（参照: `docs/spec/FEAT-local-only/verification.md`）。
 
+## Mobile / Saved Views UI (2026-10-03)
+
+- `useDialogBoundary` は背景scroll lockを同Documentの重なり全体で保持し、最後の解除で元style/scroll位置を復元する。Mobile詳細/ComposerはvisualViewportのheight/offsetTopで下端sheetを追従。caret末尾は初回だけ、async ready後に適用しユーザー操作/IME後は触らない（参照: `src/components/dialog-boundary.ts`）。
+- Searchの6選択UIは`OrbitSelect`を使用する。body portal/fixed listboxをviewport内に配置し、44px候補、Keyboard/Escape/Tab/outside dismissalを持つ。OS native select候補の不可視を避ける（参照: `src/components/orbit-select.tsx`）。
+- Saved Viewsは`/views?view=id`で選択を復元し、既存IssueQueryをclientでfilter/sort/group実行する。未知layout/created/limit/cursorは編集時保持、cursor pagingはStore同様未実行。Label条件はAND、他array条件はOR（参照: `src/components/saved-views.ts`、`src/routes/views.tsx`）。
+- Inbox通知生成はdev seedのみ。UIは既存通知read:true/falseを処理し、期限/Cycle自動配信を約束しない。日付formatterの第2引数はlocaleでありtimezoneを渡さない（参照: `src/shared/issue-dates.ts`）。
+
 ## 最終更新
 
-FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
+FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

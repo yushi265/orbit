@@ -6,6 +6,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
+  type ReactNode,
   useEffect,
   useMemo,
   useRef,
@@ -36,6 +37,13 @@ import {
   type ProjectIssueDisplaySettings,
 } from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
+import {
+  selectSavedViewIssues,
+  groupSavedViewIssues,
+  updateSavedViewQuery,
+  type ViewSearch,
+} from "./saved-views";
+import type { IssueQuery } from "../shared/contracts/issues";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
 import {
@@ -70,9 +78,11 @@ import {
 } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 import { useBackgroundRun } from "./background-run";
-import { useDialogBoundary } from "./dialog-boundary";
+import { useDialogBoundary, useInitialTextCaretEnd } from "./dialog-boundary";
 import { LinkifiedText } from "./LinkifiedText";
 import { OrbitDatePicker } from "./orbit-date-picker";
+import { OrbitIcon } from "./orbit-icon";
+import { OrbitSelect } from "./orbit-select";
 import { linkifyText } from "./linkified-text";
 import {
   normalizeIssueSearch,
@@ -108,6 +118,7 @@ type Props = {
   cycleId?: string;
   issueSearch?: IssueSearch;
   projectSearch?: ProjectSearch;
+  viewSearch?: ViewSearch;
 };
 type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
@@ -169,7 +180,7 @@ const sectionLabels: Record<Section, string> = {
   views: "Views",
   settings: "Settings",
 };
-const sectionIcons: Record<Section, string> = {
+const sectionIcons: Record<Section, ReactNode> = {
   home: "⌂",
   issues: "☷",
   cycles: "◷",
@@ -177,7 +188,7 @@ const sectionIcons: Record<Section, string> = {
   search: "⌕",
   inbox: "♧",
   views: "▤",
-  settings: "⚙",
+  settings: <OrbitIcon name="settings" />,
 };
 const cycleWeekdayOptions = [
   [0, "日曜日"],
@@ -1080,6 +1091,14 @@ function OrbitAppInner(props: Props) {
     });
   }
 
+  async function markNotificationUnread(notification: BootstrapPayload["notifications"][number]) {
+    await apiPatch(`/api/v1/notifications/${notification.id}`, {
+      idempotencyKey: idempotencyKey(),
+      read: false,
+    });
+    await refresh();
+  }
+
   async function openNotification(notification: BootstrapPayload["notifications"][number]) {
     await markNotificationRead(notification);
     await refresh();
@@ -1532,14 +1551,21 @@ function OrbitAppInner(props: Props) {
               notifications={notifications}
               onOpenNotification={openNotification}
               onMarkAllRead={markAllNotifications}
+              onMarkUnread={markNotificationUnread}
               onNavigateIssues={() => void navigate("issues")}
             />
           )}
           {section === "views" && (
             <ViewsView
               views={data.views}
+              data={data}
+              selectedViewId={props.viewSearch?.view ?? null}
+              onSelectView={(view) =>
+                void router.navigate({ to: "/views", search: view ? { view } : {} })
+              }
+              onOpenIssue={(issue) => openIssue(issue.id)}
+              now={clockNow}
               onRefresh={refresh}
-              onNavigateIssues={() => void navigate("issues")}
             />
           )}
           {section === "settings" && (
@@ -1783,7 +1809,9 @@ function Sidebar({
           className={`nav-item ${section === "settings" ? "active" : ""}`}
           onClick={() => onNavigate("settings")}
         >
-          <span className="nav-icon">⚙</span>
+          <span className="nav-icon">
+            <OrbitIcon name="settings" />
+          </span>
           <span>Settings</span>
         </button>
         <div className="user-card">
@@ -4400,7 +4428,14 @@ export function ProjectsView({
                   aria-label="Project名"
                   value={nameDraft}
                   onChange={(event) => setNameDraft(event.target.value)}
-                  onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Escape" &&
+                      !event.nativeEvent.isComposing &&
+                      event.keyCode !== 229
+                    )
+                      cancelEdit();
+                  }}
                   disabled={saving}
                 />
               ) : (
@@ -4446,7 +4481,14 @@ export function ProjectsView({
               className="text-input project-description-input"
               value={descriptionDraft}
               onChange={(event) => setDescriptionDraft(event.target.value)}
-              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Escape" &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229
+                )
+                  cancelEdit();
+              }}
               disabled={saving}
               rows={3}
             />
@@ -4458,7 +4500,14 @@ export function ProjectsView({
               className="text-input"
               value={statusDraft}
               onChange={(event) => setStatusDraft(event.target.value)}
-              onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Escape" &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229
+                )
+                  cancelEdit();
+              }}
               disabled={saving}
             >
               {projectStatuses.map((status) => (
@@ -4737,79 +4786,66 @@ export function SearchView({
         <kbd>{modifierLabel} F</kbd>
       </div>
       <div className="search-filters" aria-label="検索Filter">
-        <select
-          aria-label="検索Status"
+        <OrbitSelect
+          label="検索Status"
           value={filters.statusId}
-          onChange={(event) => updateFilter("statusId", event.target.value)}
-        >
-          <option value="all">すべてのStatus</option>
-          {workflowStates.map((state) => (
-            <option value={state.id} key={state.id}>
-              {state.name}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="検索Priority"
+          onChange={(value) => updateFilter("statusId", value)}
+          options={[
+            { value: "all", label: "すべてのStatus" },
+            ...workflowStates.map((state) => ({ value: state.id, label: state.name })),
+          ]}
+        />
+        <OrbitSelect
+          label="検索Priority"
           value={filters.priority}
-          onChange={(event) =>
-            updateFilter("priority", event.target.value as SearchFilters["priority"])
-          }
-        >
-          <option value="all">すべてのPriority</option>
-          {Object.entries(priorityLabel).map(([value, label]) => (
-            <option value={value} key={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="検索Project"
+          onChange={(value) => updateFilter("priority", value as SearchFilters["priority"])}
+          options={[
+            { value: "all", label: "すべてのPriority" },
+            ...Object.entries(priorityLabel).map(([value, label]) => ({ value, label })),
+          ]}
+        />
+        <OrbitSelect
+          label="検索Project"
           value={filters.projectId}
-          onChange={(event) => updateFilter("projectId", event.target.value)}
-        >
-          <option value="all">すべてのProject</option>
-          {projects.map((project) => (
-            <option value={project.id} key={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="検索Cycle"
+          onChange={(value) => updateFilter("projectId", value)}
+          options={[
+            { value: "all", label: "すべてのProject" },
+            ...projects.map((project) => ({ value: project.id, label: project.name })),
+          ]}
+        />
+        <OrbitSelect
+          label="検索Cycle"
           value={filters.cycleId}
-          onChange={(event) => updateFilter("cycleId", event.target.value)}
-        >
-          <option value="all">すべてのCycle</option>
-          {cycles.map((cycle) => (
-            <option value={cycle.id} key={cycle.id}>
-              {cycle.nameOverride ?? cycle.name}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="検索Label"
+          onChange={(value) => updateFilter("cycleId", value)}
+          options={[
+            { value: "all", label: "すべてのCycle" },
+            ...cycles.map((cycle) => ({
+              value: cycle.id,
+              label: cycle.nameOverride ?? cycle.name,
+            })),
+          ]}
+        />
+        <OrbitSelect
+          label="検索Label"
           value={filters.labelId}
-          onChange={(event) => updateFilter("labelId", event.target.value)}
-        >
-          <option value="all">すべてのLabel</option>
-          {labels.map((label) => (
-            <option value={label.id} key={label.id}>
-              {label.name}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="検索Due"
+          onChange={(value) => updateFilter("labelId", value)}
+          options={[
+            { value: "all", label: "すべてのLabel" },
+            ...labels.map((label) => ({ value: label.id, label: label.name })),
+          ]}
+        />
+        <OrbitSelect
+          label="検索Due"
           value={filters.due}
-          onChange={(event) => updateFilter("due", event.target.value as SearchFilters["due"])}
-        >
-          <option value="all">すべての期限</option>
-          <option value="none">期限なし</option>
-          <option value="overdue">期限超過</option>
-          <option value="today">今日</option>
-          <option value="upcoming">近日</option>
-        </select>
+          onChange={(value) => updateFilter("due", value as SearchFilters["due"])}
+          options={[
+            { value: "all", label: "すべての期限" },
+            { value: "none", label: "期限なし" },
+            { value: "overdue", label: "期限超過" },
+            { value: "today", label: "今日" },
+            { value: "upcoming", label: "近日" },
+          ]}
+        />
       </div>
       {searchError && (
         <div className="detail-live-error" role="alert">
@@ -4924,11 +4960,13 @@ export function InboxView({
   notifications,
   onOpenNotification,
   onMarkAllRead,
+  onMarkUnread,
   onNavigateIssues,
 }: {
   notifications: BootstrapPayload["notifications"];
   onOpenNotification: (notification: BootstrapPayload["notifications"][number]) => Promise<void>;
   onMarkAllRead: () => Promise<void>;
+  onMarkUnread?: (notification: BootstrapPayload["notifications"][number]) => Promise<void>;
   onNavigateIssues: () => void;
 }) {
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -4938,7 +4976,7 @@ export function InboxView({
   const [retryNotification, setRetryNotification] = useState<
     BootstrapPayload["notifications"][number] | null
   >(null);
-  const [errorAction, setErrorAction] = useState<"individual" | "all" | null>(null);
+  const [errorAction, setErrorAction] = useState<"individual" | "unread" | "all" | null>(null);
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const visibleNotifications =
     filter === "unread"
@@ -4974,6 +5012,23 @@ export function InboxView({
             ? caught.message
             : "通知の処理に失敗しました。",
       );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function markUnread(notification: BootstrapPayload["notifications"][number]) {
+    if (!onMarkUnread) return;
+    setBusyId(notification.id);
+    setError(null);
+    try {
+      await onMarkUnread(notification);
+      setRetryNotification(null);
+      setErrorAction(null);
+    } catch (caught) {
+      setRetryNotification(notification);
+      setErrorAction("unread");
+      setError(caught instanceof ApiError ? caught.message : "通知を未読に戻せませんでした。");
     } finally {
       setBusyId(null);
     }
@@ -5020,7 +5075,7 @@ export function InboxView({
         <span className="eyebrow coral">HOW INBOX WORKS</span>
         <h2 id="inbox-guide-title">Inboxは通知を処理する場所です</h2>
         <p>
-          期限やCycleなど、Orbitからのお知らせがここに届きます。通知を開くと既読になり、関連するIssue・Cycle・Projectへ移動できます。
+          保存された通知を開くと既読になり、関連するIssue・Cycle・Projectへ移動できます。期限・Cycleの自動通知はまだ配信していません。期限の確認にはHomeの期限一覧をご利用ください。
         </p>
         <div className="inbox-guide-steps">
           <span>
@@ -5040,11 +5095,13 @@ export function InboxView({
           <button
             className="text-button"
             onClick={() =>
-              errorAction === "individual" && retryNotification
-                ? void open(retryNotification)
-                : void markAll()
+              retryNotification && errorAction === "unread"
+                ? void markUnread(retryNotification)
+                : errorAction === "individual" && retryNotification
+                  ? void open(retryNotification)
+                  : void markAll()
             }
-            disabled={allBusy || Boolean(busyId) || (!unreadCount && errorAction !== "individual")}
+            disabled={allBusy || Boolean(busyId) || (!unreadCount && errorAction === "all")}
           >
             再試行
           </button>
@@ -5095,6 +5152,16 @@ export function InboxView({
                 <span className="notification-action">開いて対象を確認 →</span>
               </span>
             </button>
+            {notification.readAt && onMarkUnread && (
+              <button
+                className="text-button notification-unread"
+                onClick={() => void markUnread(notification)}
+                disabled={Boolean(busyId) || allBusy}
+                aria-label={`${notification.title}を未読に戻す`}
+              >
+                未読に戻す
+              </button>
+            )}
           </div>
         ))}
         {visibleNotifications.length === 0 && (
@@ -5109,17 +5176,290 @@ export function InboxView({
   );
 }
 
-function ViewsView({
+function SavedViewFilters({
+  query,
+  data,
+  onChange,
+  disabled,
+}: {
+  query: IssueQuery;
+  data: BootstrapPayload;
+  onChange: (query: IssueQuery) => void;
+  disabled: boolean;
+}) {
+  function patchFilter(patch: Partial<IssueQuery["filter"]>) {
+    const filter = { ...query.filter, ...patch };
+    for (const key of Object.keys(filter) as Array<keyof typeof filter>) {
+      if (filter[key] === undefined) delete filter[key];
+    }
+    onChange(updateSavedViewQuery(query, { filter }));
+  }
+  const collections = [
+    { key: "statusIds" as const, name: "Status", options: data.workflowStates },
+    {
+      key: "priorities" as const,
+      name: "Priority",
+      options: ["urgent", "high", "medium", "low", "no_priority"].map((id) => ({ id, name: id })),
+    },
+    { key: "projectIds" as const, name: "Project", options: data.projects },
+    { key: "cycleIds" as const, name: "Cycle", options: data.cycles },
+    { key: "labelIds" as const, name: "Label（選択したすべて）", options: data.labels },
+  ];
+  return (
+    <fieldset disabled={disabled} className="detail-card">
+      <legend>Filter・表示条件</legend>
+      <p className="subheading">
+        異なる条件はAND。Status・Priority・Project・Cycleは選択したいずれか、Labelはすべてに一致します。選択が0件の条件はすべてを表示します。
+      </p>
+      <label className="field-label">
+        検索語
+        <input
+          className="text-input"
+          aria-label="View検索語"
+          value={query.filter.text ?? ""}
+          onChange={(event) => patchFilter({ text: event.target.value || undefined })}
+        />
+      </label>
+      {collections.map(({ key, name, options }) => {
+        const selected = query.filter[key] ?? [];
+        const unknown = selected.filter((id) => !options.some((option) => option.id === id));
+        const choices = [...options, ...unknown.map((id) => ({ id, name: `${id}（既存条件）` }))];
+        return (
+          <details className="saved-view-filter" key={key}>
+            <summary>
+              {name} · {selected.length ? `${selected.length}件選択` : "すべて"}
+            </summary>
+            <div className="saved-view-filter-options" role="group" aria-label={`View ${name}`}>
+              {choices.map((option) => (
+                <label key={option.id}>
+                  <input
+                    type="checkbox"
+                    aria-label={`View ${name}: ${option.name}`}
+                    checked={selected.includes(option.id)}
+                    onChange={(event) =>
+                      patchFilter({
+                        [key]: event.target.checked
+                          ? [...selected, option.id]
+                          : selected.filter((id) => id !== option.id),
+                      })
+                    }
+                  />
+                  <span>{option.name}</span>
+                </label>
+              ))}
+              {choices.length === 0 && <p>選択できる項目はありません。</p>}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => patchFilter({ [key]: undefined })}
+              >
+                {name}を解除
+              </button>
+            </div>
+          </details>
+        );
+      })}
+      <label className="field-label">
+        期限
+        <select
+          aria-label="View期限"
+          value={query.filter.due ?? "all"}
+          onChange={(event) =>
+            patchFilter({
+              due:
+                event.target.value === "all"
+                  ? undefined
+                  : (event.target.value as IssueQuery["filter"]["due"]),
+            })
+          }
+        >
+          <option value="all">すべて</option>
+          <option value="none">期限なし</option>
+          <option value="overdue">期限超過</option>
+          <option value="today">今日</option>
+          <option value="upcoming">これから</option>
+          <option value="next7">7日以内</option>
+        </select>
+      </label>
+      <label className="field-label">
+        Group
+        <select
+          aria-label="View Group"
+          value={query.group ?? "none"}
+          onChange={(event) =>
+            onChange(
+              updateSavedViewQuery(query, {
+                group:
+                  event.target.value === "none"
+                    ? undefined
+                    : (event.target.value as IssueQuery["group"]),
+              }),
+            )
+          }
+        >
+          <option value="none">グループなし</option>
+          {["status", "priority", "project", "cycle", "label"].map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={query.showEmptyGroups}
+          onChange={(event) =>
+            onChange(updateSavedViewQuery(query, { showEmptyGroups: event.target.checked }))
+          }
+        />
+        空のGroupを表示
+      </label>
+      <div role="group" aria-label="View表示項目">
+        {["status", "priority", "project", "cycle", "label", "dueAt"].map((key) => (
+          <label key={key}>
+            <input
+              type="checkbox"
+              checked={query.layout[key] !== false}
+              onChange={(event) =>
+                onChange(
+                  updateSavedViewQuery(query, {
+                    layout: { ...query.layout, [key]: event.target.checked },
+                  }),
+                )
+              }
+            />
+            {key}
+          </label>
+        ))}
+      </div>
+      {query.filter.created && (
+        <p>
+          作成日時条件:{" "}
+          {query.filter.created.from === undefined
+            ? "指定なし"
+            : new Date(query.filter.created.from).toLocaleString()}{" "}
+          〜{" "}
+          {query.filter.created.to === undefined
+            ? "指定なし"
+            : new Date(query.filter.created.to).toLocaleString()}
+          （既存条件を保持）
+        </p>
+      )}
+      <p>
+        表示上限: {query.limit}件{query.cursor ? " · 既存cursorを保持" : ""}
+      </p>
+    </fieldset>
+  );
+}
+
+function SavedViewResults({
+  view,
+  data,
+  now,
+  onOpenIssue,
+}: {
+  view: SavedView;
+  data: BootstrapPayload;
+  now: number;
+  onOpenIssue: (issue: Issue) => void;
+}) {
+  const query = view.query as unknown as IssueQuery;
+  const issues = selectSavedViewIssues(data.issues, query, now, data.preferences.timezone);
+  const groups = groupSavedViewIssues(issues, query, data);
+  function row(issue: Issue) {
+    const layout = view.layout ?? view.query.layout;
+    const visible = (key: string) => layout[key] !== false;
+    return (
+      <button
+        className={`saved-view-issue ${view.query.mode === "board" ? "saved-view-issue-card" : ""}`}
+        key={issue.id}
+        data-issue-id={issue.id}
+        onClick={() => onOpenIssue(issue)}
+      >
+        <span className="saved-view-issue-main">
+          <span className="issue-id">{issue.identifier}</span>
+          <strong>{issue.title}</strong>
+        </span>
+        <span className="saved-view-issue-meta">
+          {visible("status") && (
+            <span>{data.workflowStates.find((state) => state.id === issue.statusId)?.name}</span>
+          )}
+          {visible("priority") && <span>{issue.priority}</span>}
+          {visible("project") && issue.projectId && (
+            <span>{data.projects.find((project) => project.id === issue.projectId)?.name}</span>
+          )}
+          {visible("cycle") && issue.cycleId && (
+            <span>{data.cycles.find((cycle) => cycle.id === issue.cycleId)?.name}</span>
+          )}
+          {visible("label") && (
+            <span>
+              {data.labels
+                .filter((label) => issue.labelIds.includes(label.id))
+                .map((label) => label.name)
+                .join(" · ")}
+            </span>
+          )}
+          {visible("dueAt") && issue.dueAt !== null && (
+            <span>{formatIssueDueDate(issue.dueAt)}</span>
+          )}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <section aria-label={`${view.name}のIssue`} className="detail-card">
+      <h2>
+        {view.name} · {issues.length}件
+      </h2>
+      {issues.length === 0 && (
+        <p role="status">条件に一致するIssueはありません。Viewの条件を編集してください。</p>
+      )}
+      <div className={view.query.mode === "board" ? "board-grid" : "view-results-list"}>
+        {groups.map((group) => (
+          <section
+            key={group.id}
+            className={view.query.mode === "board" ? "board-column" : "view-result-group"}
+          >
+            {(view.query.group || view.query.mode === "board") && (
+              <h3>
+                {group.name} · {group.issues.length}
+              </h3>
+            )}
+            {group.issues.map(row)}
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function ViewsView({
   views,
+  data,
+  selectedViewId,
+  onSelectView,
+  onOpenIssue,
+  now,
   onRefresh,
-  onNavigateIssues,
 }: {
   views: SavedView[];
+  data: BootstrapPayload;
+  selectedViewId: string | null;
+  onSelectView: (id: string | null) => void;
+  onOpenIssue: (issue: Issue) => void;
+  now: number;
   onRefresh: () => void;
-  onNavigateIssues: () => void;
 }) {
   const [editingView, setEditingView] = useState<SavedView | null>(null);
-  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  const [queryDraft, setQueryDraft] = useState<IssueQuery>({
+    mode: "list",
+    filter: {},
+    showEmptyGroups: false,
+    order: "manual",
+    layout: { priority: true },
+    limit: 100,
+  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [modeDraft, setModeDraft] = useState<"list" | "board">("list");
@@ -5156,6 +5496,14 @@ function ViewsView({
     setNameDraft("");
     setModeDraft("list");
     setOrderDraft("manual");
+    setQueryDraft({
+      mode: "list",
+      filter: {},
+      showEmptyGroups: false,
+      order: "manual",
+      layout: { priority: true },
+      limit: 100,
+    });
     setError(null);
     setErrorAction(null);
   }
@@ -5163,11 +5511,12 @@ function ViewsView({
   function startEdit(view: SavedView) {
     mutationKeyRef.current = null;
     setEditorOpen(true);
-    setSelectedViewId(view.id);
+    onSelectView(view.id);
     setEditingView(view);
     setNameDraft(view.name);
     setModeDraft(view.query.mode);
-    setOrderDraft(view.query.order === "estimate" ? "updated" : view.query.order);
+    setOrderDraft(view.query.order);
+    setQueryDraft(structuredClone(view.query) as unknown as IssueQuery);
     setError(null);
     setErrorAction(null);
   }
@@ -5187,16 +5536,10 @@ function ViewsView({
     setError(null);
     setErrorAction("save");
     const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
-    const query = editingView
-      ? { ...editingView.query, mode: modeDraft, order: orderDraft }
-      : {
-          mode: modeDraft,
-          filter: {},
-          showEmptyGroups: false,
-          order: orderDraft,
-          layout: { priority: true },
-          limit: 100,
-        };
+    const query = updateSavedViewQuery(queryDraft, {
+      mode: modeDraft,
+      order: orderDraft as IssueQuery["order"],
+    });
     try {
       if (editingView) {
         await apiPatch(`/api/v1/views/${editingView.id}`, {
@@ -5206,12 +5549,13 @@ function ViewsView({
           layout: query.layout,
         });
       } else {
-        await apiPost("/api/v1/views", {
+        const created = await apiPost<{ view: SavedView }>("/api/v1/views", {
           idempotencyKey: mutationKey,
           name: nameDraft,
           query,
           layout: query.layout,
         });
+        onSelectView(created.view.id);
       }
       mutationKeyRef.current = null;
       setErrorAction(null);
@@ -5251,7 +5595,7 @@ function ViewsView({
       deleteRetryRef.current = null;
       setErrorAction(null);
       if (editingView?.id === view.id) cancelEdit();
-      if (selectedViewId === view.id) setSelectedViewId(null);
+      if (selectedViewId === view.id) onSelectView(null);
       await onRefresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
@@ -5305,7 +5649,10 @@ function ViewsView({
             aria-label="Saved View名"
             value={nameDraft}
             onChange={(event) => setNameDraft(event.target.value)}
-            onKeyDown={(event) => event.key === "Escape" && cancelEdit()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !event.nativeEvent.isComposing && event.keyCode !== 229)
+                cancelEdit();
+            }}
             disabled={saving}
           />
           <div className="view-editor-grid">
@@ -5336,6 +5683,7 @@ function ViewsView({
                 ["updated", "Updated"],
                 ["created", "Created"],
                 ["due_at", "Due date"],
+                ...(orderDraft === "estimate" ? [["estimate", "Estimate (既存設定)"]] : []),
               ].map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -5343,6 +5691,12 @@ function ViewsView({
               ))}
             </select>
           </div>
+          <SavedViewFilters
+            query={queryDraft}
+            data={data}
+            onChange={setQueryDraft}
+            disabled={saving}
+          />
           {error && (
             <div className="detail-live-error" role="alert">
               {error}
@@ -5390,17 +5744,23 @@ function ViewsView({
           </div>
           <p>{filterSummary(selectedView)}</p>
           <span className="view-inspector-meta">
-            Order: {selectedView.query.order === "estimate" ? "updated" : selectedView.query.order}{" "}
-            · Limit: {String(selectedView.query.limit ?? "—")}
+            Order: {selectedView.query.order} · Limit: {String(selectedView.query.limit ?? "—")}
           </span>
         </section>
+      )}
+      {selectedView && (
+        <SavedViewResults view={selectedView} data={data} now={now} onOpenIssue={onOpenIssue} />
+      )}
+      {selectedViewId && !selectedView && (
+        <p role="status">このViewは見つかりません。一覧から選び直してください。</p>
       )}
       <div className="view-list">
         {views.map((view) => (
           <div className="saved-view-row" key={view.id}>
             <button
               className="saved-view-select"
-              onClick={() => setSelectedViewId(view.id)}
+              onClick={() => onSelectView(view.id)}
+              aria-pressed={selectedViewId === view.id}
               disabled={saving}
             >
               <span className="view-icon">▤</span>
@@ -5426,8 +5786,8 @@ function ViewsView({
         {views.length === 0 && (
           <EmptyState
             title="Saved Viewはまだありません"
-            action="Issuesで条件を作る"
-            onAction={onNavigateIssues}
+            action="Viewを作成"
+            onAction={startCreate}
           />
         )}
       </div>
@@ -6749,6 +7109,7 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue?.description ?? "");
   const [titleDraft, setTitleDraft] = useState(issue?.title ?? "");
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
+  useInitialTextCaretEnd(titleInputRef, titleDraft, Boolean(issue && titleDraft === issue.title));
   const [projectIdDraft, setProjectIdDraft] = useState(issue?.projectId ?? "");
   const [noteBody, setNoteBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -7969,17 +8330,19 @@ export function IssueComposer({
   busy: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
   useDialogBoundary(dialogRef, {
     initialFocus: "textarea",
     onEscape: () => {
       if (!dismissOpenCalendar(dialogRef.current)) onClose();
     },
   });
+  useInitialTextCaretEnd(titleInputRef, title);
   return (
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="modal-backdrop"
+      className="modal-backdrop issue-composer-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="issue-composer-title"
@@ -8013,7 +8376,8 @@ export function IssueComposer({
         ) : (
           <>
             <textarea
-              autoFocus
+              ref={titleInputRef}
+              aria-label="新しいIssueのタイトル"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {

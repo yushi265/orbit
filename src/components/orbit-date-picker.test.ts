@@ -22,9 +22,12 @@ describe("OrbitDatePicker", () => {
         }),
       ),
     );
-    await act(async () =>
-      dom.window.document.querySelector('button[aria-label="Due dateのカレンダー"]')!.click(),
-    );
+    const calendarTrigger = dom.window.document.querySelector(
+      'button[aria-label="Due dateのカレンダー"]',
+    )!;
+    expect(calendarTrigger.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(calendarTrigger.textContent).toBe("");
+    await act(async () => calendarTrigger.click());
     expect(
       dom.window.document.querySelector('[role="group"][aria-label="Due dateのカレンダー"]'),
     ).not.toBeNull();

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { OrbitIcon } from "./orbit-icon";
 
 function dateParts(value: string): [number, number] {
   const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(value);
@@ -87,7 +88,7 @@ export function OrbitDatePicker({
           setOpen(!open);
         }}
       >
-        ▦
+        <OrbitIcon name="calendar" size={20} />
       </button>
       {open && (
         <div className="orbit-calendar" role="group" aria-label={`${label}のカレンダー`}>

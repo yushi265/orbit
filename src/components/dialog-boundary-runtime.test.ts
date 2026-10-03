@@ -89,13 +89,13 @@ function command() {
     modifierLabel: "Ctrl",
   });
 }
-function detail() {
+function detail(withFallback = true) {
   return createElement(
     QueryClientProvider,
     { client },
     createElement(IssueDetailPanel, {
       issueId: "issue-1",
-      fallbackIssue: reviewIssue(),
+      fallbackIssue: withFallback ? reviewIssue() : undefined,
       knownIssues: [reviewIssue()],
       projects: [],
       workflowStates: [],
@@ -151,6 +151,170 @@ describe("review Dialog boundaries", () => {
       expect(dom.window.document.activeElement).toBe(opener);
     },
   );
+  it("locks background scrolling until the last stacked dialog closes and restores styles", async () => {
+    const body = dom.window.document.body;
+    const html = dom.window.document.documentElement;
+    body.style.overflow = "auto";
+    body.style.position = "relative";
+    html.style.overflow = "scroll";
+    await render(createElement("div", null, composer(), command()));
+    expect(body.style.overflow).toBe("hidden");
+    expect(body.style.position).toBe("fixed");
+    expect(html.style.overflow).toBe("hidden");
+    await render(createElement("div", null, composer()));
+    expect(body.style.overflow).toBe("hidden");
+    await render(null);
+    expect(body.style.overflow).toBe("auto");
+    expect(body.style.position).toBe("relative");
+    expect(html.style.overflow).toBe("scroll");
+  });
+
+  it("restores the original scroll position and inline style priority after closing", async () => {
+    const body = dom.window.document.body;
+    body.style.setProperty("top", "12px", "important");
+    body.style.width = "95%";
+    Object.defineProperties(dom.window, {
+      scrollX: { configurable: true, value: 5 },
+      scrollY: { configurable: true, value: 420 },
+    });
+    const scrollTo = vi.spyOn(dom.window, "scrollTo").mockImplementation(() => undefined);
+    await render(createElement("div", null, composer(), command()));
+    expect(body.style.top).toBe("-420px");
+    expect(body.style.left).toBe("-5px");
+    await render(createElement("div", null, composer()));
+    expect(scrollTo).not.toHaveBeenCalled();
+    await render(null);
+    expect(scrollTo).toHaveBeenCalledExactlyOnceWith(5, 420);
+    expect(body.style.top).toBe("12px");
+    expect(body.style.getPropertyPriority("top")).toBe("important");
+    expect(body.style.width).toBe("95%");
+    expect(body.style.left).toBe("");
+    expect(dom.window.document.activeElement).toBe(opener);
+  });
+
+  it("preserves desktop content width when hiding the scrollbar", async () => {
+    Object.defineProperty(dom.window.document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(dom.window, "innerWidth", { configurable: true, value: 1024 });
+    dom.window.document.body.style.paddingRight = "7px";
+    await render(composer());
+    expect(dom.window.document.body.style.paddingRight).toBe("31px");
+    await render(null);
+    expect(dom.window.document.body.style.paddingRight).toBe("7px");
+  });
+
+  it("tracks the visible viewport while a keyboard shrinks or shifts it and detaches on close", async () => {
+    const viewport = Object.assign(new dom.window.EventTarget(), { height: 844, offsetTop: 0 });
+    Object.defineProperty(dom.window, "visualViewport", { configurable: true, value: viewport });
+    const remove = vi.spyOn(viewport, "removeEventListener");
+    await render(composer());
+    const dialog = dom.window.document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.style.getPropertyValue("--dialog-viewport-height")).toBe("844px");
+    viewport.height = 390;
+    viewport.offsetTop = 48;
+    viewport.dispatchEvent(new dom.window.Event("resize"));
+    expect(dialog.style.getPropertyValue("--dialog-viewport-height")).toBe("390px");
+    expect(dialog.style.getPropertyValue("--dialog-viewport-top")).toBe("48px");
+    viewport.offsetTop = 60;
+    viewport.dispatchEvent(new dom.window.Event("scroll"));
+    expect(dialog.style.getPropertyValue("--dialog-viewport-top")).toBe("60px");
+    await render(null);
+    expect(remove).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(remove).toHaveBeenCalledWith("scroll", expect.any(Function));
+    viewport.dispatchEvent(new dom.window.Event("resize"));
+    expect(dialog.style.getPropertyValue("--dialog-viewport-height")).toBe("");
+    expect(dialog.style.getPropertyValue("--dialog-viewport-top")).toBe("");
+  });
+
+  it.each([{ isComposing: true }, { keyCode: 229 }])(
+    "keeps the dialog open during IME Escape: %j",
+    async (ime) => {
+      await render(composer());
+      const input = dom.window.document.querySelector("textarea")!;
+      await act(async () =>
+        input.dispatchEvent(
+          new dom.window.KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+            ...ime,
+          }),
+        ),
+      );
+      expect(onClose).not.toHaveBeenCalled();
+      await act(async () => key(input, "Escape"));
+      expect(onClose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("places the composer caret at the end once and preserves later selection", async () => {
+    await render(composer());
+    const input = dom.window.document.querySelector("textarea")!;
+    expect(input.selectionStart).toBe(input.value.length);
+    expect(input.selectionEnd).toBe(input.value.length);
+    input.setSelectionRange(1, 3);
+    await render(composer());
+    expect(input.selectionStart).toBe(1);
+    expect(input.selectionEnd).toBe(3);
+  });
+
+  it.each(["untouched", "pointer", "composition", "keyboard", "input"])(
+    "positions an asynchronously loaded title only when untouched: %s",
+    async (interaction) => {
+      let resolveDetail!: (value: unknown) => void;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          () =>
+            new Promise((resolve) => {
+              resolveDetail = resolve;
+            }),
+        ),
+      );
+      await render(detail(false));
+      const input = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
+      expect(dom.window.document.activeElement).toBe(input);
+      const select = vi.spyOn(input, "setSelectionRange");
+      if (interaction !== "untouched") {
+        input.dispatchEvent(
+          new dom.window.Event(
+            (
+              {
+                pointer: "pointerdown",
+                composition: "compositionstart",
+                keyboard: "keydown",
+                input: "input",
+              } as Record<string, string>
+            )[interaction],
+            {
+              bubbles: true,
+            },
+          ),
+        );
+      }
+      await act(async () => {
+        resolveDetail({ ok: true, status: 200, json: async () => reviewDetail() });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(input.value).toBe(reviewIssue().title);
+      expect(select).toHaveBeenCalledTimes(interaction === "untouched" ? 1 : 0);
+      if (interaction === "untouched") {
+        expect(input.selectionStart).toBe(input.value.length);
+        expect(input.selectionEnd).toBe(input.value.length);
+      } else {
+        // React updates the controlled value itself; the caret helper must not intervene.
+        await act(async () => client.setQueryData(["issue-detail", "issue-1"], reviewDetail()));
+        expect(select).not.toHaveBeenCalled();
+      }
+      input.setSelectionRange(1, 3);
+      await render(detail(false));
+      expect(input.selectionStart).toBe(1);
+      expect(input.selectionEnd).toBe(3);
+    },
+  );
+
   it("[Escape境界] 背景へ向いたEscapeも最前面Dialogのcloseだけへ渡す", async () => {
     await render(composer());
     await act(async () => key(dom.window.document.body, "Escape"));

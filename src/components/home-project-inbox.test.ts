@@ -323,6 +323,73 @@ describe("Home / Project / Inbox workspace UI", () => {
     expect(markup).toContain("Issueを見る");
   });
 
+  it("[回帰] Inboxは未実装の通知生成を約束しない", () => {
+    const markup = renderToStaticMarkup(
+      createElement(InboxView, {
+        notifications: [],
+        onOpenNotification: async () => undefined,
+        onMarkAllRead: async () => undefined,
+        onNavigateIssues: () => undefined,
+      }),
+    );
+    expect(markup).toContain("期限・Cycleの自動通知はまだ配信していません");
+    expect(markup).not.toContain("Orbitからのお知らせがここに届きます");
+  });
+
+  it("[状態遷移] 未読に戻す失敗後も通知を保持し、再試行できる", async () => {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+      url: "https://orbit.example/inbox",
+    });
+    for (const key of ["window", "document", "navigator", "HTMLElement", "Node"] as const)
+      vi.stubGlobal(key, key === "window" ? dom.window : dom.window[key]);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const notification = {
+      id: "n1",
+      userId: "owner",
+      type: "due_soon" as const,
+      title: "期限",
+      body: "対象を確認",
+      entityType: "issue" as const,
+      entityId: "i1",
+      readAt: now,
+      deletedAt: null,
+      createdAt: now,
+    };
+    const onMarkUnread = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    const onOpenNotification = vi.fn();
+    const root = createRoot(dom.window.document.getElementById("root")!);
+    await act(async () =>
+      root.render(
+        createElement(InboxView, {
+          notifications: [notification],
+          onMarkUnread,
+          onOpenNotification,
+          onMarkAllRead: async () => undefined,
+          onNavigateIssues: () => undefined,
+        }),
+      ),
+    );
+    await act(async () =>
+      (dom.window.document.querySelector(".notification-unread") as HTMLButtonElement).click(),
+    );
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
+      "未読に戻せません",
+    );
+    expect(dom.window.document.querySelectorAll(".notification-row")).toHaveLength(1);
+    await act(async () =>
+      (dom.window.document.querySelector('[role="alert"] button') as HTMLButtonElement).click(),
+    );
+    expect(onMarkUnread).toHaveBeenCalledTimes(2);
+    expect(onMarkUnread).toHaveBeenLastCalledWith(notification);
+    expect(onOpenNotification).not.toHaveBeenCalled();
+    expect(dom.window.document.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => root.unmount());
+    dom.window.close();
+  });
+
   it("[状態遷移] Inboxの未読切替・個別既読・すべて既読を呼び出せる", async () => {
     const dom = new JSDOM("<!doctype html><div id='root'></div>", {
       url: "https://orbit.example/inbox",

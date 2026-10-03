@@ -19,6 +19,12 @@ type ContinueResponse = {
   next: "continue" | "resume" | "none";
 };
 
+const NONTERMINAL_STATUSES: Run["status"][] = ["pending", "running", "paused", "failed"];
+
+function nonterminal(run: Run | null): run is Run {
+  return run !== null && NONTERMINAL_STATUSES.includes(run.status);
+}
+
 function active(run: Run | null): run is Run & { status: "pending" | "running" } {
   return run?.status === "pending" || run?.status === "running";
 }
@@ -59,7 +65,7 @@ function createRunner(events: Events) {
       // retain a confirmed terminal result until another Run or a 404 replaces it.
       const run =
         result.run ??
-        (current && ["pending", "running", "paused", "failed"].includes(current.status)
+        (nonterminal(current)
           ? (await apiGet<{ run: Run }>(`/api/v1/background-runs/${current.run_id}`)).run
           : current);
       if (disposed) return;
@@ -119,6 +125,16 @@ function createRunner(events: Events) {
     void perform(readCurrent, false);
   }
 
+  // A hidden tab with no nonterminal Run has nothing to recover; skip the periodic read.
+  function poll() {
+    if (document.hidden && !nonterminal(current)) return;
+    revalidate();
+  }
+
+  function revalidateOnVisible() {
+    if (!document.hidden) revalidate();
+  }
+
   function continueChunk() {
     if (!active(current)) return;
     const previous = current;
@@ -143,10 +159,11 @@ function createRunner(events: Events) {
       if (initialized || disposed) return;
       initialized = true;
       publish(initial);
-      pollTimer = setInterval(revalidate, CURRENT_INTERVAL_MS);
+      pollTimer = setInterval(poll, CURRENT_INTERVAL_MS);
       revalidate();
     },
     revalidate,
+    revalidateOnVisible,
     start() {
       if (active(current) || current?.status === "paused" || current?.status === "failed") return;
       return perform(async () => {
@@ -198,11 +215,13 @@ export function useBackgroundRun(initial: Run | null | undefined, callbacks: Cal
     runnerRef.current = runner;
     window.addEventListener("focus", runner.revalidate);
     window.addEventListener("online", runner.revalidate);
+    document.addEventListener("visibilitychange", runner.revalidateOnVisible);
     return () => {
       runner.dispose();
       runnerRef.current = null;
       window.removeEventListener("focus", runner.revalidate);
       window.removeEventListener("online", runner.revalidate);
+      document.removeEventListener("visibilitychange", runner.revalidateOnVisible);
     };
   }, []);
 

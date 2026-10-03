@@ -80,6 +80,11 @@ describe("PWA manifest", () => {
     expect(rootRoute).toContain("icon-192.png?v=4");
   });
 
+  it("[代表値] extends the viewport into the safe area with viewport-fit=cover", () => {
+    const rootRoute = readFileSync(resolve(process.cwd(), "src/routes/__root.tsx"), "utf8");
+    expect(rootRoute).toContain("width=device-width, initial-scale=1, viewport-fit=cover");
+  });
+
   it("declares cache and content-type headers for PWA assets", () => {
     const headers = readFileSync(resolve(process.cwd(), "public/_headers"), "utf8");
 

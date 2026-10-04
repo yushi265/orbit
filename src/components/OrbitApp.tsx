@@ -2978,9 +2978,8 @@ export function IssuesView({
   );
 }
 
-function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
+export function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
   const icon = priorityIconFor(priority);
-  const barCount = icon.name === "low" ? 1 : icon.name === "medium" ? 2 : 3;
   return (
     <span
       className={`priority-icon ${icon.name}`}
@@ -2988,19 +2987,22 @@ function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
       aria-label={icon.label}
       title={icon.label}
     >
-      {icon.name === "none" ? (
-        <span aria-hidden="true" className="priority-none-mark" />
-      ) : icon.name === "urgent" ? (
-        <span aria-hidden="true" className="priority-urgent-mark">
-          ✦
-        </span>
-      ) : (
-        <span aria-hidden="true" className="priority-bars">
-          {Array.from({ length: barCount }, (_, index) => (
-            <span key={index} />
-          ))}
-        </span>
-      )}
+      <svg
+        aria-hidden="true"
+        className="priority-glyph"
+        viewBox="0 0 16 16"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {icon.paths.map((path) => (
+          <path key={path.d} d={path.d} strokeDasharray={path.dash} />
+        ))}
+      </svg>
     </span>
   );
 }

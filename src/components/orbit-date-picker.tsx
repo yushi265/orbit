@@ -34,7 +34,7 @@ export function OrbitDatePicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [month, setMonth] = useState<[number, number]>(() => dateParts(value));
   const [year, monthIndex] = month;
-  const firstWeekday = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -104,7 +104,7 @@ export function OrbitDatePicker({
             </button>
           </div>
           <div className="orbit-calendar-grid">
-            {["月", "火", "水", "木", "金", "土", "日"].map((day) => (
+            {["日", "月", "火", "水", "木", "金", "土"].map((day) => (
               <span key={day} className="orbit-calendar-weekday">
                 {day}
               </span>

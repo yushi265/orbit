@@ -105,6 +105,8 @@
 
 - Mobile下部タブはHome / Inbox / Create / Search / Menuの5つ。`MobileMenuSheet`からIssues / Cycles / Projects / Views / Settingsへ移動する。Issue一覧のフィルター欄は1組だけ描画し、`div.filter-fields-wrap > div.filter-fields`を〜767pxでは下端シート、768px以上では`display: contents`でツールバーに並べる。`useDialogBoundary`はダイアログの兄弟を`inert`にするため、押下で閉じる背景はダイアログの祖先に置く（兄弟に置くと実ブラウザで押せない。jsdomでは検出できない）。常時マウントで`enabled`を切り替える場合、hookのフォーカス復帰先は初回描画時の要素になるので、閉じたときの復帰は明示的に行う（参照: `src/components/OrbitApp.tsx`、`src/components/issue-list.ts`、`src/styles.css`、`docs/spec/FIX-mobile-nav-filter-sheet/`）。
 
+- iOSのSafe Areaはviewport metaの`viewport-fit=cover`が無いと`env(safe-area-inset-*)`が0になり効かない。横方向は`.app-shell`の左右paddingで非fixedの内容へ1回だけ適用し、fixed要素（`.mobile-nav`、`.toast`、各シート、モーダル背景）は各自で`max(既存値, env())`を持つ。上方向は`apple-mobile-web-app-status-bar-style`が`default`の間は0のため追加していない（`black-translucent`へ変える場合は上方向の対応が要る）。jsdomは`env()`を評価しないので、見た目はiPhone実機で確認する（参照: `src/routes/__root.tsx`、`src/styles.css`、`src/components/mobile-layout.test.ts`）。
+
 ## 最終更新
 
 FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03

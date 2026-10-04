@@ -52,4 +52,46 @@ describe("mobile issue detail layout", () => {
       /\.filter-fields\.open \.filter-sheet-done \{[^}]*position: sticky; bottom: 0;[^}]*env\(safe-area-inset-bottom\)/,
     );
   });
+
+  it("[代表値] horizontal safe-area insets are applied to the shell, nav, toast, menu sheet and filter sheet", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toContain(
+      ".app-shell { min-height: 100vh; display: flex; background: #f7f8fa; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }",
+    );
+    // shorthandの直後にlonghandで上書きする順序までセレクタ単位で固定する。
+    expect(styles).toMatch(
+      /\.mobile-nav \{[^}]*padding: 7px 10px max\(7px, env\(safe-area-inset-bottom\)\); padding-left: max\(10px, env\(safe-area-inset-left\)\); padding-right: max\(10px, env\(safe-area-inset-right\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.toast \{[^}]*right: calc\(24px \+ env\(safe-area-inset-right\)\); bottom: 24px;/,
+    );
+    expect(styles).toMatch(
+      /\.toast \{ right: max\(14px, env\(safe-area-inset-right\)\); bottom: calc\(82px \+ env\(safe-area-inset-bottom\)\); left: max\(14px, env\(safe-area-inset-left\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.mobile-menu-sheet \{[^}]*padding: 10px 12px max\(12px, env\(safe-area-inset-bottom\)\); padding-left: max\(12px, env\(safe-area-inset-left\)\); padding-right: max\(12px, env\(safe-area-inset-right\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.filter-fields\.open \{[^}]*padding: 18px 18px 0; padding-left: max\(18px, env\(safe-area-inset-left\)\); padding-right: max\(18px, env\(safe-area-inset-right\)\);/,
+    );
+  });
+
+  it("[同値分割] existing safe-area declarations remain", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /\.content-area \{[^}]*padding: 28px 17px calc\(94px \+ env\(safe-area-inset-bottom\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.mobile-nav \{[^}]*height: calc\(70px \+ env\(safe-area-inset-bottom\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.modal-backdrop \{[^}]*padding: calc\(var\(--modal-gutter\) \+ env\(safe-area-inset-top\)\) calc\(var\(--modal-gutter\) \+ env\(safe-area-inset-right\)\) calc\(var\(--modal-gutter\) \+ env\(safe-area-inset-bottom\)\) calc\(var\(--modal-gutter\) \+ env\(safe-area-inset-left\)\);/,
+    );
+    expect(styles).toMatch(
+      /\.issue-detail-backdrop, \.issue-composer-backdrop \{[^}]*padding: 0 env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/,
+    );
+    expect(styles).toMatch(
+      /\.filter-fields\.open \.filter-sheet-done \{[^}]*min-height: calc\(48px \+ env\(safe-area-inset-bottom\)\);[^}]*padding-bottom: env\(safe-area-inset-bottom\);/,
+    );
+  });
 });

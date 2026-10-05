@@ -43,6 +43,7 @@ import { Route as ApiV1NotificationsIndexRouteImport } from './routes/api/v1/not
 import { Route as ApiV1NotificationsNotificationIdRouteImport } from './routes/api/v1/notifications/$notificationId'
 import { Route as ApiV1ProjectsIndexRouteImport } from './routes/api/v1/projects/index'
 import { Route as ApiV1ProjectsProjectIdRouteImport } from './routes/api/v1/projects/$projectId'
+import { Route as ApiV1ProjectsReorderRouteImport } from './routes/api/v1/projects/reorder'
 import { Route as ApiV1ViewsIndexRouteImport } from './routes/api/v1/views/index'
 import { Route as ApiV1ViewsViewIdRouteImport } from './routes/api/v1/views/$viewId'
 import { Route as ApiV1WorkflowStatesIndexRouteImport } from './routes/api/v1/workflow-states/index'
@@ -230,6 +231,11 @@ const ApiV1ProjectsProjectIdRoute = ApiV1ProjectsProjectIdRouteImport.update({
   path: '/api/v1/projects/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ProjectsReorderRoute = ApiV1ProjectsReorderRouteImport.update({
+  id: '/api/v1/projects/reorder',
+  path: '/api/v1/projects/reorder',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1ViewsIndexRoute = ApiV1ViewsIndexRouteImport.update({
   id: '/api/v1/views/',
   path: '/api/v1/views/',
@@ -328,6 +334,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
+  '/api/v1/projects/reorder': typeof ApiV1ProjectsReorderRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
   '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs/': typeof ApiV1BackgroundRunsIndexRoute
@@ -376,6 +383,7 @@ export interface FileRoutesByTo {
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
+  '/api/v1/projects/reorder': typeof ApiV1ProjectsReorderRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
   '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs': typeof ApiV1BackgroundRunsIndexRoute
@@ -425,6 +433,7 @@ export interface FileRoutesById {
   '/api/v1/labels/$labelId': typeof ApiV1LabelsLabelIdRoute
   '/api/v1/notifications/$notificationId': typeof ApiV1NotificationsNotificationIdRoute
   '/api/v1/projects/$projectId': typeof ApiV1ProjectsProjectIdRoute
+  '/api/v1/projects/reorder': typeof ApiV1ProjectsReorderRoute
   '/api/v1/views/$viewId': typeof ApiV1ViewsViewIdRoute
   '/api/v1/workflow-states/$workflowStateId': typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   '/api/v1/background-runs/': typeof ApiV1BackgroundRunsIndexRoute
@@ -475,6 +484,7 @@ export interface FileRouteTypes {
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
+    | '/api/v1/projects/reorder'
     | '/api/v1/views/$viewId'
     | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs/'
@@ -523,6 +533,7 @@ export interface FileRouteTypes {
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
+    | '/api/v1/projects/reorder'
     | '/api/v1/views/$viewId'
     | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs'
@@ -571,6 +582,7 @@ export interface FileRouteTypes {
     | '/api/v1/labels/$labelId'
     | '/api/v1/notifications/$notificationId'
     | '/api/v1/projects/$projectId'
+    | '/api/v1/projects/reorder'
     | '/api/v1/views/$viewId'
     | '/api/v1/workflow-states/$workflowStateId'
     | '/api/v1/background-runs/'
@@ -620,6 +632,7 @@ export interface RootRouteChildren {
   ApiV1LabelsLabelIdRoute: typeof ApiV1LabelsLabelIdRoute
   ApiV1NotificationsNotificationIdRoute: typeof ApiV1NotificationsNotificationIdRoute
   ApiV1ProjectsProjectIdRoute: typeof ApiV1ProjectsProjectIdRoute
+  ApiV1ProjectsReorderRoute: typeof ApiV1ProjectsReorderRoute
   ApiV1ViewsViewIdRoute: typeof ApiV1ViewsViewIdRoute
   ApiV1WorkflowStatesWorkflowStateIdRoute: typeof ApiV1WorkflowStatesWorkflowStateIdRoute
   ApiV1BackgroundRunsIndexRoute: typeof ApiV1BackgroundRunsIndexRoute
@@ -872,6 +885,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1ProjectsProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/reorder': {
+      id: '/api/v1/projects/reorder'
+      path: '/api/v1/projects/reorder'
+      fullPath: '/api/v1/projects/reorder'
+      preLoaderRoute: typeof ApiV1ProjectsReorderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/views/': {
       id: '/api/v1/views/'
       path: '/api/v1/views'
@@ -1061,6 +1081,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1LabelsLabelIdRoute: ApiV1LabelsLabelIdRoute,
   ApiV1NotificationsNotificationIdRoute: ApiV1NotificationsNotificationIdRoute,
   ApiV1ProjectsProjectIdRoute: ApiV1ProjectsProjectIdRoute,
+  ApiV1ProjectsReorderRoute: ApiV1ProjectsReorderRoute,
   ApiV1ViewsViewIdRoute: ApiV1ViewsViewIdRoute,
   ApiV1WorkflowStatesWorkflowStateIdRoute:
     ApiV1WorkflowStatesWorkflowStateIdRoute,

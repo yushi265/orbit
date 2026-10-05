@@ -41,6 +41,7 @@ import {
   projectCreateMutationSchema,
   projectDisplayPreferencesMutationSchema,
   projectMetadataMutationSchema,
+  projectReorderMutationSchema,
   relationMutationSchema,
   reorderIssueInputSchema,
   resumeRunInputSchema,
@@ -265,6 +266,13 @@ export async function reorderIssue(request: Request): Promise<Response> {
       await parseBody(request),
     ) as ReorderIssueInput;
     return json({ issue: owner.store.reorderIssue(owner.userId, input) }, 200, requestId);
+  });
+}
+
+export async function reorderProject(request: Request): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) => {
+    const input = parseContract(projectReorderMutationSchema, await parseBody(request));
+    return json({ project: owner.store.reorderProject(owner.userId, input) }, 200, requestId);
   });
 }
 

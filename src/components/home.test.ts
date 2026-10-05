@@ -100,6 +100,7 @@ function data(issues: ReturnType<typeof issue>[]): BootstrapViewModel {
         deletedAt: null,
         createdAt: now,
         updatedAt: now,
+        position: 0,
       },
     ],
     cycles: [

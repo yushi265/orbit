@@ -110,8 +110,11 @@
 - Issue一覧（`IssuesView`のList）は`buildIssueHierarchyRows`（`src/components/issue-hierarchy.ts`）で、子を親の直下に字下げして並べる。並び順は兄弟どうしに適用され、親が一覧に無い子は最上位に親名つきで出る。子の完了数バッジはIssue詳細と同じ`calculateCycleMetrics`の`completed / total`（totalはCanceledを含む）。開閉はlocalStorage `orbit.issues.collapsedParents`。位置（`position`）は平坦なままで、手動並べ替えは同じ表示上の親を持つ兄弟の間だけ（`beforeIssueIdForDrop`を全Issueの手動順に対して使う）。全選択と選択は表示中の行だけ。`IssueRow`の開くボタンは`button`なので、開閉ボタンは入れ子にせず`div.issue-title-cell`で並べる（参照: `src/components/OrbitApp.tsx`、`src/styles.css`、`docs/spec/FEAT-issue-hierarchy-list/`）。
 - `PATCH /api/v1/issues/:id`の更新内容は`patch`オブジェクトの中に入れる（`{ version, idempotencyKey, patch: { parentId } }`）。最上位に置いた未知の項目は無視され、空の更新でもversionが1進む。
 
+- Projectは`position`（整数）を持ち、`OrbitStore.listProjects`は`position` → `createdAt` → `id`の昇順で返す（Bootstrapも同じ。クライアント側でProjectを並べ替える処理は無いので、この1か所の順が全画面に効く）。新規は未削除の最大+1。並べ替えは`POST /api/v1/projects/reorder`（`{ idempotencyKey, projectId, beforeProjectId | null }`）で、未削除の全件を連番に振り直し、Activity / Outboxは対象1件だけ、`updatedAt`は変えない。旧Snapshot（`position`なし）は`fromSnapshot`内の`fillProjectPositions`が`isSnapshot`の検証前に補う（Ownerごと・既存の最大+1から`createdAt` → `id`順）。補完は決定的で、`store-session`は補完後の値を初期状態として扱うため、読み込みだけでは保存しない。旧版のStoreは`hasTypes`で既知の項目だけを検証しレコードをそのまま保持するので、`position`があっても読める（旧版で作ったProjectは`position`を持たず、新版が補う）。D1の正規化テーブル`projects`には`position`を足していない（参照: `src/server/store.ts`、`src/server/api.ts`、`src/routes/api/v1/projects/reorder.ts`、`src/shared/contracts/projects.ts`、`docs/spec/FEAT-project-manual-order/`）。
+- ProjectsViewのカードは`Link`（アンカー）なので、中にボタンを置けない。`div.project-card-item`で包み、`Link.project-card`と`div.project-order-actions`を兄弟として並べて、見た目だけカードに重ねる（参照: `src/components/OrbitApp.tsx`、`src/components/project-workspace.ts`、`src/styles.css`）。
+
 ## 最終更新
 
-FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
+FEAT-project-manual-order / FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

@@ -222,6 +222,7 @@ describe("Cycle breakdown", () => {
       deletedAt: null,
       createdAt: 1,
       updatedAt: 1,
+      position: 0,
     };
     const markup = renderToStaticMarkup(
       createElement(CyclesView, {

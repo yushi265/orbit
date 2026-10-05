@@ -86,6 +86,7 @@ export interface Project {
   deletedAt: number | null;
   createdAt: number;
   updatedAt: number;
+  position: number;
 }
 
 export interface ProjectDisplayPreference {

@@ -112,6 +112,7 @@ LinearのProjectは明確な成果または目標日を持つ作業単位で、I
 | PRJ-07 | Project statusを手動更新する | Backlog / Planned / In Progress / Completed / Canceledカテゴリを持つ |
 | PRJ-08 | Project statusの名称、色、順序、既定値を設定できる | ユーザーごとの既定値を1件だけ保ち、参照中または既定の状態は削除を拒否して、先にProjectの一括変更または別の既定値の選択を求める |
 | PRJ-09 | Project詳細のIssue表示設定を保存・同期できる | List / Board、検索、Status / Priority / Label / 期限Filter、並び順、完了Issue表示切替をProjectごとに保存し、別端末でも復元できる |
+| PRJ-10 | Projectの表示順を手動で並べ替えられる | Projects一覧の「上へ」「下へ」で並べ替え、同じ順をHome・IssueのProject選択欄・Filterに反映する。新規Projectは末尾に入り、Projectの更新・アーカイブでは順番が変わらない |
 
 ## 6.6 View・Filter・Board
 

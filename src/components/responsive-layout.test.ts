@@ -27,7 +27,7 @@ describe("responsive issue layout contract", () => {
 
   it("[境界値] manual orderも表示中の列数とグリッド列数を一致させる", () => {
     expect(styles).toContain("grid-template-columns: 32px 28px minmax(0, 1fr) 105px 52px;");
-    expect(styles).toContain("grid-template-columns: 44px 44px minmax(0, 1fr) 80px 44px;");
+    expect(styles).toContain("grid-template-columns: 88px 44px minmax(0, 1fr) 80px 44px;");
     expect(styles).toContain(".issue-table.manual-order .due-cell { grid-column: 3 / -1; }");
   });
 

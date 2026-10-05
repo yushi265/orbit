@@ -2965,7 +2965,7 @@ export function IssuesView({
         <div className={`issue-table ${manualOrder ? "manual-order" : ""}`}>
           <div className="table-header">
             {manualOrder && <span className="reorder-cell">MOVE</span>}
-            <span className="check-cell">
+            <label className="check-cell">
               <input
                 type="checkbox"
                 aria-label="全選択"
@@ -2977,7 +2977,7 @@ export function IssuesView({
                   setSelected(event.target.checked ? hierarchyRows.map((row) => row.issue.id) : []);
                 }}
               />
-            </span>
+            </label>
             <span className="issue-main-heading">ISSUE</span>
             <span className="status-cell">STATUS</span>
             <span className="priority-cell">PRIORITY</span>
@@ -3300,7 +3300,7 @@ function IssueRow({
           </button>
         </span>
       )}
-      <span className="check-cell">
+      <label className="check-cell">
         {onSelect && (
           <input
             type="checkbox"
@@ -3310,7 +3310,7 @@ function IssueRow({
             disabled={pending}
           />
         )}
-      </span>
+      </label>
       {hierarchical ? (
         <div className="issue-title-cell">
           {hasVisibleChildren ? (

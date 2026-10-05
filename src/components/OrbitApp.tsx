@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
+  type CSSProperties,
   type FormEvent as ReactFormEvent,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -60,6 +61,12 @@ import {
 } from "./issue-list";
 import { buildHomeSummary, homeDateLabel, homeRelativeDay } from "./home";
 import { formatIssueDueDate, issueDueDateKey } from "../shared/issue-dates";
+import {
+  buildIssueHierarchyRows,
+  readCollapsedParents,
+  writeCollapsedParents,
+  type IssueHierarchyRow,
+} from "./issue-hierarchy";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
@@ -2456,7 +2463,31 @@ export function IssuesView({
   const [draggedIssueId, setDraggedIssueId] = useState<string | null>(null);
   const [dropTargetIssueId, setDropTargetIssueId] = useState<string | null>(null);
   const manualOrder = issueSort === "manual";
-  const orderedIssues = sortIssues(allIssues, "manual", workflowStates);
+  const orderedIssues = useMemo(
+    () => sortIssues(allIssues, "manual", workflowStates),
+    [allIssues, workflowStates],
+  );
+  const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(() =>
+    readCollapsedParents(browserStorage()),
+  );
+  const hierarchyRows = useMemo(
+    () =>
+      buildIssueHierarchyRows({ issues, allIssues, workflowStates, collapsed: collapsedParents }),
+    [issues, allIssues, workflowStates, collapsedParents],
+  );
+  useEffect(() => {
+    if (viewMode !== "list") return;
+    const visibleIds = new Set(hierarchyRows.map((row) => row.issue.id));
+    const next = selected.filter((issueId) => visibleIds.has(issueId));
+    if (next.length !== selected.length) setSelected(next);
+  }, [viewMode, hierarchyRows, selected, setSelected]);
+  const hasToggleColumn = hierarchyRows.some((row) => row.hasVisibleChildren);
+  function toggleChildren(issueId: string) {
+    const next = new Set(collapsedParents);
+    if (!next.delete(issueId)) next.add(issueId);
+    setCollapsedParents(next);
+    writeCollapsedParents(browserStorage(), next);
+  }
   const grouped = workflowStates
     .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
     .filter((group) => group.issues.length > 0);
@@ -2488,21 +2519,21 @@ export function IssuesView({
     setDraggedIssueId(null);
     setDropTargetIssueId(null);
     if (!manualOrder || !draggedId || draggedId === dropTargetId || reorderBusy) return;
-    const draggedIssue = issues.find((issue) => issue.id === draggedId);
-    if (!draggedIssue) return;
-    onReorder(draggedIssue, beforeIssueIdForDrop(orderedIssues, draggedId, dropTargetId));
+    const draggedRow = hierarchyRows.find((row) => row.issue.id === draggedId);
+    const targetRow = hierarchyRows.find((row) => row.issue.id === dropTargetId);
+    if (!draggedRow || !targetRow || draggedRow.parentKey !== targetRow.parentKey) return;
+    onReorder(draggedRow.issue, beforeIssueIdForDrop(orderedIssues, draggedId, dropTargetId));
   }
 
   function moveIssue(issue: Issue, direction: "up" | "down") {
     if (!manualOrder || reorderBusy) return false;
-    const index = issues.findIndex((item) => item.id === issue.id);
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= issues.length) return false;
-    const beforeIssueId =
-      allIssues.length === issues.length
-        ? beforeIssueIdForMove(orderedIssues, issue.id, direction)
-        : beforeIssueIdForDrop(orderedIssues, issue.id, issues[targetIndex].id);
-    onReorder(issue, beforeIssueId);
+    const current = hierarchyRows.find((row) => row.issue.id === issue.id);
+    if (!current) return false;
+    const siblings = hierarchyRows.filter((row) => row.parentKey === current.parentKey);
+    const index = siblings.findIndex((row) => row.issue.id === issue.id);
+    const sibling = siblings[direction === "up" ? index - 1 : index + 1];
+    if (!sibling) return false;
+    onReorder(issue, beforeIssueIdForDrop(orderedIssues, issue.id, sibling.issue.id));
     return true;
   }
 
@@ -2909,12 +2940,12 @@ export function IssuesView({
               <input
                 type="checkbox"
                 aria-label="全選択"
-                checked={issues.length > 0 && selected.length === issues.length}
+                checked={hierarchyRows.length > 0 && selected.length === hierarchyRows.length}
                 disabled={bulkBusy}
                 onChange={(event) => {
                   resetBulkMutation();
                   setBulkError(null);
-                  setSelected(event.target.checked ? issues.map((issue) => issue.id) : []);
+                  setSelected(event.target.checked ? hierarchyRows.map((row) => row.issue.id) : []);
                 }}
               />
             </span>
@@ -2924,41 +2955,50 @@ export function IssuesView({
             <span className="project-cell">PROJECT</span>
             <span className="due-cell">DUE</span>
           </div>
-          {issues.map((issue) => (
-            <IssueRow
-              key={issue.id}
-              issue={issue}
-              state={workflowStates.find((item) => item.id === issue.statusId)}
-              workflowStates={workflowStates}
-              selected={selected.includes(issue.id)}
-              pending={pendingIssueId === issue.id || bulkBusy}
-              onSelect={(checked) => {
-                resetBulkMutation();
-                setBulkError(null);
-                setSelected(
-                  checked ? [...selected, issue.id] : selected.filter((id) => id !== issue.id),
-                );
-              }}
-              onClick={(trigger) => onOpenIssue(issue, trigger)}
-              onUpdate={scope === "active" ? onUpdate : undefined}
-              labels={labels}
-              projects={projects}
-              onRestore={scope === "archived" ? onRestore : undefined}
-              onFocusIssue={onFocusIssue}
-              manualOrder={manualOrder}
-              dragging={draggedIssueId === issue.id}
-              dropTarget={dropTargetIssueId === issue.id}
-              onDragStart={() => setDraggedIssueId(issue.id)}
-              onDragEnd={() => {
-                setDraggedIssueId(null);
-                setDropTargetIssueId(null);
-              }}
-              onDragOver={() => setDropTargetIssueId(issue.id)}
-              onDrop={() => dropIssue(issue.id)}
-              onMove={(direction) => moveIssue(issue, direction)}
-              reorderBusy={reorderBusy}
-            />
-          ))}
+          {hierarchyRows.map(
+            ({ issue, depth, hasVisibleChildren, collapsed, childProgress, parentHint }) => (
+              <IssueRow
+                key={issue.id}
+                issue={issue}
+                depth={depth}
+                hasVisibleChildren={hasVisibleChildren}
+                collapsed={collapsed}
+                reserveToggleSpace={hasToggleColumn}
+                onToggleChildren={() => toggleChildren(issue.id)}
+                childProgress={childProgress}
+                parentHint={parentHint}
+                state={workflowStates.find((item) => item.id === issue.statusId)}
+                workflowStates={workflowStates}
+                selected={selected.includes(issue.id)}
+                pending={pendingIssueId === issue.id || bulkBusy}
+                onSelect={(checked) => {
+                  resetBulkMutation();
+                  setBulkError(null);
+                  setSelected(
+                    checked ? [...selected, issue.id] : selected.filter((id) => id !== issue.id),
+                  );
+                }}
+                onClick={(trigger) => onOpenIssue(issue, trigger)}
+                onUpdate={scope === "active" ? onUpdate : undefined}
+                labels={labels}
+                projects={projects}
+                onRestore={scope === "archived" ? onRestore : undefined}
+                onFocusIssue={onFocusIssue}
+                manualOrder={manualOrder}
+                dragging={draggedIssueId === issue.id}
+                dropTarget={dropTargetIssueId === issue.id}
+                onDragStart={() => setDraggedIssueId(issue.id)}
+                onDragEnd={() => {
+                  setDraggedIssueId(null);
+                  setDropTargetIssueId(null);
+                }}
+                onDragOver={() => setDropTargetIssueId(issue.id)}
+                onDrop={() => dropIssue(issue.id)}
+                onMove={(direction) => moveIssue(issue, direction)}
+                reorderBusy={reorderBusy}
+              />
+            ),
+          )}
           {issues.length === 0 && (
             <EmptyState
               title={hasIssueFilter ? "条件に一致するIssueはありません" : "Issueはまだありません"}
@@ -3005,6 +3045,15 @@ export function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
       </svg>
     </span>
   );
+}
+
+function browserStorage(): Storage | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function useKeyboardReorderFocus(busy: boolean) {
@@ -3085,8 +3134,22 @@ function IssueRow({
   onDrop,
   onMove,
   reorderBusy = false,
+  depth,
+  hasVisibleChildren = false,
+  collapsed = false,
+  reserveToggleSpace = false,
+  onToggleChildren,
+  childProgress,
+  parentHint,
 }: {
   issue: Issue;
+  depth?: number;
+  hasVisibleChildren?: boolean;
+  collapsed?: boolean;
+  reserveToggleSpace?: boolean;
+  onToggleChildren?: () => void;
+  childProgress?: IssueHierarchyRow["childProgress"];
+  parentHint?: IssueHierarchyRow["parentHint"];
   state?: WorkflowState;
   workflowStates?: WorkflowState[];
   compact?: boolean;
@@ -3110,9 +3173,53 @@ function IssueRow({
   reorderBusy?: boolean;
 }) {
   const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(pending || reorderBusy);
+  const hierarchical = depth !== undefined;
+  const mainButton = (
+    <button
+      className="issue-main"
+      data-issue-id={issue.id}
+      aria-pressed={selected}
+      onFocus={() => onFocusIssue?.(issue.id)}
+      onClick={(event) => onClick?.(event.currentTarget)}
+    >
+      <span className="issue-id">{issue.identifier}</span>
+      <strong>{issue.title}</strong>
+      {childProgress && (
+        <span
+          className="issue-child-progress"
+          aria-label={`子Issue ${childProgress.completed} / ${childProgress.total} 完了`}
+        >
+          {childProgress.completed}/{childProgress.total}
+        </span>
+      )}
+      {parentHint && (
+        <span className="issue-parent-hint">
+          ↳ {parentHint.identifier} {parentHint.title}
+        </span>
+      )}
+      {issue.description && !compact && (
+        <span className="issue-description">{issue.description}</span>
+      )}
+      {labels.length > 0 && (
+        <span className="issue-labels" aria-label="Labels">
+          {issue.labelIds
+            .map((labelId) => labels.find((label) => label.id === labelId))
+            .filter((label): label is Label => Boolean(label))
+            .map((label) => (
+              <span className="label-chip" key={label.id}>
+                <span className="label-chip-dot" style={{ background: label.color }} />
+                {label.name}
+              </span>
+            ))}
+        </span>
+      )}
+    </button>
+  );
   return (
     <div
-      className={`issue-row ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
+      data-depth={depth}
+      style={hierarchical ? ({ "--issue-depth": Math.min(depth, 3) } as CSSProperties) : undefined}
+      className={`issue-row ${reserveToggleSpace ? "has-toggle-column" : ""} ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
       draggable={manualOrder && !pending && !reorderBusy}
       onDragStart={
         manualOrder
@@ -3175,32 +3282,26 @@ function IssueRow({
           />
         )}
       </span>
-      <button
-        className="issue-main"
-        data-issue-id={issue.id}
-        aria-pressed={selected}
-        onFocus={() => onFocusIssue?.(issue.id)}
-        onClick={(event) => onClick?.(event.currentTarget)}
-      >
-        <span className="issue-id">{issue.identifier}</span>
-        <strong>{issue.title}</strong>
-        {issue.description && !compact && (
-          <span className="issue-description">{issue.description}</span>
-        )}
-        {labels.length > 0 && (
-          <span className="issue-labels" aria-label="Labels">
-            {issue.labelIds
-              .map((labelId) => labels.find((label) => label.id === labelId))
-              .filter((label): label is Label => Boolean(label))
-              .map((label) => (
-                <span className="label-chip" key={label.id}>
-                  <span className="label-chip-dot" style={{ background: label.color }} />
-                  {label.name}
-                </span>
-              ))}
-          </span>
-        )}
-      </button>
+      {hierarchical ? (
+        <div className="issue-title-cell">
+          {hasVisibleChildren ? (
+            <button
+              type="button"
+              className="issue-children-toggle"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? "子Issueを展開する" : "子Issueを折りたたむ"}
+              onClick={onToggleChildren}
+            >
+              <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+            </button>
+          ) : reserveToggleSpace ? (
+            <span className="issue-children-toggle-spacer" aria-hidden="true" />
+          ) : null}
+          {mainButton}
+        </div>
+      ) : (
+        mainButton
+      )}
       <span className="status-cell">
         <span className="status-dot" style={{ background: state?.color }} />
         {onUpdate && !compact ? (

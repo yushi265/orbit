@@ -2905,7 +2905,7 @@ export function IssuesView({
         <div className={`issue-table ${manualOrder ? "manual-order" : ""}`}>
           <div className="table-header">
             {manualOrder && <span className="reorder-cell">MOVE</span>}
-            <span className="check-cell">
+            <label className="check-cell">
               <input
                 type="checkbox"
                 aria-label="全選択"
@@ -2917,7 +2917,7 @@ export function IssuesView({
                   setSelected(event.target.checked ? issues.map((issue) => issue.id) : []);
                 }}
               />
-            </span>
+            </label>
             <span className="issue-main-heading">ISSUE</span>
             <span className="status-cell">STATUS</span>
             <span className="priority-cell">PRIORITY</span>
@@ -3164,7 +3164,7 @@ function IssueRow({
           </button>
         </span>
       )}
-      <span className="check-cell">
+      <label className="check-cell">
         {onSelect && (
           <input
             type="checkbox"
@@ -3174,7 +3174,7 @@ function IssueRow({
             disabled={pending}
           />
         )}
-      </span>
+      </label>
       <button
         className="issue-main"
         data-issue-id={issue.id}

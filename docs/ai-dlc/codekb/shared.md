@@ -107,8 +107,11 @@
 
 - iOSのSafe Areaはviewport metaの`viewport-fit=cover`が無いと`env(safe-area-inset-*)`が0になり効かない。横方向は`.app-shell`の左右paddingで非fixedの内容へ1回だけ適用し、fixed要素（`.mobile-nav`、`.toast`、各シート、モーダル背景）は各自で`max(既存値, env())`を持つ。上方向は`apple-mobile-web-app-status-bar-style`が`default`の間は0のため追加していない（`black-translucent`へ変える場合は上方向の対応が要る）。jsdomは`env()`を評価しないので、見た目はiPhone実機で確認する（参照: `src/routes/__root.tsx`、`src/styles.css`、`src/components/mobile-layout.test.ts`）。
 
+- Issue一覧（`IssuesView`のList）は`buildIssueHierarchyRows`（`src/components/issue-hierarchy.ts`）で、子を親の直下に字下げして並べる。並び順は兄弟どうしに適用され、親が一覧に無い子は最上位に親名つきで出る。子の完了数バッジはIssue詳細と同じ`calculateCycleMetrics`の`completed / total`（totalはCanceledを含む）。開閉はlocalStorage `orbit.issues.collapsedParents`。位置（`position`）は平坦なままで、手動並べ替えは同じ表示上の親を持つ兄弟の間だけ（`beforeIssueIdForDrop`を全Issueの手動順に対して使う）。全選択と選択は表示中の行だけ。`IssueRow`の開くボタンは`button`なので、開閉ボタンは入れ子にせず`div.issue-title-cell`で並べる（参照: `src/components/OrbitApp.tsx`、`src/styles.css`、`docs/spec/FEAT-issue-hierarchy-list/`）。
+- `PATCH /api/v1/issues/:id`の更新内容は`patch`オブジェクトの中に入れる（`{ version, idempotencyKey, patch: { parentId } }`）。最上位に置いた未知の項目は無視され、空の更新でもversionが1進む。
+
 ## 最終更新
 
-FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-03
+FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
 
 MVP初回実装 / FEAT-issue-detail-workspace / FEAT-cycle-workspace / FEAT-project-view-workspace / FEAT-label-bulk-workspace / REL-d1-persistence作業中 / FEAT-feedback-polish / FEAT-issue-controls / FEAT-issue-experience-polish / PHASE1-foundation / PHASE2-issue-core / FIX-cycle-initial-bootstrap / FEAT-cycle-settings / CYC-11 / CYC-14 / CYC-17 / CI-CD-github-actions / FEAT-home-project-inbox-ux / FEAT-local-only・LAN拡張 / 2026-09-12

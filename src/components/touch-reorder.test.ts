@@ -231,6 +231,26 @@ describe("Issue list touch reorder", () => {
     expect(touch("1", "下")!.disabled).toBe(true);
   });
 
+  it("[境界値] 親子表示では兄弟内の先頭↑・末尾↓だけをdisabledにする", async () => {
+    data = reviewBootstrap([
+      reviewIssue("one", { identifier: "TASK-1", position: 0 }),
+      reviewIssue("two", { identifier: "TASK-2", position: 1, parentId: "one" }),
+      reviewIssue("three", { identifier: "TASK-3", position: 2, parentId: "one" }),
+      reviewIssue("four", { identifier: "TASK-4", position: 3 }),
+    ]);
+    queryClient.setQueryData(["bootstrap"], data);
+    await render();
+    // moveIssue は同じ親を持つ兄弟の間だけで動くため、表示行の位置ではなく兄弟内の位置で判定する
+    expect(touch("1", "上")!.disabled).toBe(true);
+    expect(touch("1", "下")!.disabled).toBe(false);
+    expect(touch("2", "上")!.disabled).toBe(true);
+    expect(touch("2", "下")!.disabled).toBe(false);
+    expect(touch("3", "上")!.disabled).toBe(false);
+    expect(touch("3", "下")!.disabled).toBe(true);
+    expect(touch("4", "上")!.disabled).toBe(false);
+    expect(touch("4", "下")!.disabled).toBe(true);
+  });
+
   it("[状態遷移] 行のpending(Issue更新中)はその行の↑/↓をdisabledにし、完了で戻る", async () => {
     await render();
     const priority = dom.window.document.querySelector(

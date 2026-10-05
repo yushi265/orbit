@@ -2727,7 +2727,12 @@ export function IssuesView({
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
-        <p className="manual-order-hint">ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。</p>
+        <p className="manual-order-hint">
+          <span className="hint-desktop">
+            ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。
+          </span>
+          <span className="hint-mobile">↑ / ↓ ボタンで並び替えます。</span>
+        </p>
       )}
       {selected.length > 0 && (
         <div className="bulk-bar" role="region" aria-label="Issue一括操作">
@@ -2924,7 +2929,7 @@ export function IssuesView({
             <span className="project-cell">PROJECT</span>
             <span className="due-cell">DUE</span>
           </div>
-          {issues.map((issue) => (
+          {issues.map((issue, index) => (
             <IssueRow
               key={issue.id}
               issue={issue}
@@ -2956,6 +2961,8 @@ export function IssuesView({
               onDragOver={() => setDropTargetIssueId(issue.id)}
               onDrop={() => dropIssue(issue.id)}
               onMove={(direction) => moveIssue(issue, direction)}
+              canMoveUp={index > 0}
+              canMoveDown={index < issues.length - 1}
               reorderBusy={reorderBusy}
             />
           ))}
@@ -3084,6 +3091,8 @@ function IssueRow({
   onDragOver,
   onDrop,
   onMove,
+  canMoveUp,
+  canMoveDown,
   reorderBusy = false,
 }: {
   issue: Issue;
@@ -3107,6 +3116,8 @@ function IssueRow({
   onDragOver?: () => void;
   onDrop?: () => void;
   onMove?: (direction: "up" | "down") => void | boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   reorderBusy?: boolean;
 }) {
   const { handleRef, rememberKeyboardFocus } = useKeyboardReorderFocus(pending || reorderBusy);
@@ -3161,6 +3172,24 @@ function IssueRow({
             }}
           >
             <span aria-hidden="true">⠿</span>
+          </button>
+          <button
+            type="button"
+            className="touch-move-button"
+            aria-label={`${issue.identifier}を上へ移動`}
+            disabled={pending || reorderBusy || !canMoveUp}
+            onClick={() => onMove?.("up")}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="touch-move-button"
+            aria-label={`${issue.identifier}を下へ移動`}
+            disabled={pending || reorderBusy || !canMoveDown}
+            onClick={() => onMove?.("down")}
+          >
+            ↓
           </button>
         </span>
       )}
@@ -3366,6 +3395,24 @@ function CycleReorderControls({
         }}
       >
         <span aria-hidden="true">⠿</span>
+      </button>
+      <button
+        type="button"
+        className="touch-move-button"
+        aria-label={`${issue.identifier}を上へ移動`}
+        disabled={disabled || !canMoveUp}
+        onClick={() => onMove("up")}
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        className="touch-move-button"
+        aria-label={`${issue.identifier}を下へ移動`}
+        disabled={disabled || !canMoveDown}
+        onClick={() => onMove("down")}
+      >
+        ↓
       </button>
     </div>
   );
@@ -4117,7 +4164,10 @@ export function CyclesView({
             </div>
             {selectedCycle.status !== "completed" && (
               <span className="manual-order-hint">
-                ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。
+                <span className="hint-desktop">
+                  ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。
+                </span>
+                <span className="hint-mobile">↑ / ↓ ボタンで並び替えます。</span>
               </span>
             )}
           </div>

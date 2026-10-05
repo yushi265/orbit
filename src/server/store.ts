@@ -47,6 +47,7 @@ import {
   type LabelUpdate,
   type PreferencesMutation,
   type ProjectDisplayPreferencesMutation,
+  type ProjectReorderMutation,
   type ReorderIssueInput,
   type SavedViewUpdate,
   type WorkflowStateCreateMutation,
@@ -223,6 +224,37 @@ export function requestHash(operation: string, input: unknown): string {
   return canonicalMutationJson(operation, input);
 }
 
+// 旧Snapshot（positionなし）の互換補完。Ownerごとに、有限な整数のpositionを持つ
+// Projectの最大値+1から、持たないものへcreatedAt昇順 → id昇順で連番を付ける。
+function fillProjectPositions(projects: unknown[]): void {
+  const hasPosition = (value: unknown): boolean =>
+    typeof value === "number" && Number.isInteger(value);
+  const byOwner = new Map<unknown, Record<string, unknown>[]>();
+  for (const entry of projects) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const owned = byOwner.get(record.userId) ?? [];
+    owned.push(record);
+    byOwner.set(record.userId, owned);
+  }
+  const compare = (left: unknown, right: unknown) =>
+    (left as number) < (right as number) ? -1 : (left as number) > (right as number) ? 1 : 0;
+  for (const owned of byOwner.values()) {
+    let next = owned.reduce(
+      (max, record) =>
+        hasPosition(record.position) ? Math.max(max, (record.position as number) + 1) : max,
+      0,
+    );
+    owned
+      .filter((record) => !hasPosition(record.position))
+      .sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id))
+      .forEach((record) => {
+        record.position = next;
+        next += 1;
+      });
+  }
+}
+
 function validateKey(key: string): void {
   if (typeof key !== "string" || key.trim().length < 1 || key.length > 200) {
     throw validationError({ idempotencyKey: ["1〜200文字のキーを指定してください。"] });
@@ -370,6 +402,7 @@ export class OrbitStore {
         return setting;
       });
     }
+    if (Array.isArray(normalized.projects)) fillProjectPositions(normalized.projects);
     if (!OrbitStore.isSnapshot(normalized, ownerUserId))
       throw new Error("Invalid OrbitStore snapshot");
     const source = structuredClone(normalized);
@@ -524,7 +557,7 @@ export class OrbitStore {
       }) &&
       hasTypes("projects", {
         strings: ["id", "userId", "name", "statusId", "priority", "color", "icon", "description"],
-        numbers: ["createdAt", "updatedAt"],
+        numbers: ["createdAt", "updatedAt", "position"],
       }) &&
       hasTypes("projectDisplayPreferences", {
         strings: ["id", "userId", "projectId"],
@@ -754,6 +787,7 @@ export class OrbitStore {
       deletedAt: null,
       createdAt: now - 14 * DAY,
       updatedAt: now,
+      position: 0,
     };
     this.projects.set(project.id, project);
     const cycle: Cycle = {
@@ -2273,6 +2307,7 @@ export class OrbitStore {
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
+      position: this.nextProjectPosition(userId),
     };
     this.projects.set(project.id, project);
     this.recordActivity(userId, "project", project.id, "created", input.idempotencyKey, null, {
@@ -2288,7 +2323,71 @@ export class OrbitStore {
   listProjects(userId: string): Project[] {
     return [...this.projects.values()]
       .filter((item) => item.userId === userId && !item.deletedAt)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .sort(
+        (a, b) =>
+          a.position - b.position ||
+          a.createdAt - b.createdAt ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+  }
+
+  private nextProjectPosition(userId: string): number {
+    return this.listProjects(userId).reduce((max, item) => Math.max(max, item.position + 1), 0);
+  }
+
+  reorderProject(userId: string, input: ProjectReorderMutation): Project {
+    this.assertOwner(userId);
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Project>(
+      userId,
+      "project.reorder",
+      input.idempotencyKey,
+      input,
+    );
+    if (existing) return existing;
+
+    const target = this.projects.get(input.projectId);
+    if (!target || target.userId !== userId || target.deletedAt) throw notFound();
+    if (input.beforeProjectId === target.id)
+      throw validationError({ beforeProjectId: ["移動先には対象Project自身を指定できません。"] });
+    if (input.beforeProjectId !== null) {
+      const before = this.projects.get(input.beforeProjectId);
+      if (!before || before.userId !== userId || before.deletedAt) throw notFound();
+    }
+
+    const current = this.listProjects(userId);
+    const remaining = current.filter((item) => item.id !== target.id);
+    const insertionIndex =
+      input.beforeProjectId === null
+        ? remaining.length
+        : remaining.findIndex((item) => item.id === input.beforeProjectId);
+    remaining.splice(insertionIndex, 0, target);
+    if (remaining.every((item, index) => item.id === current[index].id)) {
+      this.recordReceipt(userId, "project.reorder", input.idempotencyKey, input, target);
+      return target;
+    }
+
+    const positionBefore = target.position;
+    remaining.forEach((item, index) => {
+      item.position = index;
+    });
+    this.recordActivity(
+      userId,
+      "project",
+      target.id,
+      "reordered",
+      input.idempotencyKey,
+      { position: positionBefore },
+      { position: target.position },
+    );
+    this.recordOutbox(
+      userId,
+      "project.reordered",
+      `project.reordered:${target.id}:${input.idempotencyKey}`,
+      { projectId: target.id, position: target.position },
+    );
+    this.recordReceipt(userId, "project.reorder", input.idempotencyKey, input, target);
+    return target;
   }
 
   private findProjectDisplayPreference(

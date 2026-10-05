@@ -11,7 +11,7 @@ const datePicker = readFileSync(
 
 describe("responsive issue layout contract", () => {
   it("[境界値] mobileのIssue一覧は本文幅を確保し期限を2行目で編集できる", () => {
-    expect(styles).toContain("grid-template-columns: 25px minmax(0, 1fr) 82px 30px;");
+    expect(styles).toContain("grid-template-columns: 44px minmax(0, 1fr) 96px 44px;");
     expect(styles).toContain(".issue-row .due-cell { grid-column: 2 / -1; grid-row: 2; }");
     expect(styles).toContain(
       '.due-cell input[type="date"] { width: 130px; max-width: 100%; font-size: 11px; }',
@@ -27,7 +27,7 @@ describe("responsive issue layout contract", () => {
 
   it("[境界値] manual orderも表示中の列数とグリッド列数を一致させる", () => {
     expect(styles).toContain("grid-template-columns: 32px 28px minmax(0, 1fr) 105px 52px;");
-    expect(styles).toContain("grid-template-columns: 88px 22px minmax(42px, 1fr) 72px 28px;");
+    expect(styles).toContain("grid-template-columns: 88px 44px minmax(0, 1fr) 80px 44px;");
     expect(styles).toContain(".issue-table.manual-order .due-cell { grid-column: 3 / -1; }");
   });
 
@@ -41,7 +41,7 @@ describe("responsive issue layout contract", () => {
       /@media \(max-width: 767px\) \{[^}]*\.detail-actions \{ position: sticky;/,
     );
     expect(styles).toContain(
-      ".detail-actions .button { padding: 0 6px; font-size: 10px; white-space: nowrap; }",
+      ".detail-actions .button { flex: 0 0 auto; min-height: 44px; padding: 0 12px; font-size: 14px; white-space: nowrap; }",
     );
   });
 

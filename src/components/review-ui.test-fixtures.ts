@@ -93,6 +93,7 @@ export function reviewBootstrap(issues = [reviewIssue()]): BootstrapViewModel {
         deletedAt: null,
         createdAt: 1,
         updatedAt: 1,
+        position: 0,
       },
     ],
     projectDisplayPreferences: [],

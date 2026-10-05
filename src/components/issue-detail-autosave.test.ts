@@ -524,6 +524,7 @@ describe("Issue detail autosave", () => {
       deletedAt: null,
       createdAt: 1,
       updatedAt: 1,
+      position: 0,
     };
     const descriptionUpdatedIssue = {
       ...issue,

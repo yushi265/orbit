@@ -163,6 +163,7 @@ export interface ProjectViewModel {
   deletedAt: number | null;
   createdAt: number;
   updatedAt: number;
+  position: number;
 }
 export interface ProjectDisplayPreferenceViewModel {
   id: string;

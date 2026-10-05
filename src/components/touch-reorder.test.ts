@@ -59,7 +59,7 @@ describe("touch reorder CSS contract", () => {
   });
 
   it("[境界値] manual orderのmobile gridは2ボタン分(88px)のMOVE列を持つ", () => {
-    expect(styles).toContain("grid-template-columns: 88px 22px minmax(42px, 1fr) 72px 28px;");
+    expect(styles).toContain("grid-template-columns: 88px 44px minmax(0, 1fr) 80px 44px;");
   });
 });
 

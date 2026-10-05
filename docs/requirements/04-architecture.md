@@ -101,7 +101,7 @@ Issue期限の`due_at`は時刻を持たない暦日であり、既存互換の�
 | cycles | id, user_id, number, name_override, description_json, starts_at, ends_at, schedule_overridden, status, completed_at, completion_token |
 | cycle_settings | user_id, enabled, duration_weeks, cooldown_weeks, start_weekday, future_count, auto_add_to_current_cycle |
 | project_statuses | id, user_id, name, category, color, position, is_default |
-| projects | id, user_id, name, status_id, priority, color, icon, description_json, start_at, start_precision, target_at, target_precision, archived_at, deleted_at |
+| projects | id, user_id, name, status_id, priority, color, icon, description_json, start_at, start_precision, target_at, target_precision, archived_at, deleted_at。表示順の`position`は現在Owner単位Snapshot内のProjectだけが持つ（正規化テーブルへは未反映。[FEAT-project-manual-order](../spec/FEAT-project-manual-order/index.md)） |
 | issues | id, user_id, number, title, description_json, description_text, status_id, priority, estimate, due_at, project_id, cycle_id, parent_id, position, version, last_mutation_key, archived_at, deleted_at, created_at, updated_at |
 | labels | id, user_id, name, color |
 | issue_labels | issue_id, label_id |

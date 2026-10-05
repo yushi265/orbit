@@ -67,6 +67,7 @@ import {
   writeCollapsedParents,
   type IssueHierarchyRow,
 } from "./issue-hierarchy";
+import { beforeProjectIdForMove } from "./project-workspace";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
@@ -362,6 +363,8 @@ function OrbitAppInner(props: Props) {
   const [projectCreateBusy, setProjectCreateBusy] = useState(false);
   const projectCreateBusyRef = useRef(false);
   const projectCreateRequestRef = useRef<{ name: string; key: string } | null>(null);
+  const [projectReorderBusy, setProjectReorderBusy] = useState(false);
+  const projectReorderBusyRef = useRef(false);
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1239,6 +1242,30 @@ function OrbitAppInner(props: Props) {
     }
   }
 
+  async function reorderProject(projectId: string, beforeProjectId: string | null) {
+    if (projectReorderBusyRef.current) return false;
+    projectReorderBusyRef.current = true;
+    setProjectReorderBusy(true);
+    try {
+      await apiPost("/api/v1/projects/reorder", {
+        idempotencyKey: idempotencyKey(),
+        projectId,
+        beforeProjectId,
+      });
+      await refresh();
+      return true;
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof ApiError ? error.message : "Projectの並べ替えに失敗しました",
+      );
+      return false;
+    } finally {
+      projectReorderBusyRef.current = false;
+      setProjectReorderBusy(false);
+    }
+  }
+
   async function bulkUpdateIssues(patch: Record<string, unknown>) {
     setBulkBusy(true);
     const mutationKey =
@@ -1503,6 +1530,8 @@ function OrbitAppInner(props: Props) {
               }
               issues={issues}
               projectId={props.projectId}
+              onReorderProject={reorderProject}
+              projectReorderBusy={projectReorderBusy}
               workflowStates={workflowStates}
               projectStatuses={data.projectStatuses}
               timezone={data.preferences.timezone}
@@ -4390,6 +4419,8 @@ export function ProjectsView({
   projects,
   issues,
   projectId,
+  onReorderProject,
+  projectReorderBusy,
   workflowStates,
   projectStatuses,
   timezone,
@@ -4415,6 +4446,8 @@ export function ProjectsView({
   projects: Project[];
   issues: Issue[];
   projectId?: string;
+  onReorderProject: (projectId: string, beforeProjectId: string | null) => Promise<boolean>;
+  projectReorderBusy: boolean;
   workflowStates: WorkflowState[];
   projectStatuses: BootstrapPayload["projectStatuses"];
   timezone: string;
@@ -4452,6 +4485,33 @@ export function ProjectsView({
   const [error, setError] = useState<string | null>(null);
   const mutationKeyRef = useRef<string | null>(null);
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const projectOrderKey = projects.map((project) => project.id).join(",");
+  const [orderFocus, setOrderFocus] = useState<{
+    projectId: string;
+    direction: "up" | "down";
+    orderKey: string;
+    failed: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!orderFocus || projectReorderBusy) return;
+    if (!orderFocus.failed && orderFocus.orderKey === projectOrderKey) return;
+    const card = [...document.querySelectorAll<HTMLElement>(".project-card-item")].find(
+      (element) => element.dataset.projectId === orderFocus.projectId,
+    );
+    const buttons = [...(card?.querySelectorAll<HTMLButtonElement>(".project-order-button") ?? [])];
+    const pressed = buttons[orderFocus.direction === "up" ? 0 : 1];
+    const other = buttons[orderFocus.direction === "up" ? 1 : 0];
+    (pressed?.disabled ? other : pressed)?.focus();
+    setOrderFocus(null);
+  }, [orderFocus, projectReorderBusy, projectOrderKey]);
+  function moveProject(projectId: string, direction: "up" | "down") {
+    const move = beforeProjectIdForMove(projects, projectId, direction);
+    if (!move) return;
+    setOrderFocus({ projectId, direction, orderKey: projectOrderKey, failed: false });
+    void onReorderProject(projectId, move.beforeProjectId).then((ok) => {
+      if (!ok) setOrderFocus((current) => (current ? { ...current, failed: true } : current));
+    });
+  }
   const [displaySettings, setDisplaySettings] = useState<ProjectIssueDisplaySettings>(() =>
     defaultProjectIssueDisplaySettings(),
   );
@@ -4920,46 +4980,67 @@ export function ProjectsView({
         </button>
       </div>
       <div className="project-grid">
-        {projects.map((project) => {
+        {projects.map((project, index) => {
           const projectIssues = issues.filter(
             (issue) =>
               issue.userId === project.userId && issue.projectId === project.id && !issue.deletedAt,
           );
           return (
-            <Link
-              className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
-              data-project-id={project.id}
-              key={project.id}
-              to={projectDetailPath(project.id) as never}
-              onClick={(event) => {
-                if (saving) {
-                  event.preventDefault();
-                  return;
-                }
-                setSelectedProjectId(project.id);
-              }}
-            >
-              <div className="project-card-top">
-                <span className="project-icon" style={{ background: project.color }}>
-                  {project.icon}
-                </span>
-                <span className="priority-badge high">{priorityLabel[project.priority]}</span>
-              </div>
-              <h2>{project.name}</h2>
-              <p>{project.description || "説明はまだありません。"}</p>
-              <div className="project-progress">
-                <div className="progress-line">
-                  <span
-                    style={{
-                      width: `${calculateCycleMetrics(projectIssues, workflowStates).progressPercent}%`,
-                    }}
-                  />
+            <div className="project-card-item" data-project-id={project.id} key={project.id}>
+              <Link
+                className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
+                data-project-id={project.id}
+                to={projectDetailPath(project.id) as never}
+                onClick={(event) => {
+                  if (saving) {
+                    event.preventDefault();
+                    return;
+                  }
+                  setSelectedProjectId(project.id);
+                }}
+              >
+                <div className="project-card-top">
+                  <span className="project-icon" style={{ background: project.color }}>
+                    {project.icon}
+                  </span>
+                  <span className="priority-badge high">{priorityLabel[project.priority]}</span>
                 </div>
-                <span>
-                  {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
-                </span>
+                <h2>{project.name}</h2>
+                <p>{project.description || "説明はまだありません。"}</p>
+                <div className="project-progress">
+                  <div className="progress-line">
+                    <span
+                      style={{
+                        width: `${calculateCycleMetrics(projectIssues, workflowStates).progressPercent}%`,
+                      }}
+                    />
+                  </div>
+                  <span>
+                    {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
+                  </span>
+                </div>
+              </Link>
+              <div className="project-order-actions">
+                <button
+                  type="button"
+                  className="project-order-button"
+                  aria-label={`${project.name}を上へ移動`}
+                  disabled={saving || projectReorderBusy || index === 0}
+                  onClick={() => moveProject(project.id, "up")}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="project-order-button"
+                  aria-label={`${project.name}を下へ移動`}
+                  disabled={saving || projectReorderBusy || index === projects.length - 1}
+                  onClick={() => moveProject(project.id, "down")}
+                >
+                  ↓
+                </button>
               </div>
-            </Link>
+            </div>
           );
         })}
         {projects.length === 0 && (

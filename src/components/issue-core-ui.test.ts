@@ -172,6 +172,7 @@ describe("Phase 2 Issue core UI helpers", () => {
       deletedAt: null,
       createdAt: 1,
       updatedAt: 1,
+      position: 0,
     } satisfies Project;
     const markup = renderToStaticMarkup(
       createElement(IssuesView, {

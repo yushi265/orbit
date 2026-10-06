@@ -59,7 +59,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - WebアプリおよびPWA（インストール可能なWebアプリ）として提供し、ネイティブアプリは作らない
 - CycleとWorkflowはユーザーに対して1系統とする
 - 1 IssueはProjectとCycleにそれぞれ最大1件所属する
-- MVPではCycle境界処理、将来Cycle生成、論理削除データのPurge、Outbox再送などのバックグラウンド処理をSettingsの手動実行から起動し、D1を一定件数ずつ処理する。外部メッセージ基盤・自動スケジューラは導入しない
+- MVPではCycle境界処理・将来Cycle生成をCron Trigger（毎時）とSettingsの手動実行の両方から起動し、論理削除データのPurge、Outbox再送などのバックグラウンド処理はSettingsの手動実行から起動する。いずれもD1を一定件数ずつ処理する。外部メッセージ基盤は導入しない
 
 ## 4. スコープと優先順位
 
@@ -73,8 +73,8 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | 個人設定 | タイムゾーン、UI言語、Workflow、Cycle、テーマ設定 | Must |
 | Issue | CRUD、状態、優先度、期限、Label、Project、Cycle | Must |
 | Issue | 親子Issue、メモ、活動履歴、関連Issue | Should |
-| Cycle | 反復設定、手動実行による生成・計画・繰越、進捗、履歴 | Must |
-| Background processing | 手動RunによるCycle処理、Purge、Outbox再送、実行中の操作ロック・進捗・復旧 | Must |
+| Cycle | 反復設定、Cron Triggerまたは手動実行による生成・計画・繰越、進捗、履歴 | Must |
+| Background processing | 手動RunによるCycle処理、Purge、Outbox再送、実行中の操作ロック・進捗・復旧。Cycle境界処理はCron Triggerからも起動 | Must |
 | Project | CRUD、状態、期間、Issue一覧、進捗 | Must |
 | View | List / Board、Filter、Group、Order、保存View | Must |
 | 操作 | コマンドメニュー、主要ショートカット、一括操作 | Must |
@@ -86,7 +86,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 
 ### 4.2 Phase 2
 
-ここでのPhase 2 / Phase 3は機能スコープ上の区分であり、実装フェーズ表のPhase 0〜6とは別軸である。サーバー側の自動スケジューラや外部メッセージ基盤は今回の対象外とする。
+ここでのPhase 2 / Phase 3は機能スコープ上の区分であり、実装フェーズ表のPhase 0〜6とは別軸である。外部メッセージ基盤は今回の対象外とする。
 
 - InitiativeとロードマップTimeline
 - Triage（外部連携から来たIssue候補の受け入れキュー）
@@ -96,7 +96,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - Webhook、公開API、GitHub / Slack連携
 - CSV import / export
 - CycleおよびProjectの高度な分析
-- サーバー側の自動スケジューラ、外部メッセージ基盤、Webhook配送（今回対象外）
+- 外部メッセージ基盤、Webhook配送（今回対象外）。Cycle境界処理のCron Triggerは対象内
 - 完全なリアルタイム更新（Phase 2候補。導入要否は利用実績で判断）
 - オフラインでのIssue作成・編集と再同期
 

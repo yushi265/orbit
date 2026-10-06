@@ -124,10 +124,12 @@
 
 - WCAG の残り（FIX-a11y-aa-remaining）: 入力欄の枠線は `--orbit-input-border`（ダークは `:root[data-theme="dark"] <sel>:not(:focus)` で上書き）。`document.title` は `OrbitApp` の effect で「<画面名> — Orbit」（`src/routes/**` の `head()` は使わない）。Settings の select は見出しの `<strong id="setting-*-label">` を `aria-labelledby` で参照する。Inbox の切替は `aria-pressed` のトグル、Cycle のタブは roving tabindex の tab パターン。Issue 一覧は div のまま `role="table"` などを付けている。
 - 罠: `styles.css` の末尾にトップレベルのルールを足すと、前にある `@media (max-width: 767px)` 内の同じ詳細度のルール（モバイルの 44px など）を後勝ちで上書きする。デスクトップだけの値は `@media (min-width: 768px)` に入れる（`a11y-contrast.test.ts` に検出テストあり）。
+- Cron Trigger（FEAT-cycle-cron）: Worker entryは`src/server.ts`（`fetch`はTanStack Startのまま + `scheduled`）。`wrangler.jsonc`トップレベルの`triggers.crons`（毎時0分UTC）は`env.production`へ継承される。`scheduled`は`runScheduledCycles(env)`を呼び、Ownerをenv（`OWNER_USER_ID` / `OWNER_EMAIL`、localは`LOCAL_OWNER`）と`users`行で確認してから、`OrbitStore.runScheduledCycleTransitions`でCycleの終了・繰越・予定どおりの開始だけを行う。Background RunもLockも作らず、PurgeとOutbox再送は実行しない。保存は処理があった時か`needsInitialPersist`の時だけで、`D1_WRITE_CONFLICT`は読み直して合計3回まで試行する。自動開始のActivityは`system:automation` / `scheduled-<cycleId>-start`（参照: `src/server.ts`、`src/server/scheduled-cycles.ts`、`src/server/store.ts`、`docs/spec/FEAT-cycle-cron/`）。
+- 罠: `createServerEntry`は`fetch`以外のハンドラを落とすので、entryは素のオブジェクトで書く。`wrangler.jsonc`の`main`を`src/server.ts`にしないと独自entryは使われない。`package.json`の`format` / `format:check`は対象を列挙しているため、`src/`直下に足したファイルは追記しないと検査されない。Background Runは3ステップ固定かつブラウザが`continue`を呼んで進める方式で、Cycleだけを処理するRunは作れない。Inbox通知（`cycle_started`など）を生成するコードは無い（参照: `src/server.ts`、`src/server/store.ts`、`src/components/background-run.ts`）。
 
 ## 最終更新
 
-FIX-ux-a11y-high / FIX-a11y-aa-remaining / 2026-10-06
+FIX-ux-a11y-high / FIX-a11y-aa-remaining / FEAT-cycle-cron / 2026-10-06
 
 FEAT-project-manual-order / FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
 

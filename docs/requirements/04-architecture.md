@@ -18,8 +18,8 @@
 | ORM | Drizzle ORM + Drizzle Kit | D1を正式サポートし、型安全SQLとMigrationを扱える |
 | Auth | Cloudflare Access | 一人専用のためApp内にUser・Session・招待機能を実装せず、メールAllow policyで保護できる |
 | Package manager | pnpm | 依存導入・script実行・lockfileをpnpmへ統一する |
-| Async | 手動HTTP Chunk Runner | MVPはSettingsのボタンからD1を一定件数ずつ処理し、cursorを返して次のHTTP呼び出しへ継続する。外部メッセージ基盤や常駐Consumerは使わない |
-| Scheduler | なし（手動実行のみ） | サーバー側の自動スケジューラは使わず、必要な処理はユーザーの手動Runから起動する |
+| Async | 手動HTTP Chunk Runner | MVPはSettingsのボタンからD1を一定件数ずつ処理し、cursorを返して次のHTTP呼び出しへ継続する。外部メッセージ基盤や常駐Consumerは使わない。Cycle境界処理はCron Triggerからも起動する |
+| Scheduler | Cron Trigger（毎時0分 UTC） | WorkerのCron TriggerでCycle境界処理（補充・終了・繰越・開始）だけを自動実行する。PurgeとOutbox再送はユーザーの手動Runから起動する |
 | Realtime | Durable Objects + WebSocket（Phase 2・任意） | PCとモバイル間の即時Push更新に向く |
 | File | Cloudflare R2（Phase 2） | 添付ファイルをDBと分離できる |
 | Test | Vitest + Playwright + MSW | Unit / Integrationを一次担保とし、外部I/O Mockと少数の実Browser Smokeを分担できる |
@@ -53,11 +53,11 @@ flowchart TD
 ### 構成判断
 
 - 主データはD1に集約する。D1は管理DBとしてMigration、Import / Export、Query insightsを備える。一方、Durable Objects SQLiteは強整合な状態と計算を同一場所に置けるが、初期構築の複雑性が増すため、MVPの主DBにはしない。[Cloudflare storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
-- MVPのバックグラウンド処理はSettingsの手動起動を入口とし、各HTTP呼び出しでD1を一定件数ずつ処理する。Serverはcursorと進捗を返し、ブラウザが次Chunkを継続呼び出しする。外部メッセージ基盤、自動スケジューラ、常駐Consumerは導入しない。
+- MVPのバックグラウンド処理はSettingsの手動起動を入口とし、各HTTP呼び出しでD1を一定件数ずつ処理する。Serverはcursorと進捗を返し、ブラウザが次Chunkを継続呼び出しする。Cycle境界処理に限り、Cron Trigger（毎時）がWorkerの`scheduled`ハンドラから、Runを作らずLockも保存せずに1回の実行内でSnapshot読込・処理・Version CAS保存を行う。保存競合は最大3回再試行し、Manual Run実行中はスキップする。外部メッセージ基盤、常駐Consumerは導入しない。
 - RealtimeはMVPでポーリング/再検証に留める。Phase 2では利用実績に基づいて導入要否を判断し、導入する場合は複数Clientの状態調停とWebSocketに適するDurable Objectsを使用する。[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
 - 通知は同じWorkerのD1書き込みとして生成し、Webhook、重い外部連携、常駐Background Workerは今回対象外とする。
 - D1 Read Replicationを有効にする場合はSessions APIとBookmarkを用い、同一Browser session内のsequential consistency（順序一貫性）を確保する。[D1 read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
-- HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。手動RunnerはHTTPで認証した`user_id`をRunへ保存し、各Chunkで所有者境界を再検証する。actorは`user` / `system:manual-run`として監査へ記録する。
+- HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。手動RunnerはHTTPで認証した`user_id`をRunへ保存し、各Chunkで所有者境界を再検証する。actorは`user` / `system:manual-run`として監査へ記録する。Cron Triggerの`scheduled`はHTTPを通らずAccess JWTを検証しないため、`OWNER_USER_ID` / `OWNER_EMAIL`と`users`行のemail一致で所有者を確認し、予定どおりのCycle開始のactorは`system:automation`として記録する。
 - 初回Deploy時にUUID v7の唯一の`users`行をBootstrapし、そのIDを`OWNER_USER_ID`へ設定する。Binding未設定、UUID不正、対応行なし、Access JWTの本人識別子が所有者と対応しない場合はFail closedとする。
 - D1 Outboxは同じWorkerのChunk処理で再送し、外部配送基盤や常駐Consumerには依存しない。未完了EventはRunのcursorとdedupe台帳で再処理する。
 - Accessセッション失効時は共通Fetch層で401を検知し、Client Routerではなく現在URLをTop-levelで再読込する。Window focus復帰時・タブの表示復帰時・Network再接続時・30秒周期にもServer stateを再検証する。Background Runの30秒周期は、タブが非表示で、進行中または再開待ちのRunを把握していない間は停止する。
@@ -365,4 +365,4 @@ async function startManualRun(
 
 `POST /api/v1/background-runs/:id/resume`は`paused / failed` Runだけを対象とし、同じRun計画・cursor・dedupe台帳を使って新しいLeaseを取得し、`resume_count`を1増やす。再開時はブロッキングOverlayを解除して再開可能Runカードを表示し、成功済みStep・ChunkをNo-opにし、失敗Stepを`running`、失敗後に`skipped`となった後続Stepを`pending`へ戻して正しい順序で再開する。Lease取得、Run状態変更、Lock解放・取得はすべて`run_id + lock_token`を条件にしたD1 CASで行う。
 
-ブラウザが閉じた場合、継続HTTP呼び出しが止まりLeaseが期限切れになる。再度アプリを開くと`/current`が`paused` Runを返し、ユーザーはOverlayの「再開」から同じRunを続けられる。外部メッセージ基盤、自動スケジューラ、常駐Workerは使用しない。
+ブラウザが閉じた場合、継続HTTP呼び出しが止まりLeaseが期限切れになる。再度アプリを開くと`/current`が`paused` Runを返し、ユーザーはOverlayの「再開」から同じRunを続けられる。外部メッセージ基盤、常駐Workerは使用しない。Cron TriggerのCycle境界処理はRunを作らないため、この再開の対象外である。

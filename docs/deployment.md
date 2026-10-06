@@ -60,6 +60,8 @@ PWAのインストール判定はManifestとアイコンをブラウザが直接
 
 設定後は、未認証状態で静的Assetが`200`になり、ルートHTMLはAccessへ`302`になることを確認します。
 
+Cron Triggerの`scheduled`はHTTPを通らず、Cloudflare Accessの経路にも入らないため、Cron用のBypass設定は不要です。
+
 ## 4. Migration / dry-run
 
 ```bash
@@ -73,7 +75,7 @@ D1 Migrationは失敗時にロールバックされるため、先にMigration�
 ## 5. 本番更新前の確認
 
 1. 本番D1への読み取り認証が有効なことを確認し、直前の稼働Worker Versionと対象commitを記録する。認証不足のまま更新しない。
-2. Manual Runが終了しており、Snapshotに実行中Runがないことを確認する。Run途中では旧版への切替を行わない。
+2. Manual Runが終了しており、Snapshotに実行中Runがないことを確認する。Run途中では旧版への切替を行わない。Cron TriggerのCycle境界処理はRunを作らず1回の実行内で完結するため、ここでいう「Run途中」には当たらない。ただし毎時0分前後にデプロイした場合は、デプロイ後にCronの実行ログ（6.2）を確認する。
 3. 下記のバックアップを取得し、コピー復元と旧新版の読込を検証する。`main`へのpushはWorkers Buildsの本番CDを起動するため、この確認より先にpush/mergeしない。
 4. Access認証後のBootstrapと主要Routeを確認する。業務データを使った検証では、利用者が保存していないテスト変更を加えない。
 
@@ -112,13 +114,27 @@ pnpm deploy
 - staging用D1を準備するまで、非本番ブランチのPreview Buildは無効とします。本番D1を非本番Previewから参照させません。
 - Branch protectionは本ユニットでは変更していません。設定前は`main`への直接pushでCIとCDが独立して起動するため、保護ブランチ運用を導入する場合は別途GitHub側で設定してください。
 
+## 6.2 Cron Trigger
+
+Cycle境界処理（補充・終了・繰越・予定どおりの開始）は、毎時0分（UTC）のCron Trigger（`wrangler.jsonc`の`triggers.crons`）から`src/server.ts`の`scheduled`で実行します。Cron Triggerの登録は、`wrangler deploy`（Workers Builds）が`wrangler.jsonc`の設定を反映することで行われます。`main`へのマージは本番デプロイであり、その時点でCronが有効になります。
+
+- デプロイ後の確認: CloudflareダッシュボードでWorker `orbit`のCron Trigger設定に`0 * * * *`があることと、Cronの実行ログで実行結果が成功（`scheduled_cycles`の`completed`または`skipped`）になっていることを確認する。画面名は変更されることがあるため、見つからない場合はWorkerの設定画面とログ画面を探す。
+- 失敗時: Owner設定不備・D1 Bindingなし・保存競合の3回超過・処理中の例外は、保存せずに例外を再送出し、Cronの実行は失敗として記録される。次の毎時実行が同じ処理をやり直す。
+- ローカル確認: `pnpm local:start`を起動したあと、別のターミナルで次を実行する。
+
+```bash
+curl "http://127.0.0.1:3000/cdn-cgi/local/scheduled?cron=0+*+*+*+*"
+```
+
+結果のJSON（`event: "scheduled_cycles"`）は`pnpm local:start`のログへ出る。
+
 ## 7. ロールバック・確認
 
 デプロイ後はAccess経由で主要Routeを確認する。異常時はWranglerのVersions画面／`wrangler versions list`で切替先を特定する。確認済みの基準は`15eb0eb`に対応するVersion `c9ba19fc-a647-46d6-ac95-ab731d536338`であり、実行前に現Versionと切替先を再確認する。
 
 今回の保存codecはProject表示設定・Recent検索・Saved View・関連Receiptの新enumを旧互換値へ投影し、元値を各レコードの`__orbitRollback`へ保存する。SQL migrationや`dueAt`変換は行わない。旧版へ戻す間、6つの追加並び順は対応する従来方向へ、`next7`は`upcoming`へ表示が縮退する。旧版の通常業務編集後も、新版は未変更の新設定を復元し、旧版で明示保存した設定を優先する。互換メタデータは新版ではD1保存境界だけに存在し、不正な形式は読込を拒否する。
 
-rollbackはRunが終了した境界で**Worker Versionだけ**を切り替え、D1は更新後の最新データをそのまま使用する。バックアップを本番DBへ復元すると、取得後の利用者の更新を失うため、通常rollbackではDB復元やresetを行わない。旧版へ戻している間はMaintenance Runを実行しない。同一ミリ秒・同じ旧投影値の明示保存は関連Receiptを根拠に区別するため、そのReceiptが残っていることが旧設定優先の前提となる。
+rollbackはRunが終了した境界で**Worker Versionだけ**を切り替え、D1は更新後の最新データをそのまま使用する。Cron Trigger導入前の旧Versionは`scheduled`ハンドラを持たないため、Cron実行は失敗として記録されるだけで、D1は変更されない（切替後にCronの実行ログで確認する）。Cronを止めたい場合は、`wrangler.jsonc`から`triggers.crons`を外して再デプロイする。バックアップを本番DBへ復元すると、取得後の利用者の更新を失うため、通常rollbackではDB復元やresetを行わない。旧版へ戻している間はMaintenance Runを実行しない。同一ミリ秒・同じ旧投影値の明示保存は関連Receiptを根拠に区別するため、そのReceiptが残っていることが旧設定優先の前提となる。
 
 切替後はブラウザをrefreshして旧版のUIへ揃える。新旧のタブが混在すると旧APIが追加enumを拒否するため、旧UIで新機能を操作し続けない。過去の新request keyを旧fallback内容で再利用した場合の`409 IDEMPOTENCY_KEY_REUSED`は既存の競合検出であり、異なる内容を同じkeyへ上書きしない。
 

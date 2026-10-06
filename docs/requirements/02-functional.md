@@ -13,7 +13,7 @@
 | AUTH-03 | 未認証アクセスとセッション失効をCloudflare Accessの再認証へ戻す | 通常NavigationはAccessがWorker到達前に保護し、Server Function / APIは失効時の401を検知して現在URLへTop-level Navigationする |
 | AUTH-04 | 許可メールアドレスをAccess Policyで管理する | App側のClient bundleやログへ値を露出しない |
 | AUTH-05 | SPA / PWAでAccessのセッション失効を回復できる | 同一Originの非同期リクエストへ`X-Requested-With: XMLHttpRequest`と`credentials: 'same-origin'`を付け、401をOffline・Timeout・5xxと区別し、再認証後に元のDeep linkへ戻る |
-| AUTH-06 | 手動Runnerでも唯一の所有者を安全に解決する | Access JWTで認証した所有者の`user_id`をRunへ保存し、Chunk実行ごとに同じ所有者を検証する。未認証、所有者不一致、Runのuser_id不一致は外部応答を404または401にして業務データを更新せず、内部Security logだけへ記録する |
+| AUTH-06 | 手動RunnerとCron Triggerでも唯一の所有者を安全に解決する | Access JWTで認証した所有者の`user_id`をRunへ保存し、Chunk実行ごとに同じ所有者を検証する。Cron TriggerはHTTPを通らないためAccess JWTを使わず、`OWNER_USER_ID` / `OWNER_EMAIL`と`users`行のemail一致で所有者を確認し、不一致・未設定は保存せず失敗とする。未認証、所有者不一致、Runのuser_id不一致は外部応答を404または401にして業務データを更新せず、内部Security logだけへ記録する |
 
 Cloudflare Accessの認証画面はアプリ内Routeではない。ログアウトは`/cdn-cgi/access/logout`へのTop-level Navigationで行う。Service Workerは静的公開AssetだけをCacheし、認証済みSSR HTML、Server Function / API応答、Accessの401・Redirect・Login応答、個人データをCacheしない。[Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/) [Cloudflare Access authorization cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)
 
@@ -61,8 +61,8 @@ Issueの依存関係はLinearのblocking、related、duplicateを踏襲する。
 | CYC-01 | Cycleを有効化できる | 無効化しても過去Cycleは保持される |
 | CYC-02 | 期間を1〜8週間で設定できる | 個人設定のタイムゾーン基準で開始・終了する |
 | CYC-03 | 開始曜日を設定できる | 開始日の00:00を境界とする |
-| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と手動Runによる繰越は許可するが、現在Cycleへの割当は行わない |
-| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を保留として表示し、手動Runで生成する |
+| CYC-04 | Cycle間のCooldownを0〜4週間で設定できる | Cooldown中はActive Cycleが存在しない。Upcoming Cycleへの計画割当と手動Run・Cron Triggerによる繰越は許可するが、現在Cycleへの割当は行わない |
+| CYC-05 | 将来Cycleの生成数を1〜15件で設定できる | 設定変更時に不足分を保留として表示し、手動RunまたはCron Triggerで生成する |
 | CYC-06 | 将来Cycleの開始日・終了日を個別調整できる | 過去Cycleは変更不可、期間重複を禁止し、個別調整したCycleは`schedule_overridden = true`として自動再生成の上書き対象外にする |
 
 ### 6.4.2 Cycleライフサイクル
@@ -84,7 +84,7 @@ CooldownはCycle自身の状態ではなく、前Cycleの終了から次Cycleの
 | CYC-09 | Active終了時に未完了Issueを次Cycleへ繰り越す | Workflow categoryがUnstartedまたはStartedのIssueだけを次Cycleへ移し、Backlog / Completed / Canceledは元Cycleに残す |
 | CYC-10 | StartedまたはCompletedになった未所属Issueを現在Cycleへ自動追加できる | 個人設定でON/OFFでき、変更履歴にAutomationとして記録する |
 | CYC-11 | Issueが繰り越された回数と元Cycleを保持する | Issue詳細およびCycle履歴から追跡できる |
-| CYC-12 | Cycle終了処理を冪等に実行する | 手動Run再実行・同時実行・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
+| CYC-12 | Cycle終了処理を冪等に実行する | 手動Run・Cron Triggerの再実行・同時実行・CYC-08との競合でも、条件付きUPDATEの勝者だけが処理し、重複Cycle・重複履歴・二重繰越・重複Outboxが発生しない |
 
 ### 6.4.3 Cycle画面・分析
 
@@ -177,9 +177,9 @@ MVP推奨ショートカット:
 
 | ID | 要件 | 受入条件 |
 | --- | --- | --- |
-| ASYNC-01 | バックグラウンド処理をSettingsから手動実行できる | 公開Run種別は`maintenance`に固定し、固定Stepを`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`の順に処理する。各Chunkは最大`CHUNK_SIZE`件で、`cursor`と進捗を保存して次のHTTP呼び出しへ返す |
+| ASYNC-01 | バックグラウンド処理をSettingsから手動実行できる（Cycle境界処理はCron Triggerからも起動する） | 公開Run種別は`maintenance`に固定し、固定Stepを`cycle_transition`（Cycle境界処理・将来Cycle生成）→ `purge` → `outbox_retry`の順に処理する。各Chunkは最大`CHUNK_SIZE`件で、`cursor`と進捗を保存して次のHTTP呼び出しへ返す。Cron Triggerは毎時`cycle_transition`相当のCycle境界処理だけをRunを作らずに実行し、PurgeとOutbox再送は実行せず、Manual Run実行中はスキップする |
 | ASYNC-02 | バックグラウンド処理の実行中は業務操作を停止する | Issue（CRUD、Notes、Relation、Label、Archive、Trash、Restore、Bulk）、Cycle、Project、View、Notification、Preference、Workflow、Project statusなど全業務Mutationを`code = OPERATION_IN_PROGRESS`と`requestId`付きの423で拒否し、version、Activity、Outbox、Mutation receiptを増やさない。Run継続・状態取得・復旧、進捗取得、再認証、ログアウト、読み取りは許可する。画面はフルスクリーンの処理中表示にする |
 | ASYNC-03 | 実行状態と進捗を端末横断で確認できる | `pending / running / paused / succeeded / failed / rejected`を保持し、`GET /current`で再読み込み・別端末から同じ`run_id`、Step、cursor、進捗を表示する。cursorはServer生成のopaque stringとし、比較はcursor値ではなくD1のversion / 状態遷移で行う。Lease期限切れは`paused`へ遷移し、古いChunk実行は書き込みできない |
-| ASYNC-04 | 手動RunをHTTP Chunk実行で継続できる | `POST /api/v1/background-runs`でRunを作成し、`POST /api/v1/background-runs/:id/continue`へ現在の`expected_cursor`を渡してブラウザが完了まで呼び出す。各呼び出しはD1 `batch()`で1 Chunkだけ処理し、Heartbeatを更新する。古いcursorの敗者は現在進捗を返して効果を発生させない。外部メッセージ基盤・自動スケジューラ・常駐Workerを必要としない |
+| ASYNC-04 | 手動RunをHTTP Chunk実行で継続できる | `POST /api/v1/background-runs`でRunを作成し、`POST /api/v1/background-runs/:id/continue`へ現在の`expected_cursor`を渡してブラウザが完了まで呼び出す。各呼び出しはD1 `batch()`で1 Chunkだけ処理し、Heartbeatを更新する。古いcursorの敗者は現在進捗を返して効果を発生させない。外部メッセージ基盤・常駐Workerを必要としない |
 | ASYNC-05 | Chunk処理を冪等に再実行できる | 同じRun・Step・cursorの再送や同時実行でも一度だけ反映し、`background_effect_dedupes`で業務効果を重複させない。Chunkの順序、user_id、Run所有者、lock token、LeaseをServer側で検証する。Run所有者不一致・不存在は404、paused / failed Runへのcontinueは409 `RUN_REQUIRES_RESUME`、有効Runへの競合Mutationは423 `OPERATION_IN_PROGRESS`とする |
 | ASYNC-06 | ブラウザ終了・失敗後に安全に再開できる | Heartbeatが止まるとRunを`paused`にしてLockを解放し、再度開いた画面から同じRunをcursor位置から再開する。Step失敗は`failed`として再開対象にし、成功済みStep・ChunkはNo-op、terminal状態からの逆戻りは禁止する |

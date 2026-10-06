@@ -125,9 +125,11 @@ describe("review Dialog boundaries", () => {
         );
       await render(kind === "Composer" ? composer() : kind === "Command" ? command() : detail());
       const dialog = dom.window.document.querySelector('[role="dialog"]') as HTMLElement;
-      const initial = dialog.querySelector(
-        kind === "Composer" ? "textarea" : kind === "Command" ? "input" : "#issue-detail-title",
-      );
+      // Detail opens on the dialog itself so no text control (and no touch keyboard) is focused.
+      const initial =
+        kind === "Detail"
+          ? dialog
+          : dialog.querySelector(kind === "Composer" ? "textarea" : "input");
       expect(dom.window.document.activeElement).toBe(initial);
       expect(opener.hasAttribute("inert")).toBe(true);
       const controls = [
@@ -260,60 +262,30 @@ describe("review Dialog boundaries", () => {
     expect(input.selectionEnd).toBe(3);
   });
 
-  it.each(["untouched", "pointer", "composition", "keyboard", "input"])(
-    "positions an asynchronously loaded title only when untouched: %s",
-    async (interaction) => {
-      let resolveDetail!: (value: unknown) => void;
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(
-          () =>
-            new Promise((resolve) => {
-              resolveDetail = resolve;
-            }),
-        ),
-      );
-      await render(detail(false));
-      const input = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
-      expect(dom.window.document.activeElement).toBe(input);
-      const select = vi.spyOn(input, "setSelectionRange");
-      if (interaction !== "untouched") {
-        input.dispatchEvent(
-          new dom.window.Event(
-            (
-              {
-                pointer: "pointerdown",
-                composition: "compositionstart",
-                keyboard: "keydown",
-                input: "input",
-              } as Record<string, string>
-            )[interaction],
-            {
-              bubbles: true,
-            },
-          ),
-        );
-      }
-      await act(async () => {
-        resolveDetail({ ok: true, status: 200, json: async () => reviewDetail() });
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      });
-      expect(input.value).toBe(reviewIssue().title);
-      expect(select).toHaveBeenCalledTimes(interaction === "untouched" ? 1 : 0);
-      if (interaction === "untouched") {
-        expect(input.selectionStart).toBe(input.value.length);
-        expect(input.selectionEnd).toBe(input.value.length);
-      } else {
-        // React updates the controlled value itself; the caret helper must not intervene.
-        await act(async () => client.setQueryData(["issue-detail", "issue-1"], reviewDetail()));
-        expect(select).not.toHaveBeenCalled();
-      }
-      input.setSelectionRange(1, 3);
-      await render(detail(false));
-      expect(input.selectionStart).toBe(1);
-      expect(input.selectionEnd).toBe(3);
-    },
-  );
+  it("[非フォーカス] 非同期で届いたタイトルにはFocusもキャレット操作も行わない", async () => {
+    let resolveDetail!: (value: unknown) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveDetail = resolve;
+          }),
+      ),
+    );
+    await render(detail(false));
+    const dialog = dom.window.document.querySelector('[role="dialog"]');
+    const input = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
+    expect(dom.window.document.activeElement).toBe(dialog);
+    const select = vi.spyOn(input, "setSelectionRange");
+    await act(async () => {
+      resolveDetail({ ok: true, status: 200, json: async () => reviewDetail() });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(input.value).toBe(reviewIssue().title);
+    expect(dom.window.document.activeElement).toBe(dialog);
+    expect(select).not.toHaveBeenCalled();
+  });
 
   it("[Escape境界] 背景へ向いたEscapeも最前面Dialogのcloseだけへ渡す", async () => {
     await render(composer());

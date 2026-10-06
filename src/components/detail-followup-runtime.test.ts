@@ -462,7 +462,6 @@ describe("Detail follow-up runtime", () => {
     const selectors = [
       "#issue-description",
       '.detail-section:has([aria-label="新しい作業メモ"])',
-      "#issue-parent",
       ".issue-hierarchy",
       ".cycle-history-section",
     ];
@@ -473,6 +472,8 @@ describe("Detail follow-up runtime", () => {
         true,
       );
     }
+    // 親Issue編集はプロパティ側（aside）へ移った。
+    expect(detailDocument.querySelector(".detail-side #issue-parent")).not.toBeNull();
   });
 
   it("[Dialog] カレンダー表示中のEscapeは詳細を閉じず日付選択だけ閉じる", async () => {

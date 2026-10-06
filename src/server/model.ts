@@ -242,6 +242,10 @@ export interface ActivityEvent {
 
 export type ActivityView = Omit<ActivityEvent, "mutationKey">;
 
+export type ScheduledCycleTransition =
+  | { type: "completed"; cycleId: string; name: string; moved: number }
+  | { type: "started"; cycleId: string; name: string };
+
 export interface OutboxEvent {
   id: string;
   userId: string;

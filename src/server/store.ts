@@ -27,6 +27,7 @@ import {
   OutboxEvent,
   RunStep,
   RunStatus,
+  ScheduledCycleTransition,
   RecentIssueViewRecord,
   RecentSearchRecord,
   priorities,
@@ -3660,25 +3661,39 @@ export class OrbitStore {
     return { processed, hasRemaining: this.nextCycleTransition(userId) !== undefined };
   }
 
-  runScheduledCycleTransitions(
-    userId: string,
-  ): { status: "locked" } | { status: "done"; processed: number; hasRemaining: boolean } {
+  runScheduledCycleTransitions(userId: string):
+    | { status: "locked" }
+    | {
+        status: "done";
+        processed: number;
+        hasRemaining: boolean;
+        transitions: ScheduledCycleTransition[];
+      } {
     this.expireRunIfNeeded(userId);
     const hasActiveRun = [...this.runs.values()].some(
       (run) => run.user_id === userId && (run.status === "pending" || run.status === "running"),
     );
     if (this.locks.get(userId)?.status === "running" || hasActiveRun) return { status: "locked" };
-    let processed = 0;
-    while (processed < CHUNK_SIZE) {
+    const transitions: ScheduledCycleTransition[] = [];
+    while (transitions.length < CHUNK_SIZE) {
       const next = this.nextCycleTransition(userId);
       if (!next) break;
-      if (next.status === "active") this.closeCycle(userId, next.id, `scheduled-${next.id}`);
-      else if (!this.activateScheduledCycle(userId, next, undefined)) break;
-      processed += 1;
+      const name = next.nameOverride ?? next.name;
+      if (next.status === "active") {
+        this.closeCycle(userId, next.id, `scheduled-${next.id}`);
+        const event = this.outbox.find(
+          (item) => item.userId === userId && item.dedupeKey === `cycle.completed:${next.id}`,
+        );
+        const moved = typeof event?.payload.moved === "number" ? event.payload.moved : 0;
+        transitions.push({ type: "completed", cycleId: next.id, name, moved });
+      } else if (this.activateScheduledCycle(userId, next, undefined))
+        transitions.push({ type: "started", cycleId: next.id, name });
+      else break;
     }
     return {
       status: "done",
-      processed,
+      processed: transitions.length,
+      transitions,
       hasRemaining: this.nextCycleTransition(userId) !== undefined,
     };
   }

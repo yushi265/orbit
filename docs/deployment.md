@@ -36,6 +36,8 @@ pnpm exec wrangler secret put ACCESS_TEAM_DOMAIN --env production
 pnpm exec wrangler secret put ACCESS_AUD --env production
 ```
 
+任意（メール通知を使う場合）として、送信元アドレスのSecret `MAIL_FROM`も登録します。手順は「6.3 メール通知」を参照してください。
+
 Access Secretを登録した後、`OWNER_USER_ID`と`OWNER_EMAIL`を環境変数へ設定してOwner行を初期化します。既存行は上書きされず、必須値が不正な場合はリモートD1を実行しません。
 
 ```bash
@@ -127,6 +129,29 @@ curl "http://127.0.0.1:3000/cdn-cgi/local/scheduled?cron=0+*+*+*+*"
 ```
 
 結果のJSON（`event: "scheduled_cycles"`）は`pnpm local:start`のログへ出る。
+
+## 6.3 メール通知
+
+Cronの実行でCycleが完了・開始したとき（1回の実行につき1通）と、自動処理が失敗したときに、所有者本人（`OWNER_EMAIL`）へテキストメールを送ります。送信はCloudflareの`send_email` binding（`wrangler.jsonc`の`env.production`、binding名`EMAIL`）で行います。Manual Runと手動のCycle操作では送りません。
+
+- 事前準備（`send_email` bindingを含む版を本番へ出す前に済ませる。`main`へのマージが本番デプロイであるため）:
+  1. 送信元のドメインをCloudflareのEmail Service（Email Sending）でオンボードする。
+  2. 宛先アドレス（`OWNER_EMAIL`と同じアドレス）を検証済みの宛先にする。
+  3. 送信元アドレスをSecretへ登録する。
+
+```bash
+pnpm exec wrangler secret put MAIL_FROM --env production
+```
+
+  `MAIL_FROM`には`<送信元アドレス>`を入れる。手順の詳細は[Cloudflare Email Service](https://developers.cloudflare.com/email-service/)を参照する。
+- デプロイ後の確認: Cronの実行ログに`cycle_mail`の`outcome`が出る。`sent`は送信成功、`not_configured`は`EMAIL` binding・`MAIL_FROM`・`OWNER_EMAIL`のいずれかが無い状態（送信せず、Cycle処理は動く）、`failed`は送信に失敗した状態（`code`が付く。Cycle処理は失敗にならない）。
+- 止め方: Secret `MAIL_FROM`を削除する。送信されなくなり、Cycleの自動処理はそのまま動く。
+
+```bash
+pnpm exec wrangler secret delete MAIL_FROM --env production
+```
+
+- 注意: 自動処理の失敗が続く間は、失敗のメールが毎時届く。
 
 ## 7. ロールバック・確認
 

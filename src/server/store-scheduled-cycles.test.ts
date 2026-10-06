@@ -54,7 +54,12 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
     const result = store.runScheduledCycleTransitions("owner");
 
-    expect(result).toEqual({ status: "done", processed: 1, hasRemaining: false });
+    expect(result).toEqual({
+      status: "done",
+      processed: 1,
+      hasRemaining: false,
+      transitions: expect.any(Array),
+    });
     expect(store.cycles.get("cycle-1")?.status).toBe("completed");
     expect(store.listCycles("owner").some((cycle) => cycle.number === 2)).toBe(true);
   });
@@ -134,7 +139,12 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
     const result = store.runScheduledCycleTransitions("owner");
 
-    expect(result).toEqual({ status: "done", processed: 1, hasRemaining: false });
+    expect(result).toEqual({
+      status: "done",
+      processed: 1,
+      hasRemaining: false,
+      transitions: expect.any(Array),
+    });
     const cycle = store.cycles.get("cycle-2")!;
     expect(cycle.status).toBe("active");
     expect([cycle.startsAt, cycle.endsAt]).toEqual([NOW - DAY, NOW + 13 * DAY]);
@@ -171,7 +181,12 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
     const result = store.runScheduledCycleTransitions("owner");
 
-    expect(result).toEqual({ status: "done", processed: 2, hasRemaining: false });
+    expect(result).toEqual({
+      status: "done",
+      processed: 2,
+      hasRemaining: false,
+      transitions: expect.any(Array),
+    });
     expect(store.cycles.get("cycle-1")?.status).toBe("completed");
     expect(store.cycles.get("cycle-2")?.status).toBe("active");
   });
@@ -254,7 +269,12 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
     const result = store.runScheduledCycleTransitions("owner");
 
-    expect(result).toEqual({ status: "done", processed: 0, hasRemaining: false });
+    expect(result).toEqual({
+      status: "done",
+      processed: 0,
+      hasRemaining: false,
+      transitions: [],
+    });
     expect(store.cycles.get("cycle-1")?.status).toBe("completed");
     expect(store.cycles.get("cycle-3")?.status).toBe("upcoming");
     expect(counts(store)).toEqual(before);
@@ -272,7 +292,12 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
     const second = store.runScheduledCycleTransitions("owner");
 
-    expect(second).toEqual({ status: "done", processed: 0, hasRemaining: false });
+    expect(second).toEqual({
+      status: "done",
+      processed: 0,
+      hasRemaining: false,
+      transitions: [],
+    });
     expect(counts(store)).toEqual(before);
   });
 
@@ -349,11 +374,163 @@ describe("OrbitStore.runScheduledCycleTransitions", () => {
 
       const first = store.runScheduledCycleTransitions("owner");
 
-      expect(first).toEqual({ status: "done", processed, hasRemaining });
+      expect(first).toEqual({
+        status: "done",
+        processed,
+        hasRemaining,
+        transitions: expect.any(Array),
+      });
       const second = store.runScheduledCycleTransitions("owner");
       expect(second).toMatchObject({ status: "done", processed: rest, hasRemaining: false });
     },
   );
+
+  describe("transitions", () => {
+    it("[代表値] 完了1件 → completedでmovedは移動したIssueの件数", () => {
+      const { store } = setup();
+      const [active] = seedCycles(store, [
+        { status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW - DAY },
+        { status: "upcoming", startsAt: NOW + DAY, endsAt: NOW + 15 * DAY },
+      ]);
+      const unstarted = store.ownedWorkflowStates("owner").find((s) => s.category === "unstarted")!;
+      for (const index of [0, 1])
+        store.createIssue("owner", {
+          idempotencyKey: `t-${index}`,
+          title: `T ${index}`,
+          cycleId: active.id,
+          statusId: unstarted.id,
+        });
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({
+        status: "done",
+        transitions: [{ type: "completed", cycleId: "cycle-1", name: "Cycle 1", moved: 2 }],
+      });
+    });
+
+    it("[代表値] 別Ownerの同じdedupe keyのOutboxからmovedを読まない", () => {
+      const { store } = setup();
+      seedCycles(store, [{ status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW - DAY }]);
+      store.outbox.push({
+        id: "outbox-other",
+        userId: "other",
+        type: "cycle.completed",
+        dedupeKey: "cycle.completed:cycle-1",
+        payload: { cycleId: "cycle-1", moved: 9 },
+        status: "pending",
+        attemptCount: 0,
+        createdAt: NOW,
+      });
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({
+        transitions: [{ type: "completed", cycleId: "cycle-1", moved: 0 }],
+      });
+    });
+
+    it("[境界値] 移動するIssueが0件 → moved: 0", () => {
+      const { store } = setup();
+      seedCycles(store, [{ status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW - DAY }]);
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({
+        transitions: [{ type: "completed", cycleId: "cycle-1", moved: 0 }],
+      });
+    });
+
+    it("[代表値] 開始1件 → startedはmovedを持たない", () => {
+      const { store } = setup();
+      seedCycles(store, [{ status: "upcoming", startsAt: NOW - DAY, endsAt: NOW + 13 * DAY }]);
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toEqual({
+        status: "done",
+        processed: 1,
+        hasRemaining: false,
+        transitions: [{ type: "started", cycleId: "cycle-1", name: "Cycle 1" }],
+      });
+    });
+
+    it("[代表値] 完了と開始 → 完了、開始の順", () => {
+      const { store } = setup();
+      seedCycles(store, [
+        { status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW - 1000 },
+        { status: "upcoming", startsAt: NOW - 1000, endsAt: NOW + 14 * DAY },
+      ]);
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({
+        transitions: [
+          { type: "completed", cycleId: "cycle-1" },
+          { type: "started", cycleId: "cycle-2" },
+        ],
+      });
+    });
+
+    it.each([
+      ["nameOverrideあり", "Sprint X", "Sprint X"],
+      ["nameOverrideなし", null, "Cycle 1"],
+    ])("[同値分割] %s → nameが%s系", (_label, override, expected) => {
+      const { store } = setup();
+      const [cycle] = seedCycles(store, [
+        { status: "upcoming", startsAt: NOW - DAY, endsAt: NOW + 13 * DAY },
+      ]);
+      cycle.nameOverride = override;
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({ transitions: [{ type: "started", name: expected }] });
+    });
+
+    it("[同値分割] 完了でもnameOverrideがnameより優先される", () => {
+      const { store } = setup();
+      const [cycle] = seedCycles(store, [
+        { status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW - DAY },
+      ]);
+      cycle.nameOverride = "Sprint X";
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({ transitions: [{ type: "completed", name: "Sprint X" }] });
+    });
+
+    it("[代表値] 処理0件 → transitions: []。lockedはtransitionsを持たない", () => {
+      const { store } = setup();
+      seedCycles(store, [{ status: "active", startsAt: NOW - 14 * DAY, endsAt: NOW + DAY }]);
+
+      expect(store.runScheduledCycleTransitions("owner")).toEqual({
+        status: "done",
+        processed: 0,
+        hasRemaining: false,
+        transitions: [],
+      });
+      store.startRun("owner", { kind: "maintenance", idempotencyKey: "run" });
+      expect(store.runScheduledCycleTransitions("owner")).toEqual({ status: "locked" });
+    });
+
+    it("[境界値] 26件 → processedとtransitions.lengthがともに25", () => {
+      const { store } = setup();
+      const past = (offset: number) => NOW - 1000 * DAY + offset * DAY;
+      const specs: Spec[] = [{ status: "active", startsAt: past(0), endsAt: past(1) }];
+      for (let number = 2; number <= 15; number += 1)
+        specs.push({
+          status: "upcoming",
+          startsAt: number <= 14 ? past(number) : NOW + 5 * DAY,
+          endsAt: number <= 13 ? past(number + 1) : NOW + 6 * DAY,
+        });
+      seedCycles(store, specs);
+
+      const result = store.runScheduledCycleTransitions("owner");
+
+      expect(result).toMatchObject({ status: "done", processed: 25, hasRemaining: true });
+      if (result.status === "done") expect(result.transitions).toHaveLength(25);
+    });
+  });
 
   it("[代表値] Manual Runによる予定開始のActivityはsystem:manual-run・mutationKey run-<runId>-<cycleId>-start のまま", () => {
     const { store } = setup();

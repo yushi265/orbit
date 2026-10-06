@@ -96,7 +96,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 - Webhook、公開API、GitHub / Slack連携
 - CSV import / export
 - CycleおよびProjectの高度な分析
-- 外部メッセージ基盤、Webhook配送（今回対象外）。Cycle境界処理のCron Triggerは対象内
+- 外部メッセージ基盤、Webhook配送（今回対象外）。Cycle境界処理のCron Triggerと、所有者本人へのメール通知（Cloudflareの`send_email` binding）は対象内
 - 完全なリアルタイム更新（Phase 2候補。導入要否は利用実績で判断）
 - オフラインでのIssue作成・編集と再同期
 

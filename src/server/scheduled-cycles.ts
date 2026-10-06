@@ -1,6 +1,8 @@
 import { createDb } from "../db/client";
 import { findOwnedUser } from "../db/repositories/owner";
 import type { RuntimeEnvironment } from "./auth";
+import { buildFailureMail, buildTransitionMail, sendCycleMail } from "./cycle-mail";
+import type { CycleMailEnvironment } from "./cycle-mail";
 import { ServiceError } from "./errors";
 import { LOCAL_OWNER, resolveRuntimeConfig } from "./runtime-config";
 import { openStoreSession } from "./store-session";
@@ -33,7 +35,9 @@ async function resolveOwner(
   return owner;
 }
 
-async function run(env: RuntimeEnvironment): Promise<ScheduledCyclesResult> {
+type ScheduledEnvironment = RuntimeEnvironment & CycleMailEnvironment;
+
+async function run(env: ScheduledEnvironment): Promise<ScheduledCyclesResult> {
   const config = resolveRuntimeConfig(env);
   if (config.storage === "memory") return { outcome: "skipped", reason: "memory_storage" };
   const { userId, email } = await resolveOwner(env, config.mode);
@@ -53,6 +57,8 @@ async function run(env: RuntimeEnvironment): Promise<ScheduledCyclesResult> {
       if (retryable) continue;
       throw error;
     }
+    if (result.transitions.length > 0)
+      await sendCycleMail(env, buildTransitionMail(result.transitions, result.hasRemaining));
     return {
       outcome: "completed",
       processed: result.processed,
@@ -63,19 +69,17 @@ async function run(env: RuntimeEnvironment): Promise<ScheduledCyclesResult> {
   }
 }
 
-export async function runScheduledCycles(env: RuntimeEnvironment): Promise<ScheduledCyclesResult> {
+export async function runScheduledCycles(
+  env: ScheduledEnvironment,
+): Promise<ScheduledCyclesResult> {
   try {
     const result = await run(env);
     console.log(JSON.stringify({ event: "scheduled_cycles", ...result }));
     return result;
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "scheduled_cycles",
-        outcome: "failed",
-        message: error instanceof Error ? error.message : "unknown",
-      }),
-    );
+    const message = error instanceof Error ? error.message : "unknown";
+    console.error(JSON.stringify({ event: "scheduled_cycles", outcome: "failed", message }));
+    await sendCycleMail(env, buildFailureMail(message));
     throw error;
   }
 }

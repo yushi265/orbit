@@ -65,4 +65,16 @@ describe("responsive issue layout contract", () => {
     expect(orbitApp).toContain('label="Cycle開始日"');
     expect(orbitApp).toContain('label="Cycle終了日"');
   });
+
+  it("[境界値] tablet(768〜1023px)の設定グリッドは1列のままで暗黙の2列目を作らない", () => {
+    expect(styles).toContain(".label-settings-card { grid-column: 1 / -1; }");
+    expect(styles).not.toMatch(/\.label-settings-card \{[^}]*grid-column:[^;}]*span/);
+    expect(styles).not.toContain(".label-settings-card { grid-column: auto; }");
+    expect(styles).toContain(
+      "@media (min-width: 768px) and (max-width: 1023px) { .settings-grid { grid-template-columns: minmax(0, 1fr); }",
+    );
+    expect(styles).toContain(
+      ".settings-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr));",
+    );
+  });
 });

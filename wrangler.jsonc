@@ -31,7 +31,8 @@
           "database_id": "53d2ce53-5326-47da-95b6-386732c50a9b",
           "migrations_dir": "drizzle"
         }
-      ]
+      ],
+      "send_email": [{ "name": "EMAIL" }]
     }
   }
 }

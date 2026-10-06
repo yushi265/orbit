@@ -55,7 +55,7 @@ flowchart TD
 - 主データはD1に集約する。D1は管理DBとしてMigration、Import / Export、Query insightsを備える。一方、Durable Objects SQLiteは強整合な状態と計算を同一場所に置けるが、初期構築の複雑性が増すため、MVPの主DBにはしない。[Cloudflare storage options](https://developers.cloudflare.com/workers/platform/storage-options/)
 - MVPのバックグラウンド処理はSettingsの手動起動を入口とし、各HTTP呼び出しでD1を一定件数ずつ処理する。Serverはcursorと進捗を返し、ブラウザが次Chunkを継続呼び出しする。Cycle境界処理に限り、Cron Trigger（毎時）がWorkerの`scheduled`ハンドラから、Runを作らずLockも保存せずに1回の実行内でSnapshot読込・処理・Version CAS保存を行う。保存競合は最大3回再試行し、Manual Run実行中はスキップする。外部メッセージ基盤、常駐Consumerは導入しない。
 - RealtimeはMVPでポーリング/再検証に留める。Phase 2では利用実績に基づいて導入要否を判断し、導入する場合は複数Clientの状態調停とWebSocketに適するDurable Objectsを使用する。[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
-- 通知は同じWorkerのD1書き込みとして生成し、Webhook、重い外部連携、常駐Background Workerは今回対象外とする。
+- 通知は同じWorkerのD1書き込みとして生成し、Webhook、重い外部連携、常駐Background Workerは今回対象外とする。ただしCronによるCycle自動処理の結果は、Cloudflareの`send_email` bindingで所有者本人へメールを送る。
 - D1 Read Replicationを有効にする場合はSessions APIとBookmarkを用い、同一Browser session内のsequential consistency（順序一貫性）を確保する。[D1 read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
 - HTTP Handlerは検証済みAccess JWTのemailが`OWNER_USER_ID`に対応する`users.email`と一致する場合だけ所有者を返す。手動RunnerはHTTPで認証した`user_id`をRunへ保存し、各Chunkで所有者境界を再検証する。actorは`user` / `system:manual-run`として監査へ記録する。Cron Triggerの`scheduled`はHTTPを通らずAccess JWTを検証しないため、`OWNER_USER_ID` / `OWNER_EMAIL`と`users`行のemail一致で所有者を確認し、予定どおりのCycle開始のactorは`system:automation`として記録する。
 - 初回Deploy時にUUID v7の唯一の`users`行をBootstrapし、そのIDを`OWNER_USER_ID`へ設定する。Binding未設定、UUID不正、対応行なし、Access JWTの本人識別子が所有者と対応しない場合はFail closedとする。

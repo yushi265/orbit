@@ -19,6 +19,12 @@ describe("Worker 設定（Cron Trigger 併用）", () => {
     assert.equal("triggers" in readJson("wrangler.local.jsonc"), false);
   });
 
+  it("[代表値] env.production.send_email が EMAIL binding で、トップレベルと local には send_email が無い", () => {
+    assert.deepEqual(readJson("wrangler.jsonc").env.production.send_email, [{ name: "EMAIL" }]);
+    assert.equal("send_email" in readJson("wrangler.jsonc"), false);
+    assert.equal("send_email" in readJson("wrangler.local.jsonc"), false);
+  });
+
   it("[代表値] package.json の format / format:check が src/server.ts を含む", () => {
     const { scripts } = readJson("package.json");
     assert.match(scripts.format, /(^|\s)src\/server\.ts(\s|$)/);

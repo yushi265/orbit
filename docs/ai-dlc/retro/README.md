@@ -82,3 +82,4 @@ AI-DLC（[ai-dlc-flow](../../../.claude/skills/ai-dlc-flow/SKILL.md)）の各ユ
 - [FEAT-home-project-inbox-ux.md](./FEAT-home-project-inbox-ux.md) — Home・Project詳細・Inbox UX（2026-08-29）
 - [CI-CD-github-actions.md](./CI-CD-github-actions.md) — GitHub Actions CIとWorkers Builds CDの責務分担（2026-08-29）
 - [FEAT-cycle-cron.md](./FEAT-cycle-cron.md) — Cron TriggerによるCycle境界処理の自動実行（2026-10-06）
+- [FEAT-cycle-email.md](./FEAT-cycle-email.md) — Cycle自動処理のメール通知（2026-10-06）

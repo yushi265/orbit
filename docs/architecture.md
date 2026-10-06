@@ -27,7 +27,7 @@ data（D1 + Drizzle）  Manual Run      D1 Chunk Runner
 | data（データ層） | `src/db/` / `drizzle/` | Drizzleスキーマ、Migration、Repository。D1 BindingをBrowserへ露出しない |
 | shared（共有契約） | `src/shared/` | UIとserviceの間で共有するZod入出力スキーマ・エラーEnvelope・公開型。特定層へ依存しない |
 
-MVPではSettingsのManual Runから冪等なservice処理を呼び出し、実行中はD1のBackground run lockで業務Mutationを停止する。Cycle境界処理はCron Trigger（毎時0分 UTC）がWorker entry（`src/server.ts`）の`scheduled`からも起動する。CronはRunを作らずLockも保存せず、PurgeとOutbox再送は実行しない。通知生成・重い集計は同じWorkerのD1 Chunk処理で行い、Webhookや外部連携は今回対象外とする。
+MVPではSettingsのManual Runから冪等なservice処理を呼び出し、実行中はD1のBackground run lockで業務Mutationを停止する。Cycle境界処理はCron Trigger（毎時0分 UTC）がWorker entry（`src/server.ts`）の`scheduled`からも起動する。CronはRunを作らずLockも保存せず、PurgeとOutbox再送は実行しない。通知生成・重い集計は同じWorkerのD1 Chunk処理で行い、Webhookやその他の外部連携は今回対象外とする。所有者本人へのメール通知（Cronの結果）はCloudflareの`send_email` bindingで送る。
 
 ## 依存方向
 

@@ -298,6 +298,12 @@ describe("mobile readability baseline (<=767px)", () => {
     expect(mobilePx(".detail-actions .button", "font-size")).toBe(14);
   });
 
+  it("[代表値] 設定行のselectは行幅の55%までに収まり、ラベルを潰さない", () => {
+    // Timezone の select は最長 option（419 件）の内容幅 295px になり、flex item の
+    // min-width:auto で縮まずカードからはみ出していた。max-width が自動最小幅も抑える。
+    expect(mobileValue(".setting-row > select", "max-width")).toBe("55%");
+  });
+
   it("[境界値] 詳細アクションは保存状態を別行にし、3ボタンが320pxに収まる", () => {
     expect(mobileValue(".detail-save-status", "flex")).toBe("0 0 100%");
     expect(mobileValue(".detail-save-status", "margin-right")).toBe("0");

@@ -43,7 +43,7 @@ describe("mobile issue detail layout", () => {
 
   it("[代表値] Menu sheet items keep one color in every state, the Done button is sticky, and the sheet respects the safe area", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(styles).toContain(".mobile-menu-sheet .nav-item:hover { color: #84909f; }");
+    expect(styles).toContain(".mobile-menu-sheet .nav-item:hover { color: var(--orbit-muted); }");
     expect(styles).toContain(
       ".mobile-menu-sheet .nav-item.active, .mobile-menu-sheet .nav-item.active:hover { color: var(--orbit-accent-strong",
     );

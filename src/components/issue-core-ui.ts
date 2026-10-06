@@ -15,6 +15,42 @@ export interface ShortcutEventLike {
   ctrlKey?: boolean;
   shiftKey?: boolean;
   editable?: boolean;
+  /** 1文字ショートカットの ON/OFF（省略時は ON）。 */
+  singleKeyEnabled?: boolean;
+  /** フォーカスが SELECT / combobox / listbox にあるか。 */
+  onSelectControl?: boolean;
+}
+
+export const SINGLE_KEY_SHORTCUTS_STORAGE_KEY = "orbit.singleKeyShortcuts";
+
+type ShortcutStorage = Pick<Storage, "getItem" | "setItem">;
+
+function defaultStorage(): ShortcutStorage | undefined {
+  try {
+    return typeof window === "undefined" ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+/** localStorage が "off" のときだけ OFF。未設定・他の値・例外は ON。 */
+export function readSingleKeyShortcuts(storage: ShortcutStorage | undefined = defaultStorage()) {
+  try {
+    return storage?.getItem(SINGLE_KEY_SHORTCUTS_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function writeSingleKeyShortcuts(
+  enabled: boolean,
+  storage: ShortcutStorage | undefined = defaultStorage(),
+) {
+  try {
+    storage?.setItem(SINGLE_KEY_SHORTCUTS_STORAGE_KEY, enabled ? "on" : "off");
+  } catch {
+    // 保存できなくても画面上の状態だけ切り替える
+  }
 }
 
 export function shortcutActionFor(event: ShortcutEventLike): ShortcutAction | null {
@@ -25,6 +61,7 @@ export function shortcutActionFor(event: ShortcutEventLike): ShortcutAction | nu
   if (modifier && key === "b") return "toggle-board";
   if (key === "escape") return "close";
   if (event.editable || modifier) return null;
+  if (event.singleKeyEnabled === false || event.onSelectControl) return null;
   if (key === "c") return "create";
   if (key === "f") return "focus-filter";
   if (key === "v" && event.shiftKey) return "focus-display";

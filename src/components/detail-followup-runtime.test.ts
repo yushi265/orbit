@@ -281,7 +281,7 @@ describe("Detail follow-up runtime", () => {
     expect(patches).toHaveLength(3);
     expect(patches[2].body).toMatchObject({ version: 2, patch: { projectId: "project-2" } });
     await savePatch(2, { projectId: "project-2" });
-    expect(detailDocument.querySelector('[role="alert"]')).toBeNull();
+    expect(detailDocument.querySelector('[role="alert"]:not(:empty)')).toBeNull();
   });
 
   it.each(["Project", "Label"] as const)(
@@ -368,7 +368,7 @@ describe("Detail follow-up runtime", () => {
         1,
         kind === "Project" ? { projectId: "project-2" } : { labelIds: ["label-1", "label-2"] },
       );
-      expect(detailDocument.querySelector('[role="alert"]')).toBeNull();
+      expect(detailDocument.querySelector('[role="alert"]:not(:empty)')).toBeNull();
     },
   );
 

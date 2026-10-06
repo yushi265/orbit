@@ -10,6 +10,7 @@
 2. 検索の各候補は画面内に表示・選択可能。アプリ内listboxをportalで描画し、overflowによる切断を防止。Escape/Tab/Arrow/Enterで操作可能。
 3. Mobile一覧の期限入力は130pxに抑え、日付とcalendar triggerの重なり・横overflowを防ぐ。
 4. 詳細を初めて開いたとき、非同期タイトルが届いた後にcaretを末尾に置く。ユーザーの選択・入力・IME開始後は動かさない。再開時も適用。
+   - **2026-10-06 FIX-detail-views-polish で置換**: 詳細は開いた直後にタイトルへFocusしなくなった（FocusはDialog自身）。このため詳細側のcaret制御は削除した。Composer側の末尾caretは継続。以下の検証記録の「末尾caret」は当時の結果。
 5. Mobile SettingsはSVGで他のアプリUIと色を統一。
 6. Mobileの44px操作、長文、320/390px、縮小viewportと背景固定を確認。実機キーボードは別途確認対象。
 7. PC calendar triggerはSVG。フォントglyphに依存しない。

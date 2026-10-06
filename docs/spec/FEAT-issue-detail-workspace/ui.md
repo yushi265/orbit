@@ -18,8 +18,10 @@
 
 ## UI/UX方針
 
-- Desktop: 2カラムPanel（本文 / Activity）とRelations / Notesのカード。
-- Mobile: full-screen相当の1カラム、Description / Notes / Relations / Activityを縦に並べる。
+- Desktop: 2カラムPanel。左は本文（Description / Notes / Sub-issue / Relations / Activity の順、Activityは一番下）、右はプロパティ（Priority / Status / Project / Cycle / 日付 / Label / Parent）。
+- Mobile: full-screen相当の1カラム、プロパティ / Description / Notes / Sub-issue / Relations / Activityを縦に並べる。
+- 開いた直後のFocusはDialog自身に置く（タイトルや入力には当てない。Mobileでキーボードを出さないため）。
+- アーカイブ / ゴミ箱へ と自動保存ステータスはPanel最下部の固定フッターに置く（Desktop / Mobile共通）。閉じる操作は右上の×とEscape。
 - 初期: Issue属性とSkeleton、空Notes / Relationsには作成導線。
 - 保存中: pending表示。成功はServer responseで確定、409 / 423 / 5xxはrollback + Retry。
 - Note / Relation追加後は入力をクリアし、対象カードへfocusを戻す。

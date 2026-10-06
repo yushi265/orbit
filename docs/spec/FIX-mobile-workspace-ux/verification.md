@@ -13,7 +13,7 @@
 
 Chromeでlocal developmentのみ操作。320×740 /390×844 /1200×900と320×380縮小viewport。
 
-- 詳細: bottom=画面下端、内部scrollTop1196でもclose44px保持、末尾caret、Escape閉じる、再開。
+- 詳細: bottom=画面下端、内部scrollTop1196でもclose44px保持、末尾caret、Escape閉じる、再開。（末尾caretは 2026-10-06 FIX-detail-views-polish で廃止。詳細は開いた直後にタイトルへFocusしない）
 - Composer: 下端sheet、priority/date選択→fixture作成→一覧/詳細に保存値を確認。
 - Search: 6候補表示/選択、Arrow/End/Enter、該当fixture結果1件、画面内portal。
 - Views: 条件保存/実際の2件表示、URL再読込、Board編集、詳細→戻る、削除/空/不存在ID。

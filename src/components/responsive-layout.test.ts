@@ -37,8 +37,10 @@ describe("responsive issue layout contract", () => {
   });
 
   it("[境界値] mobileの詳細操作はスクロール領域下端で見切れない", () => {
+    // 固定フッターは全幅（メディアクエリ外）で効き、mobileはsafe-areaを下パディングに含める。
+    expect(styles).toMatch(/\n\.detail-foot \{ position: sticky; bottom: 0;/);
     expect(styles).toMatch(
-      /@media \(max-width: 767px\) \{[^}]*\.detail-actions \{ position: sticky;/,
+      /@media \(max-width: 767px\) \{[^@]*?\.detail-actions \{[^}]*env\(safe-area-inset-bottom\)/,
     );
     expect(styles).toContain(
       ".detail-actions .button { flex: 0 0 auto; min-height: 44px; padding: 0 12px; font-size: 14px; white-space: nowrap; }",

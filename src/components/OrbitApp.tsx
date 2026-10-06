@@ -94,7 +94,7 @@ import {
 } from "../lib/api-client";
 import { queryClient } from "../lib/query";
 import { useBackgroundRun } from "./background-run";
-import { useDialogBoundary, useInitialTextCaretEnd } from "./dialog-boundary";
+import { DIALOG_ITSELF, useDialogBoundary, useInitialTextCaretEnd } from "./dialog-boundary";
 import { LinkifiedText } from "./LinkifiedText";
 import { OrbitDatePicker } from "./orbit-date-picker";
 import { OrbitIcon } from "./orbit-icon";
@@ -6046,7 +6046,7 @@ function SavedViewResults({
     );
   }
   return (
-    <section aria-label={`${view.name}のIssue`} className="detail-card">
+    <section aria-label={`${view.name}のIssue`} className="detail-card view-results">
       <h2>
         {view.name} · {issues.length}件
       </h2>
@@ -6371,28 +6371,7 @@ export function ViewsView({
           )}
         </div>
       )}
-      {selectedView && (
-        <section className="detail-card view-inspector">
-          <div className="detail-section-heading">
-            <div>
-              <span className="eyebrow">SELECTED VIEW</span>
-              <h3>{selectedView.name}</h3>
-            </div>
-            <span className="status-pill">{selectedView.query.mode}</span>
-          </div>
-          <p>{filterSummary(selectedView)}</p>
-          <span className="view-inspector-meta">
-            Order: {selectedView.query.order} · Limit: {String(selectedView.query.limit ?? "—")}
-          </span>
-        </section>
-      )}
-      {selectedView && (
-        <SavedViewResults view={selectedView} data={data} now={now} onOpenIssue={onOpenIssue} />
-      )}
-      {selectedViewId && !selectedView && (
-        <p role="status">このViewは見つかりません。一覧から選び直してください。</p>
-      )}
-      <div className="view-list">
+      <div className="view-list detail-card">
         {views.map((view) => (
           <div className="saved-view-row" key={view.id}>
             <button
@@ -6429,6 +6408,27 @@ export function ViewsView({
           />
         )}
       </div>
+      {selectedView && (
+        <section className="detail-card view-inspector">
+          <div className="detail-section-heading">
+            <div>
+              <span className="eyebrow">SELECTED VIEW</span>
+              <h3>{selectedView.name}</h3>
+            </div>
+            <span className="status-pill">{selectedView.query.mode}</span>
+          </div>
+          <p>{filterSummary(selectedView)}</p>
+          <span className="view-inspector-meta">
+            Order: {selectedView.query.order} · Limit: {String(selectedView.query.limit ?? "—")}
+          </span>
+        </section>
+      )}
+      {selectedView && (
+        <SavedViewResults view={selectedView} data={data} now={now} onOpenIssue={onOpenIssue} />
+      )}
+      {selectedViewId && !selectedView && (
+        <p role="status">このViewは見つかりません。一覧から選び直してください。</p>
+      )}
     </div>
   );
 }
@@ -7787,7 +7787,7 @@ export function IssueDetailPanel({
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogBoundary(dialogRef, {
-    initialFocus: "#issue-detail-title",
+    initialFocus: DIALOG_ITSELF,
     onEscape: () => {
       if (!dismissOpenCalendar(dialogRef.current)) void closePanel();
     },
@@ -7802,7 +7802,6 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue?.description ?? "");
   const [titleDraft, setTitleDraft] = useState(issue?.title ?? "");
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
-  useInitialTextCaretEnd(titleInputRef, titleDraft, Boolean(issue && titleDraft === issue.title));
   const [projectIdDraft, setProjectIdDraft] = useState(issue?.projectId ?? "");
   const [noteBody, setNoteBody] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -8511,6 +8510,248 @@ export function IssueDetailPanel({
         {issue && (
           <div className="detail-grid">
             <section className="detail-main">
+              <label className="detail-label" htmlFor="issue-description">
+                Description
+              </label>
+              <textarea
+                id="issue-description"
+                className="detail-textarea"
+                ref={descriptionInputRef}
+                value={description}
+                onChange={(event) =>
+                  updateDescriptionDraft({
+                    description: event.target.value,
+                    title: descriptionDraftRef.current.title,
+                  })
+                }
+                onBlur={handleDescriptionBlur}
+                placeholder="説明を追加…"
+                rows={6}
+              />
+              {linkifyText(description).some((part) => part.type === "link") && (
+                <section
+                  className="detail-description-preview description-preview"
+                  aria-label="説明のリンクPreview"
+                >
+                  <LinkifiedText text={description} className="linkified-text" />
+                </section>
+              )}
+              <section className="detail-section">
+                <div className="detail-section-heading">
+                  <div>
+                    <span className="eyebrow">NOTES</span>
+                    <h3>作業メモ</h3>
+                  </div>
+                  <span className="detail-count">{detail?.notes.length ?? 0}</span>
+                </div>
+                <div className="note-compose">
+                  <textarea
+                    aria-label="新しい作業メモ"
+                    value={noteBody}
+                    onChange={(event) => setNoteBody(event.target.value)}
+                    placeholder="調査結果や次の一手をメモ…"
+                    rows={3}
+                  />
+                  <button
+                    className="button secondary"
+                    disabled={saving || !noteBody}
+                    onClick={() => void addNote()}
+                  >
+                    メモを追加
+                  </button>
+                </div>
+                <div className="note-list">
+                  {detail?.notes.map((note) => (
+                    <article className="note-card" key={note.id}>
+                      {editingNoteId === note.id ? (
+                        <textarea
+                          aria-label="編集中の作業メモ"
+                          value={noteDraft}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                          rows={3}
+                        />
+                      ) : (
+                        <p className="note-body">
+                          <LinkifiedText text={note.body} className="linkified-text" />
+                        </p>
+                      )}
+                      <div className="note-footer">
+                        <span>
+                          {formatDate(note.editedAt ?? note.createdAt)}
+                          {note.editedAt ? " · 編集済み" : ""}
+                        </span>
+                        {editingNoteId === note.id ? (
+                          <>
+                            <button className="text-button" onClick={() => void editNote(note)}>
+                              保存
+                            </button>
+                            <button className="text-button" onClick={() => setEditingNoteId(null)}>
+                              取消
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="text-button"
+                              onClick={() => {
+                                setEditingNoteId(note.id);
+                                setNoteDraft(note.body);
+                              }}
+                            >
+                              編集
+                            </button>
+                            <button
+                              className="text-button danger"
+                              onClick={() => void removeNote(note.id)}
+                            >
+                              削除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                  {detail?.notes.length === 0 && (
+                    <p className="detail-empty">まだメモはありません。</p>
+                  )}
+                </div>
+              </section>
+              {detail && (
+                <section className="issue-hierarchy" aria-label="親子Issue">
+                  <div className="detail-section-heading">
+                    <div>
+                      <span className="eyebrow">HIERARCHY</span>
+                      <h3>親子Issue</h3>
+                    </div>
+                    <span className="detail-count">{detail.children.length}</span>
+                  </div>
+                  {detail.parent && (
+                    <button
+                      className="text-button hierarchy-parent"
+                      onClick={() =>
+                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
+                      }
+                    >
+                      ↑ {detail.parent.identifier} · {detail.parent.title}
+                    </button>
+                  )}
+                  <p className="child-progress-summary">
+                    子Issue {detail.childProgress.completed} / {detail.childProgress.total} 完了 （
+                    {detail.childProgress.progressPercent}%）
+                  </p>
+                  <div className="child-issue-list">
+                    {detail.children.map((child) => (
+                      <button
+                        className="text-button child-issue-link"
+                        key={child.id}
+                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
+                      >
+                        {child.identifier} · {child.title}
+                      </button>
+                    ))}
+                    {detail.children.length === 0 && (
+                      <p className="detail-empty">Sub-issueはまだありません。</p>
+                    )}
+                  </div>
+                </section>
+              )}
+              {detail && (
+                <IssueCycleHistorySection
+                  cycleHistory={detail.cycleHistory}
+                  carryoverCount={detail.carryoverCount}
+                />
+              )}
+              <section className="detail-section">
+                <div className="detail-section-heading">
+                  <div>
+                    <span className="eyebrow">RELATIONS</span>
+                    <h3>関連Issue</h3>
+                  </div>
+                  <span className="detail-count">{detail?.relations.length ?? 0}</span>
+                </div>
+                <div className="relation-compose">
+                  <select
+                    aria-label="Relation先"
+                    value={relationTargetId}
+                    onChange={(event) => setRelationTargetId(event.target.value)}
+                  >
+                    <option value="">Issueを選択…</option>
+                    {knownIssues
+                      .filter((item) => item.id !== issue.id)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.identifier} · {item.title}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    aria-label="Relation種別"
+                    value={relationType}
+                    onChange={(event) =>
+                      setRelationType(event.target.value as IssueRelationTypeViewModel)
+                    }
+                  >
+                    {Object.entries(relationLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="button secondary"
+                    disabled={saving || !relationTargetId}
+                    onClick={() => void addRelation()}
+                  >
+                    追加
+                  </button>
+                </div>
+                <div className="relation-list">
+                  {detail?.relations.map((relation) => (
+                    <div className="relation-card" key={relation.id}>
+                      <span className="relation-type">{relationLabels[relation.type]}</span>
+                      <button
+                        className="relation-target"
+                        onClick={() =>
+                          void navigateAfterDescriptionSave(`/issues/${relation.target.id}`)
+                        }
+                      >
+                        <span className="issue-id">{relation.target.identifier}</span>
+                        <strong>{relation.target.title}</strong>
+                      </button>
+                      <button
+                        className="text-button danger"
+                        aria-label={`${relation.target.identifier}とのRelationを削除`}
+                        onClick={() => void removeRelation(relation.id)}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                  {detail?.relations.length === 0 && (
+                    <p className="detail-empty">関連Issueはありません。</p>
+                  )}
+                </div>
+              </section>
+              <section className="detail-section detail-activity">
+                <span className="eyebrow">ACTIVITY</span>
+                <h3>変更履歴</h3>
+                <div className="activity-list">
+                  {detail?.activity.map((event) => (
+                    <div className="activity-item" key={event.id}>
+                      <span className="activity-dot" />
+                      <div>
+                        <strong>{activityTitle(event)}</strong>
+                        <span>{formatDate(event.createdAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {detail?.activity.length === 0 && (
+                    <p className="detail-empty">Activityはありません。</p>
+                  )}
+                </div>
+              </section>
+            </section>
+            <aside className="detail-side" aria-label="プロパティ">
               <div className="detail-properties">
                 <select
                   className="detail-priority-select"
@@ -8653,138 +8894,6 @@ export function IssueDetailPanel({
                   </span>
                 )}
               </fieldset>
-              <label className="detail-label" htmlFor="issue-description">
-                Description
-              </label>
-              <textarea
-                id="issue-description"
-                className="detail-textarea"
-                ref={descriptionInputRef}
-                value={description}
-                onChange={(event) =>
-                  updateDescriptionDraft({
-                    description: event.target.value,
-                    title: descriptionDraftRef.current.title,
-                  })
-                }
-                onBlur={handleDescriptionBlur}
-                placeholder="説明を追加…"
-                rows={6}
-              />
-              {linkifyText(description).some((part) => part.type === "link") && (
-                <section
-                  className="detail-description-preview description-preview"
-                  aria-label="説明のリンクPreview"
-                >
-                  <LinkifiedText text={description} className="linkified-text" />
-                </section>
-              )}
-              <div className="detail-actions">
-                <span className="detail-save-status" aria-live="polite">
-                  {descriptionSaveStatus === "saving"
-                    ? "自動保存中…"
-                    : descriptionSaveStatus === "saved"
-                      ? "自動保存済み"
-                      : ""}
-                </span>
-                <button className="button ghost" onClick={() => void closePanel()}>
-                  閉じる
-                </button>
-                <button
-                  className="button ghost"
-                  disabled={saving || pending}
-                  onClick={() => void archiveCurrentIssue()}
-                >
-                  アーカイブ
-                </button>
-                <button
-                  className="button ghost danger"
-                  disabled={saving}
-                  onClick={() => void trashIssue()}
-                >
-                  ゴミ箱へ
-                </button>
-              </div>
-              <section className="detail-section">
-                <div className="detail-section-heading">
-                  <div>
-                    <span className="eyebrow">NOTES</span>
-                    <h3>作業メモ</h3>
-                  </div>
-                  <span className="detail-count">{detail?.notes.length ?? 0}</span>
-                </div>
-                <div className="note-compose">
-                  <textarea
-                    aria-label="新しい作業メモ"
-                    value={noteBody}
-                    onChange={(event) => setNoteBody(event.target.value)}
-                    placeholder="調査結果や次の一手をメモ…"
-                    rows={3}
-                  />
-                  <button
-                    className="button secondary"
-                    disabled={saving || !noteBody}
-                    onClick={() => void addNote()}
-                  >
-                    メモを追加
-                  </button>
-                </div>
-                <div className="note-list">
-                  {detail?.notes.map((note) => (
-                    <article className="note-card" key={note.id}>
-                      {editingNoteId === note.id ? (
-                        <textarea
-                          aria-label="編集中の作業メモ"
-                          value={noteDraft}
-                          onChange={(event) => setNoteDraft(event.target.value)}
-                          rows={3}
-                        />
-                      ) : (
-                        <p className="note-body">
-                          <LinkifiedText text={note.body} className="linkified-text" />
-                        </p>
-                      )}
-                      <div className="note-footer">
-                        <span>
-                          {formatDate(note.editedAt ?? note.createdAt)}
-                          {note.editedAt ? " · 編集済み" : ""}
-                        </span>
-                        {editingNoteId === note.id ? (
-                          <>
-                            <button className="text-button" onClick={() => void editNote(note)}>
-                              保存
-                            </button>
-                            <button className="text-button" onClick={() => setEditingNoteId(null)}>
-                              取消
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="text-button"
-                              onClick={() => {
-                                setEditingNoteId(note.id);
-                                setNoteDraft(note.body);
-                              }}
-                            >
-                              編集
-                            </button>
-                            <button
-                              className="text-button danger"
-                              onClick={() => void removeNote(note.id)}
-                            >
-                              削除
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                  {detail?.notes.length === 0 && (
-                    <p className="detail-empty">まだメモはありません。</p>
-                  )}
-                </div>
-              </section>
               <div className="detail-property-editor issue-parent-editor">
                 <label className="field-label" htmlFor="issue-parent">
                   Parent Issue
@@ -8815,189 +8924,82 @@ export function IssueDetailPanel({
                     ))}
                 </select>
               </div>
-              {detail && (
-                <section className="issue-hierarchy" aria-label="親子Issue">
-                  <div className="detail-section-heading">
-                    <div>
-                      <span className="eyebrow">HIERARCHY</span>
-                      <h3>親子Issue</h3>
-                    </div>
-                    <span className="detail-count">{detail.children.length}</span>
-                  </div>
-                  {detail.parent && (
-                    <button
-                      className="text-button hierarchy-parent"
-                      onClick={() =>
-                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
-                      }
-                    >
-                      ↑ {detail.parent.identifier} · {detail.parent.title}
-                    </button>
-                  )}
-                  <p className="child-progress-summary">
-                    子Issue {detail.childProgress.completed} / {detail.childProgress.total} 完了 （
-                    {detail.childProgress.progressPercent}%）
-                  </p>
-                  <div className="child-issue-list">
-                    {detail.children.map((child) => (
-                      <button
-                        className="text-button child-issue-link"
-                        key={child.id}
-                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
-                      >
-                        {child.identifier} · {child.title}
-                      </button>
-                    ))}
-                    {detail.children.length === 0 && (
-                      <p className="detail-empty">Sub-issueはまだありません。</p>
-                    )}
-                  </div>
-                </section>
-              )}
-              {detail && (
-                <IssueCycleHistorySection
-                  cycleHistory={detail.cycleHistory}
-                  carryoverCount={detail.carryoverCount}
-                />
-              )}
-              <section className="detail-section">
-                <div className="detail-section-heading">
-                  <div>
-                    <span className="eyebrow">RELATIONS</span>
-                    <h3>関連Issue</h3>
-                  </div>
-                  <span className="detail-count">{detail?.relations.length ?? 0}</span>
-                </div>
-                <div className="relation-compose">
-                  <select
-                    aria-label="Relation先"
-                    value={relationTargetId}
-                    onChange={(event) => setRelationTargetId(event.target.value)}
-                  >
-                    <option value="">Issueを選択…</option>
-                    {knownIssues
-                      .filter((item) => item.id !== issue.id)
-                      .map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.identifier} · {item.title}
-                        </option>
-                      ))}
-                  </select>
-                  <select
-                    aria-label="Relation種別"
-                    value={relationType}
-                    onChange={(event) =>
-                      setRelationType(event.target.value as IssueRelationTypeViewModel)
-                    }
-                  >
-                    {Object.entries(relationLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="button secondary"
-                    disabled={saving || !relationTargetId}
-                    onClick={() => void addRelation()}
-                  >
-                    追加
-                  </button>
-                </div>
-                <div className="relation-list">
-                  {detail?.relations.map((relation) => (
-                    <div className="relation-card" key={relation.id}>
-                      <span className="relation-type">{relationLabels[relation.type]}</span>
-                      <button
-                        className="relation-target"
-                        onClick={() =>
-                          void navigateAfterDescriptionSave(`/issues/${relation.target.id}`)
-                        }
-                      >
-                        <span className="issue-id">{relation.target.identifier}</span>
-                        <strong>{relation.target.title}</strong>
-                      </button>
-                      <button
-                        className="text-button danger"
-                        aria-label={`${relation.target.identifier}とのRelationを削除`}
-                        onClick={() => void removeRelation(relation.id)}
-                      >
-                        削除
-                      </button>
-                    </div>
-                  ))}
-                  {detail?.relations.length === 0 && (
-                    <p className="detail-empty">関連Issueはありません。</p>
-                  )}
-                </div>
-              </section>
-            </section>
-            <aside className="detail-activity">
-              <span className="eyebrow">ACTIVITY</span>
-              <h3>変更履歴</h3>
-              <div className="activity-list">
-                {detail?.activity.map((event) => (
-                  <div className="activity-item" key={event.id}>
-                    <span className="activity-dot" />
-                    <div>
-                      <strong>{activityTitle(event)}</strong>
-                      <span>{formatDate(event.createdAt)}</span>
-                    </div>
-                  </div>
-                ))}
-                {detail?.activity.length === 0 && (
-                  <p className="detail-empty">Activityはありません。</p>
-                )}
-              </div>
             </aside>
           </div>
         )}
-        {(error || projectRetry !== null || labelRetry !== null) && (
-          <div className="detail-live-error" role="alert">
-            <span>{error ?? "選択した変更を再試行してください。"}</span>
-            {descriptionFieldErrors && (
-              <span className="detail-field-errors">
-                {Object.values(descriptionFieldErrors).flat().join(" ")}
+        <footer className="detail-foot">
+          {(error || projectRetry !== null || labelRetry !== null) && (
+            <div className="detail-live-error" role="alert">
+              <span>{error ?? "選択した変更を再試行してください。"}</span>
+              {descriptionFieldErrors && (
+                <span className="detail-field-errors">
+                  {Object.values(descriptionFieldErrors).flat().join(" ")}
+                </span>
+              )}
+              {descriptionRetry !== null && (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    const retry = descriptionRetry;
+                    updateDescriptionDraft(retry);
+                    setDescriptionRetry(null);
+                    void saveDescription(retry.description, retry.title);
+                  }}
+                >
+                  説明を再試行
+                </button>
+              )}
+              {projectRetry !== null && (
+                <button
+                  className="text-button"
+                  disabled={propertySaving || saving || pending}
+                  onClick={() => {
+                    const retry = projectRetry;
+                    setProjectIdDraft(retry);
+                    setError(null);
+                    void saveProject(retry);
+                  }}
+                >
+                  Projectを再試行
+                </button>
+              )}
+              {labelRetry !== null && (
+                <button
+                  className="text-button"
+                  disabled={propertySaving || saving || pending}
+                  onClick={() => void saveLabels(labelRetry)}
+                >
+                  Labelを再試行
+                </button>
+              )}
+            </div>
+          )}
+          {issue && (
+            <div className="detail-actions">
+              <span className="detail-save-status" aria-live="polite">
+                {descriptionSaveStatus === "saving"
+                  ? "自動保存中…"
+                  : descriptionSaveStatus === "saved"
+                    ? "自動保存済み"
+                    : ""}
               </span>
-            )}
-            {descriptionRetry !== null && (
               <button
-                className="text-button"
-                onClick={() => {
-                  const retry = descriptionRetry;
-                  updateDescriptionDraft(retry);
-                  setDescriptionRetry(null);
-                  void saveDescription(retry.description, retry.title);
-                }}
+                className="button ghost"
+                disabled={saving || pending}
+                onClick={() => void archiveCurrentIssue()}
               >
-                説明を再試行
+                アーカイブ
               </button>
-            )}
-            {projectRetry !== null && (
               <button
-                className="text-button"
-                disabled={propertySaving || saving || pending}
-                onClick={() => {
-                  const retry = projectRetry;
-                  setProjectIdDraft(retry);
-                  setError(null);
-                  void saveProject(retry);
-                }}
+                className="button ghost danger"
+                disabled={saving}
+                onClick={() => void trashIssue()}
               >
-                Projectを再試行
+                ゴミ箱へ
               </button>
-            )}
-            {labelRetry !== null && (
-              <button
-                className="text-button"
-                disabled={propertySaving || saving || pending}
-                onClick={() => void saveLabels(labelRetry)}
-              >
-                Labelを再試行
-              </button>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </footer>
       </div>
     </div>
   );

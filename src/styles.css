@@ -512,3 +512,6 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 .skip-link { position: absolute; top: 0; left: 0; z-index: 1000; padding: 10px 16px; color: #fff; background: #1a2230; font-size: 14px; font-weight: 700; text-decoration: none; transform: translateY(-120%); }
 .skip-link:focus { z-index: 1000; transform: none; outline: 2px solid #fff; outline-offset: -4px; }
 @media (max-width: 767px) { html { scroll-padding-bottom: calc(80px + env(safe-area-inset-bottom)); } }
+.detail-panel select, .detail-panel input[type="date"] { box-sizing: border-box; height: 36px; min-height: 36px; padding-block: 0; padding-left: 10px; border-radius: 7px; font-size: 12px; }
+.detail-panel select { padding-right: 10px; }
+@media (max-width: 767px) { .detail-panel select, .detail-panel input[type="date"] { height: 44px; min-height: 44px; } }

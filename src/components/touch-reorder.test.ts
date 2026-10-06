@@ -33,8 +33,11 @@ function outsideMobileCss() {
 }
 
 describe("touch reorder CSS contract", () => {
-  it("[状態遷移] ↑/↓ボタンはmobile以外では非表示", () => {
-    expect(outsideMobileCss()).toMatch(/\.touch-move-button \{[^}]*display: none;/);
+  it("[状態遷移] ↑/↓ボタンは全幅で表示し、デスクトップでも24x24px以上 (AC-12)", () => {
+    const rule = outsideMobileCss().match(/\.touch-move-button \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).not.toMatch(/display: none/);
+    expect(rule).toMatch(/min-width: 24px/);
+    expect(rule).toMatch(/min-height: 24px/);
   });
 
   it("[境界値] mobile(767px以下)でボタンを表示し44x44px以上にする", () => {

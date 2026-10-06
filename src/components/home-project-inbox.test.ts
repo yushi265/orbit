@@ -432,7 +432,7 @@ describe("Home / Project / Inbox workspace UI", () => {
       );
     });
     const unreadTab = dom.window.document.querySelector(
-      'button[role="tab"][aria-selected="false"]',
+      'button.inbox-filter[aria-pressed="false"]',
     ) as HTMLButtonElement;
     await act(async () => {
       unreadTab.click();

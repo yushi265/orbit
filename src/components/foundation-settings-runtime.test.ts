@@ -84,7 +84,7 @@ describe("Phase 1 Settings runtime interactions", () => {
     });
 
     const timezone = dom.window.document.querySelector(
-      'select[aria-label="タイムゾーン"]',
+      'select[aria-labelledby="setting-timezone-label"]',
     ) as HTMLSelectElement;
     await act(async () => {
       setSelectValue(timezone, "UTC");
@@ -137,7 +137,7 @@ describe("Phase 1 Settings runtime interactions", () => {
     });
 
     const timezone = dom.window.document.querySelector(
-      'select[aria-label="タイムゾーン"]',
+      'select[aria-labelledby="setting-timezone-label"]',
     ) as HTMLSelectElement;
     await act(async () => {
       setSelectValue(timezone, "UTC");

@@ -1,9 +1,16 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IssueViewModel as Issue, ProjectViewModel as Project } from "../shared/view-models";
 import { CommandPalette, IssueComposer, IssuesView, SearchView } from "./OrbitApp";
-import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
+import {
+  nextCommandIndex,
+  readSingleKeyShortcuts,
+  shortcutActionFor,
+  shortcutModifierLabel,
+  SINGLE_KEY_SHORTCUTS_STORAGE_KEY,
+  writeSingleKeyShortcuts,
+} from "./issue-core-ui";
 
 describe("Phase 2 Issue core UI helpers", () => {
   it("[デシジョンテーブル] modifier shortcutと単一キーの発火条件を分ける", () => {
@@ -234,5 +241,85 @@ describe("Phase 2 Issue core UI helpers", () => {
     expect(markup).toContain("復元");
     expect(markup).not.toContain('aria-label="TASK-2のEstimate"');
     expect(markup).toContain('class="view-toggle-group"');
+  });
+});
+
+describe("AC-11 single-key shortcut gating", () => {
+  it("[デシジョンテーブル] 有効・body・cはcreateになる", () => {
+    expect(shortcutActionFor({ key: "c", editable: false, singleKeyEnabled: true })).toBe("create");
+  });
+
+  it.each(["c", "f", "x", "?"])("[デシジョンテーブル] 無効のとき %s はnullになる", (key) => {
+    expect(shortcutActionFor({ key, editable: false, singleKeyEnabled: false })).toBeNull();
+  });
+
+  it("[デシジョンテーブル] 無効でもShift+Vの1文字ショートカットはnullになる", () => {
+    expect(
+      shortcutActionFor({ key: "V", shiftKey: true, editable: false, singleKeyEnabled: false }),
+    ).toBeNull();
+  });
+
+  it("[デシジョンテーブル] 無効でも修飾キー付きとEscapeは従来どおり動く", () => {
+    const off = { editable: false, singleKeyEnabled: false };
+    expect(shortcutActionFor({ key: "k", ctrlKey: true, ...off })).toBe("command");
+    expect(shortcutActionFor({ key: "f", metaKey: true, ...off })).toBe("focus-search");
+    expect(shortcutActionFor({ key: "b", ctrlKey: true, ...off })).toBe("toggle-board");
+    expect(shortcutActionFor({ key: "Escape", ...off })).toBe("close");
+  });
+
+  it.each(["c", "f", "x", "?"])(
+    "[デシジョンテーブル] 有効でも選択系の部品にフォーカスがあると %s はnullになる",
+    (key) => {
+      expect(
+        shortcutActionFor({ key, editable: false, singleKeyEnabled: true, onSelectControl: true }),
+      ).toBeNull();
+    },
+  );
+
+  it("[デシジョンテーブル] 選択系の部品でも修飾キー付きは動く", () => {
+    expect(
+      shortcutActionFor({ key: "k", ctrlKey: true, editable: false, onSelectControl: true }),
+    ).toBe("command");
+  });
+
+  it("[代表値] localStorageのoffだけがOFFになる", () => {
+    const store = (value: string | null) => ({
+      getItem: (key: string) => (key === SINGLE_KEY_SHORTCUTS_STORAGE_KEY ? value : "off"),
+      setItem: () => undefined,
+    });
+    expect(SINGLE_KEY_SHORTCUTS_STORAGE_KEY).toBe("orbit.singleKeyShortcuts");
+    expect(readSingleKeyShortcuts(store("off"))).toBe(false);
+    expect(readSingleKeyShortcuts(store("on"))).toBe(true);
+    expect(readSingleKeyShortcuts(store(null))).toBe(true);
+  });
+
+  it("[代表値] getItemが例外・storageが無いときはONになる", () => {
+    expect(
+      readSingleKeyShortcuts({
+        getItem: () => {
+          throw new Error("denied");
+        },
+        setItem: () => undefined,
+      }),
+    ).toBe(true);
+    expect(readSingleKeyShortcuts(undefined)).toBe(true);
+  });
+
+  it("[代表値] 書き込みは on/off を保存し、setItemの例外は握りつぶす", () => {
+    const setItem = vi.fn();
+    writeSingleKeyShortcuts(false, { getItem: () => null, setItem });
+    writeSingleKeyShortcuts(true, { getItem: () => null, setItem });
+    expect(setItem.mock.calls).toEqual([
+      ["orbit.singleKeyShortcuts", "off"],
+      ["orbit.singleKeyShortcuts", "on"],
+    ]);
+    expect(() =>
+      writeSingleKeyShortcuts(false, {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("quota");
+        },
+      }),
+    ).not.toThrow();
   });
 });

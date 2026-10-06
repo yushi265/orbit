@@ -113,7 +113,21 @@
 - Projectは`position`（整数）を持ち、`OrbitStore.listProjects`は`position` → `createdAt` → `id`の昇順で返す（Bootstrapも同じ。クライアント側でProjectを並べ替える処理は無いので、この1か所の順が全画面に効く）。新規は未削除の最大+1。並べ替えは`POST /api/v1/projects/reorder`（`{ idempotencyKey, projectId, beforeProjectId | null }`）で、未削除の全件を連番に振り直し、Activity / Outboxは対象1件だけ、`updatedAt`は変えない。旧Snapshot（`position`なし）は`fromSnapshot`内の`fillProjectPositions`が`isSnapshot`の検証前に補う（Ownerごと・既存の最大+1から`createdAt` → `id`順）。補完は決定的で、`store-session`は補完後の値を初期状態として扱うため、読み込みだけでは保存しない。旧版のStoreは`hasTypes`で既知の項目だけを検証しレコードをそのまま保持するので、`position`があっても読める（旧版で作ったProjectは`position`を持たず、新版が補う）。D1の正規化テーブル`projects`には`position`を足していない（参照: `src/server/store.ts`、`src/server/api.ts`、`src/routes/api/v1/projects/reorder.ts`、`src/shared/contracts/projects.ts`、`docs/spec/FEAT-project-manual-order/`）。
 - ProjectsViewのカードは`Link`（アンカー）なので、中にボタンを置けない。`div.project-card-item`で包み、`Link.project-card`と`div.project-order-actions`を兄弟として並べて、見た目だけカードに重ねる（参照: `src/components/OrbitApp.tsx`、`src/components/project-workspace.ts`、`src/styles.css`）。
 
+## a11y / 確認ダイアログ（FIX-ux-a11y-high・2026-10-06）
+
+- 色は `styles.css` のトークンを使う。ライトのミュート文字は `--orbit-muted`（#647184・#f7f8fa に対して 4.66:1）、アクセント地の白文字と、アクセント色の文字は `--orbit-accent-solid`（5 テーマそれぞれ。`--orbit-accent` / `-strong` は白文字で 4.5:1 に届かない）、フォーカスは `--orbit-focus`（ダークは `:root[data-theme="dark"]` で上書き）。`a11y-contrast.test.ts` が styles.css を読んでコントラスト比を計算するので、色を足すときはこのテストを通す（参照: `src/styles.css`、`src/components/a11y-contrast.test.ts`）。
+- トーストは `useToast()` と `ToastRegion`。`role="status"` と `role="alert"` のライブリージョンが常に DOM にあるため、「エラーが出ていない」の判定は `[role="alert"]:not(:empty)` を使う。アクションなしの成功だけが 3.5 秒で消える（参照: `src/components/OrbitApp.tsx`）。
+- Background Run は pending / running だけがブロッキングのダイアログ。paused / failed は `.run-banner`（閉じられる。run_id と status の組で再表示を判定）（参照: `src/components/OrbitApp.tsx`）。
+- 1 文字ショートカットは localStorage `orbit.singleKeyShortcuts`（`"off"` のときだけ OFF）。`shortcutActionFor` に `singleKeyEnabled` と `onSelectControl`（SELECT / `[role=combobox]` / `[role=listbox]`）を渡す（参照: `src/components/issue-core-ui.ts`）。
+- `html lang` は翻訳が入るまで `ja` に固定。保存済みの `locale: "en"` はサーバーの値を変えずに残す。
+- Cycle の完了 API は次の Cycle が無ければ作ってから繰り越すので、「次の Cycle が無い」場合の分岐は UI に不要。繰越の件数は category が `unstarted` / `started` の Issue（参照: `src/server/store.ts` の `closeCycle`）。
+
+- WCAG の残り（FIX-a11y-aa-remaining）: 入力欄の枠線は `--orbit-input-border`（ダークは `:root[data-theme="dark"] <sel>:not(:focus)` で上書き）。`document.title` は `OrbitApp` の effect で「<画面名> — Orbit」（`src/routes/**` の `head()` は使わない）。Settings の select は見出しの `<strong id="setting-*-label">` を `aria-labelledby` で参照する。Inbox の切替は `aria-pressed` のトグル、Cycle のタブは roving tabindex の tab パターン。Issue 一覧は div のまま `role="table"` などを付けている。
+- 罠: `styles.css` の末尾にトップレベルのルールを足すと、前にある `@media (max-width: 767px)` 内の同じ詳細度のルール（モバイルの 44px など）を後勝ちで上書きする。デスクトップだけの値は `@media (min-width: 768px)` に入れる（`a11y-contrast.test.ts` に検出テストあり）。
+
 ## 最終更新
+
+FIX-ux-a11y-high / FIX-a11y-aa-remaining / 2026-10-06
 
 FEAT-project-manual-order / FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
 

@@ -191,9 +191,14 @@ describe("Background Run browser recovery", () => {
         },
       });
       await render(stopped);
-      expect(dom.window.document.querySelector('[role="status"]')).not.toBeNull();
+      // failed は role=alert、paused は role=status のバナー（ui.md AC-1）
+      expect(
+        dom.window.document.querySelector(
+          status === "failed" ? '[role="alert"]' : '[role="status"]',
+        ),
+      ).not.toBeNull();
       const resumeButton = dom.window.document.querySelector(
-        ".run-overlay button",
+        ".run-banner button",
       ) as HTMLButtonElement;
       expect(resumeButton.textContent).toBe("同じRunを再開");
       expect(resumeButton.disabled).toBe(false);
@@ -270,7 +275,7 @@ describe("Background Run browser recovery", () => {
     expect(currentCalls).toBe(2);
     expect(success).not.toHaveBeenCalled();
     expect(dom.window.document.body.textContent).toContain("処理が一時停止しました");
-    const button = dom.window.document.querySelector(".run-overlay button") as HTMLButtonElement;
+    const button = dom.window.document.querySelector(".run-banner button") as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     await act(async () => button.click());
     await advance(100);
@@ -297,7 +302,7 @@ describe("Background Run browser recovery", () => {
     expect(currentCalls).toBe(2);
     await advance(1);
     expect(currentCalls).toBe(3);
-    expect(dom.window.document.querySelector(".run-overlay button")?.textContent).toBe(
+    expect(dom.window.document.querySelector(".run-banner button")?.textContent).toBe(
       "同じRunを再開",
     );
     expect(success).not.toHaveBeenCalled();
@@ -426,7 +431,7 @@ describe("Background Run browser recovery", () => {
     });
     expect(fetch.mock.calls.filter(([path]) => path === "/api/v1/background-runs")).toHaveLength(1);
     await act(async () => finishStart(response({ run: runAt(10, "failed") })));
-    expect(dom.window.document.body.textContent).toContain("処理の再開が必要です");
+    expect(dom.window.document.body.textContent).toContain("処理が失敗しました");
     expect(success).not.toHaveBeenCalled();
   });
 

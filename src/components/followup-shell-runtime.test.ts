@@ -155,7 +155,7 @@ describe("followup shell state", () => {
     const retry = dom.window.document.querySelector('[role="alert"] button') as HTMLButtonElement;
     await act(async () => retry.click());
     await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(dom.window.document.querySelector('[role="alert"]')).toBeNull();
+    expect(dom.window.document.querySelector('[role="alert"]:not(:empty)')).toBeNull();
     expect(dom.window.document.querySelector(".run-status-box")?.textContent).toContain("完了");
   });
   it("[初回Bootstrap500] Cacheがなければ従来ErrorScreenとRetryを維持する", async () => {

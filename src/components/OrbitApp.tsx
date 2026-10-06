@@ -76,7 +76,13 @@ import { isImeComposing } from "./ime";
 import { projectDetailPath } from "./navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
-import { nextCommandIndex, shortcutActionFor, shortcutModifierLabel } from "./issue-core-ui";
+import {
+  nextCommandIndex,
+  readSingleKeyShortcuts,
+  shortcutActionFor,
+  shortcutModifierLabel,
+  writeSingleKeyShortcuts,
+} from "./issue-core-ui";
 import {
   ApiError,
   apiDelete,
@@ -139,7 +145,11 @@ type CycleSettingsPatch = Pick<
   "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount" | "autoAddToCurrentCycle"
 >;
 type CycleSchedulePatch = { startDate: string; endDate: string };
-type IssueMutationVariables = { issue: Issue; patch: Partial<Issue>; undo?: boolean };
+type IssueMutationVariables = {
+  issue: Issue;
+  patch: Partial<Issue>;
+  undo?: boolean;
+};
 type IssueMutationRetry = IssueMutationVariables;
 type IssueDescriptionDraft = { description: string; title: string };
 type IssueReorderVariables = {
@@ -173,6 +183,7 @@ const priorityLabel: Record<Issue["priority"], string> = {
   high: "High",
   urgent: "Urgent",
 };
+const cycleTabValues = ["current", "upcoming", "past"] as const;
 const priorityTone: Record<Issue["priority"], string> = {
   no_priority: "neutral",
   low: "low",
@@ -317,6 +328,7 @@ function OrbitAppInner(props: Props) {
   const [composerOpen, setComposerOpen] = useState(Boolean(props.issueId));
   const [newTitle, setNewTitle] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
+  const [newCycleChoice, setNewCycleChoice] = useState<string | null>(null);
   const [newPriority, setNewPriority] = useState<Issue["priority"]>("no_priority");
   const [newDueAt, setNewDueAt] = useState<number | null>(null);
   const [newParentId, setNewParentId] = useState("");
@@ -339,11 +351,7 @@ function OrbitAppInner(props: Props) {
   const openOnly = props.issueSearch?.open === true;
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [toast, setToast] = useState<{
-    kind: "success" | "error";
-    text: string;
-    action?: ToastAction;
-  } | null>(null);
+  const { toast, showToast, dismissToast } = useToast();
   const [pendingIssueId, setPendingIssueId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<Issue[]>([]);
@@ -373,7 +381,6 @@ function OrbitAppInner(props: Props) {
   const searchTimer = useRef<number | undefined>(undefined);
   const searchSequenceRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
-  const toastTimerRef = useRef<number | undefined>(undefined);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -486,9 +493,10 @@ function OrbitAppInner(props: Props) {
   const recentQuery = useQuery({
     queryKey: ["recent"],
     queryFn: () =>
-      apiGet<{ issueViews: RecentIssueViewModel[]; searches: RecentSearchViewModel[] }>(
-        "/api/v1/recent",
-      ),
+      apiGet<{
+        issueViews: RecentIssueViewModel[];
+        searches: RecentSearchViewModel[];
+      }>("/api/v1/recent"),
     enabled: section === "search",
   });
   const trashQuery = useQuery({
@@ -498,6 +506,13 @@ function OrbitAppInner(props: Props) {
   });
   const data = bootstrap.data;
   const issues = data?.issues ?? [];
+  const detailIssue = props.issueId ? issues.find((item) => item.id === props.issueId) : undefined;
+  const documentTitle = detailIssue
+    ? `${detailIssue.identifier} ${detailIssue.title} — Orbit`
+    : `${sectionLabels[section]} — Orbit`;
+  useEffect(() => {
+    document.title = documentTitle;
+  }, [documentTitle]);
   const issueWorkspaceIssues =
     issueScope === "active" ? issues : (scopedIssuesQuery.data?.items ?? []);
   const projects = data?.projects ?? [];
@@ -507,6 +522,7 @@ function OrbitAppInner(props: Props) {
   const notifications = data?.notifications ?? [];
   const workflowStates = data?.workflowStates ?? [];
   const activeCycle = cycles.find((cycle) => cycle.status === "active");
+  const newCycleId = newCycleChoice ?? activeCycle?.id ?? "";
   const unread = notifications.filter((notification) => !notification.readAt).length;
   const modifierLabel = shortcutModifierLabel(
     typeof navigator === "undefined" ? undefined : navigator.platform,
@@ -637,7 +653,8 @@ function OrbitAppInner(props: Props) {
 
   useEffect(() => {
     if (!data || typeof document === "undefined") return;
-    document.documentElement.lang = data.preferences.locale === "en" ? "en" : "ja";
+    // 翻訳が入るまでは日本語UIなので、保存済みlocaleに関わらずjaに固定する。
+    document.documentElement.lang = "ja";
   }, [data?.preferences.locale]);
 
   useEffect(() => {
@@ -688,12 +705,17 @@ function OrbitAppInner(props: Props) {
       const target = event.target as HTMLElement;
       const editing =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      const onSelectControl =
+        target.tagName === "SELECT" ||
+        target.closest?.('[role="combobox"], [role="listbox"]') != null;
       const action = shortcutActionFor({
         key: event.key,
         metaKey: event.metaKey,
         ctrlKey: event.ctrlKey,
         shiftKey: event.shiftKey,
         editable: editing,
+        singleKeyEnabled: readSingleKeyShortcuts(),
+        onSelectControl,
       });
       if (
         !action ||
@@ -780,21 +802,6 @@ function OrbitAppInner(props: Props) {
   ]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-  const dismissToast = () => {
-    if (toastTimerRef.current !== undefined) {
-      window.clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = undefined;
-    }
-    setToast(null);
-  };
-  const showToast = (kind: "success" | "error", text: string, action?: ToastAction) => {
-    if (toastTimerRef.current !== undefined) window.clearTimeout(toastTimerRef.current);
-    setToast({ kind, text, action });
-    toastTimerRef.current = window.setTimeout(() => {
-      toastTimerRef.current = undefined;
-      setToast(null);
-    }, 3500);
-  };
 
   async function installPwa() {
     if (!installPrompt) return;
@@ -817,7 +824,7 @@ function OrbitAppInner(props: Props) {
         dueAt: newDueAt,
         parentId: newParentId || null,
         projectId: projectIdFromSelection(newProjectId),
-        cycleId: activeCycle?.id ?? null,
+        cycleId: newCycleId || null,
       }),
     onSuccess: ({ issue }) => {
       queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
@@ -825,6 +832,7 @@ function OrbitAppInner(props: Props) {
       );
       setNewTitle("");
       setNewProjectId("");
+      setNewCycleChoice(null);
       setNewPriority("no_priority");
       setNewDueAt(null);
       setNewParentId("");
@@ -1012,10 +1020,9 @@ function OrbitAppInner(props: Props) {
     patch: PreferencePatch,
     mutationKey = idempotencyKey(),
   ): Promise<void> {
-    const result = await apiPatch<{ preferences: BootstrapPayload["preferences"] }>(
-      "/api/v1/preferences",
-      { idempotencyKey: mutationKey, ...patch },
-    );
+    const result = await apiPatch<{
+      preferences: BootstrapPayload["preferences"];
+    }>("/api/v1/preferences", { idempotencyKey: mutationKey, ...patch });
     queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
       current ? { ...current, preferences: result.preferences } : current,
     );
@@ -1049,10 +1056,9 @@ function OrbitAppInner(props: Props) {
     patch: CycleSettingsPatch,
     mutationKey = idempotencyKey(),
   ): Promise<void> {
-    const result = await apiPatch<{ cycleSettings: BootstrapPayload["cycleSettings"] }>(
-      "/api/v1/cycle-settings",
-      { idempotencyKey: mutationKey, ...patch },
-    );
+    const result = await apiPatch<{
+      cycleSettings: BootstrapPayload["cycleSettings"];
+    }>("/api/v1/cycle-settings", { idempotencyKey: mutationKey, ...patch });
     queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
       current ? { ...current, cycleSettings: result.cycleSettings } : current,
     );
@@ -1064,10 +1070,9 @@ function OrbitAppInner(props: Props) {
     mutationKey = idempotencyKey(),
   ): Promise<void> {
     try {
-      const result = await apiPatch<{ preferences: BootstrapPayload["preferences"] }>(
-        "/api/v1/preferences",
-        { idempotencyKey: mutationKey, colorTheme },
-      );
+      const result = await apiPatch<{
+        preferences: BootstrapPayload["preferences"];
+      }>("/api/v1/preferences", { idempotencyKey: mutationKey, colorTheme });
       queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
         current ? { ...current, preferences: result.preferences } : current,
       );
@@ -1367,6 +1372,9 @@ function OrbitAppInner(props: Props) {
     selected.length === 1 ? issues.find((issue) => issue.id === selected[0]) : undefined;
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        本文へ移動
+      </a>
       <Sidebar
         section={section}
         unread={unread}
@@ -1396,13 +1404,17 @@ function OrbitAppInner(props: Props) {
               <span className="search-placeholder">検索</span>
               <kbd>{modifierLabel} K</kbd>
             </button>
-            <button className="icon-button" aria-label="通知" onClick={() => navigate("inbox")}>
+            <button
+              className="icon-button"
+              aria-label={unread > 0 ? `通知（未読${unread}件）` : "通知"}
+              onClick={() => navigate("inbox")}
+            >
               ♧{unread > 0 && <span className="notification-dot" />}
             </button>
-            <button className="avatar">OU</button>
+            <div className="avatar">OU</div>
           </div>
         </header>
-        <main className="content-area">
+        <main className="content-area" id="main-content">
           {bootstrap.error && (
             <div className="detail-live-error" role="alert">
               最新情報を取得できませんでした。表示中の情報を保持しています。
@@ -1517,8 +1529,9 @@ function OrbitAppInner(props: Props) {
               onNavigateCycles={() => void navigate("cycles")}
               closeBusy={cycleCloseBusy}
               startBusy={cycleStartBusy}
-              onClose={(cycle) => void closeCycle(cycle)}
+              onClose={closeCycle}
               onStart={startCycle}
+              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "projects" && (
@@ -1646,6 +1659,7 @@ function OrbitAppInner(props: Props) {
             fallbackIssue={issues.find((item) => item.id === props.issueId)}
             knownIssues={issues}
             projects={projects}
+            cycles={cycles}
             labels={labels}
             onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
             pending={pendingIssueId === props.issueId}
@@ -1663,6 +1677,9 @@ function OrbitAppInner(props: Props) {
             projects={projects}
             projectId={newProjectId}
             setProjectId={setNewProjectId}
+            cycles={cycles}
+            cycleId={newCycleId}
+            setCycleId={setNewCycleChoice}
             priority={newPriority}
             setPriority={setNewPriority}
             dueAt={newDueAt}
@@ -1674,6 +1691,7 @@ function OrbitAppInner(props: Props) {
               setComposerOpen(false);
               setNewTitle("");
               setNewProjectId("");
+              setNewCycleChoice(null);
               setNewPriority("no_priority");
               setNewDueAt(null);
               setNewParentId("");
@@ -1779,18 +1797,78 @@ function OrbitAppInner(props: Props) {
           </div>
         </Modal>
       )}
-      {toast && (
-        <div className={`toast ${toast.kind}`} role="status">
-          <span>{toast.kind === "success" ? "✓" : "!"}</span>
-          {toast.text}
-          {toast.action && (
-            <button className="text-button" onClick={toast.action.onClick}>
-              {toast.action.label}
-            </button>
-          )}
-        </div>
+      <ToastRegion toast={toast} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+type ToastState = {
+  kind: "success" | "error";
+  text: string;
+  action?: ToastAction;
+};
+
+const TOAST_AUTO_DISMISS_MS = 3500;
+
+/** 自動で消えるのは、アクションなしの成功トーストだけ。 */
+export function useToast() {
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const timerRef = useRef<number | undefined>(undefined);
+  const clearTimer = () => {
+    if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+    timerRef.current = undefined;
+  };
+  useEffect(() => clearTimer, []);
+  const dismissToast = () => {
+    clearTimer();
+    setToast(null);
+  };
+  const showToast = (kind: ToastState["kind"], text: string, action?: ToastAction) => {
+    clearTimer();
+    setToast({ kind, text, action });
+    if (kind === "success" && !action)
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = undefined;
+        setToast(null);
+      }, TOAST_AUTO_DISMISS_MS);
+  };
+  return { toast, showToast, dismissToast };
+}
+
+/** ライブリージョンは常に DOM に置く（後から挿入された領域は読み上げられないため）。 */
+export function ToastRegion({
+  toast,
+  onDismiss,
+}: {
+  toast: ToastState | null;
+  onDismiss: () => void;
+}) {
+  const body = toast && (
+    <div className={`toast ${toast.kind}`}>
+      <span aria-hidden="true">{toast.kind === "success" ? "✓" : "!"}</span>
+      {toast.text}
+      {toast.action && (
+        <button className="text-button" onClick={toast.action.onClick}>
+          {toast.action.label}
+        </button>
+      )}
+      {(toast.kind === "error" || toast.action) && (
+        <button
+          className="icon-button toast-close"
+          type="button"
+          aria-label="通知を閉じる"
+          onClick={onDismiss}
+        >
+          ×
+        </button>
       )}
     </div>
+  );
+  return (
+    <>
+      <div role="status">{toast?.kind === "success" ? body : null}</div>
+      <div role="alert">{toast?.kind === "error" ? body : null}</div>
+    </>
   );
 }
 
@@ -1812,11 +1890,13 @@ function Sidebar({
         <span className="brand-mark">O</span>
         <span className="brand-name">Orbit</span>
       </div>
-      <button className="workspace-switcher">
+      <div className="workspace-switcher">
         <span className="workspace-avatar">O</span>
         <span className="workspace-name">Personal space</span>
-        <span className="chevron">⌄</span>
-      </button>
+        <span className="chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </div>
       <nav className="side-nav">
         <div className="nav-label">WORKSPACE</div>
         {primary.map((item) => (
@@ -1849,7 +1929,7 @@ function Sidebar({
           aria-current={section === "settings" ? "page" : undefined}
           onClick={() => onNavigate("settings")}
         >
-          <span className="nav-icon">
+          <span className="nav-icon" aria-hidden="true">
             <OrbitIcon name="settings" />
           </span>
           <span>Settings</span>
@@ -1902,7 +1982,9 @@ function MobileNav({
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}
         >
-          <span className="nav-icon">☰</span>
+          <span className="nav-icon" aria-hidden="true">
+            ☰
+          </span>
           <span>Menu</span>
         </button>
       </nav>
@@ -1989,7 +2071,9 @@ function NavItem({
       aria-current={active ? "page" : undefined}
       onClick={onClick}
     >
-      <span className="nav-icon">{sectionIcons[item]}</span>
+      <span className="nav-icon" aria-hidden="true">
+        {sectionIcons[item]}
+      </span>
       <span>{sectionLabels[item]}</span>
       {badge > 0 && <span className="nav-badge">{badge}</span>}
     </button>
@@ -2459,6 +2543,28 @@ export function IssuesView({
   );
   const [bulkValue, setBulkValue] = useState("");
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  function bulkPatch(): Record<string, unknown> {
+    if (bulkField === "status") return { statusId: bulkValue };
+    if (bulkField === "priority") return { priority: bulkValue };
+    if (bulkField === "cycle") return { cycleId: bulkValue === "__none__" ? null : bulkValue };
+    if (bulkField === "project") return { projectId: projectIdFromSelection(bulkValue) };
+    return { labelIds: bulkValue === "__none__" ? [] : [bulkValue] };
+  }
+  function applyBulk() {
+    setBulkError(null);
+    void onBulk(bulkPatch())
+      .then(() => setSelected([]))
+      .catch((error) =>
+        setBulkError(
+          error instanceof ApiError
+            ? error.fieldErrors
+              ? Object.values(error.fieldErrors).flat().join(" ")
+              : error.message
+            : "一括更新に失敗しました。",
+        ),
+      );
+  }
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const filterSheetRef = useRef<HTMLDivElement>(null);
   const filterSheetButtonRef = useRef<HTMLButtonElement>(null);
@@ -2585,6 +2691,7 @@ export function IssuesView({
           <input
             ref={filterInputRef}
             id="issues-filter-input"
+            aria-label="Issueを絞り込む"
             value={filterText}
             onChange={(event) => setFilterText(event.target.value)}
             placeholder="Issueを検索…"
@@ -2811,7 +2918,7 @@ export function IssuesView({
             <option value="priority">Priority</option>
             <option value="cycle">Cycle</option>
             <option value="project">Project</option>
-            <option value="label">Label</option>
+            <option value="label">Label（置き換え）</option>
           </select>
           <select
             aria-label="一括更新値"
@@ -2869,30 +2976,7 @@ export function IssuesView({
           <button
             className="button secondary"
             disabled={bulkBusy || !bulkValue}
-            onClick={() => {
-              const patch =
-                bulkField === "status"
-                  ? { statusId: bulkValue }
-                  : bulkField === "priority"
-                    ? { priority: bulkValue }
-                    : bulkField === "cycle"
-                      ? { cycleId: bulkValue === "__none__" ? null : bulkValue }
-                      : bulkField === "project"
-                        ? { projectId: projectIdFromSelection(bulkValue) }
-                        : { labelIds: bulkValue === "__none__" ? [] : [bulkValue] };
-              setBulkError(null);
-              void onBulk(patch)
-                .then(() => setSelected([]))
-                .catch((error) =>
-                  setBulkError(
-                    error instanceof ApiError
-                      ? error.fieldErrors
-                        ? Object.values(error.fieldErrors).flat().join(" ")
-                        : error.message
-                      : "一括更新に失敗しました。",
-                  ),
-                );
-            }}
+            onClick={() => (bulkField === "label" ? setBulkConfirmOpen(true) : applyBulk())}
           >
             {bulkBusy ? "適用中…" : "一括適用"}
           </button>
@@ -2912,16 +2996,7 @@ export function IssuesView({
               <button
                 onClick={() => {
                   setBulkError(null);
-                  const patch =
-                    bulkField === "status"
-                      ? { statusId: bulkValue }
-                      : bulkField === "priority"
-                        ? { priority: bulkValue }
-                        : bulkField === "cycle"
-                          ? { cycleId: bulkValue === "__none__" ? null : bulkValue }
-                          : bulkField === "project"
-                            ? { projectId: projectIdFromSelection(bulkValue) }
-                            : { labelIds: bulkValue === "__none__" ? [] : [bulkValue] };
+                  const patch = bulkPatch();
                   void onBulk(patch)
                     .then(() => setSelected([]))
                     .catch((error) =>
@@ -2937,6 +3012,35 @@ export function IssuesView({
             </span>
           )}
         </div>
+      )}
+      {bulkConfirmOpen && (
+        <Modal title="Labelを置き換えますか？" onClose={() => setBulkConfirmOpen(false)}>
+          <p className="cycle-confirm-message">
+            {bulkValue === "__none__"
+              ? `選択中の${selected.length}件からすべてのLabelを外します。`
+              : `選択中の${selected.length}件のLabelを「${labels.find((label) => label.id === bulkValue)?.name ?? ""}」に置き換えます。既存のLabelは外れます。`}
+          </p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button ghost"
+              data-modal-autofocus
+              onClick={() => setBulkConfirmOpen(false)}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => {
+                setBulkConfirmOpen(false);
+                applyBulk();
+              }}
+            >
+              {bulkValue === "__none__" ? "外す" : "置き換える"}
+            </button>
+          </div>
+        </Modal>
       )}
       {viewMode === "board" ? (
         <div className="board-grid">
@@ -2967,10 +3071,18 @@ export function IssuesView({
           )}
         </div>
       ) : (
-        <div className={`issue-table ${manualOrder ? "manual-order" : ""}`}>
-          <div className="table-header">
-            {manualOrder && <span className="reorder-cell">MOVE</span>}
-            <label className="check-cell">
+        <div
+          className={`issue-table ${manualOrder ? "manual-order" : ""}`}
+          role="table"
+          aria-label="Issue一覧"
+        >
+          <div className="table-header" role="row">
+            {manualOrder && (
+              <span className="reorder-cell" role="columnheader">
+                MOVE
+              </span>
+            )}
+            <label className="check-cell" role="columnheader">
               <input
                 type="checkbox"
                 aria-label="全選択"
@@ -2983,11 +3095,21 @@ export function IssuesView({
                 }}
               />
             </label>
-            <span className="issue-main-heading">ISSUE</span>
-            <span className="status-cell">STATUS</span>
-            <span className="priority-cell">PRIORITY</span>
-            <span className="project-cell">PROJECT</span>
-            <span className="due-cell">DUE</span>
+            <span className="issue-main-heading" role="columnheader">
+              ISSUE
+            </span>
+            <span className="status-cell" role="columnheader">
+              STATUS
+            </span>
+            <span className="priority-cell" role="columnheader">
+              PRIORITY
+            </span>
+            <span className="project-cell" role="columnheader">
+              PROJECT
+            </span>
+            <span className="due-cell" role="columnheader">
+              DUE
+            </span>
           </div>
           {hierarchyRows.map(
             (
@@ -3264,6 +3386,7 @@ function IssueRow({
     <div
       data-depth={depth}
       style={hierarchical ? ({ "--issue-depth": Math.min(depth, 3) } as CSSProperties) : undefined}
+      role="row"
       className={`issue-row ${reserveToggleSpace ? "has-toggle-column" : ""} ${compact ? "compact" : ""} ${pending ? "pending" : ""} ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${dropTarget ? "drop-target" : ""}`}
       draggable={manualOrder && !pending && !reorderBusy}
       onDragStart={
@@ -3294,7 +3417,7 @@ function IssueRow({
       }
     >
       {manualOrder && (
-        <span className="reorder-cell">
+        <span className="reorder-cell" role="cell">
           <button
             type="button"
             ref={handleRef}
@@ -3334,7 +3457,7 @@ function IssueRow({
           </button>
         </span>
       )}
-      <label className="check-cell">
+      <label className="check-cell" role="cell">
         {onSelect && (
           <input
             type="checkbox"
@@ -3346,7 +3469,7 @@ function IssueRow({
         )}
       </label>
       {hierarchical ? (
-        <div className="issue-title-cell">
+        <div className="issue-title-cell" role="cell">
           {hasVisibleChildren ? (
             <button
               type="button"
@@ -3365,7 +3488,7 @@ function IssueRow({
       ) : (
         mainButton
       )}
-      <span className="status-cell">
+      <span className="status-cell" role="cell">
         <span className="status-dot" style={{ background: state?.color }} />
         {onUpdate && !compact ? (
           <select
@@ -3384,7 +3507,7 @@ function IssueRow({
           <span>{state?.name ?? "—"}</span>
         )}
       </span>
-      <span className="priority-cell">
+      <span className="priority-cell" role="cell">
         {onUpdate && !compact ? (
           <span className="priority-control">
             <PriorityIcon priority={issue.priority} />
@@ -3408,7 +3531,7 @@ function IssueRow({
           <PriorityIcon priority={issue.priority} />
         )}
       </span>
-      <span className="project-cell">
+      <span className="project-cell" role="cell">
         {projects.length > 0 && onUpdate ? (
           <select
             aria-label={`${issue.identifier}のProject`}
@@ -3431,7 +3554,7 @@ function IssueRow({
           "Projectなし"
         )}
       </span>
-      <span className="due-cell">
+      <span className="due-cell" role="cell">
         {onRestore && !compact ? (
           <button className="text-button" onClick={() => onRestore(issue)}>
             復元
@@ -3553,6 +3676,20 @@ function CycleReorderControls({
   );
 }
 
+function IssueTitleButton({
+  issue,
+  onOpen,
+}: {
+  issue: { id: string; title: string };
+  onOpen?: (issue: { id: string }) => void;
+}) {
+  return (
+    <button type="button" className="issue-title-button" onClick={() => onOpen?.(issue)}>
+      {issue.title}
+    </button>
+  );
+}
+
 function CycleIssueCard({
   issue,
   state,
@@ -3566,6 +3703,7 @@ function CycleIssueCard({
   onDragOver,
   onDrop,
   onMove,
+  onOpen,
 }: {
   issue: Issue;
   state: WorkflowState;
@@ -3579,6 +3717,7 @@ function CycleIssueCard({
   onDragOver: () => void;
   onDrop: () => void;
   onMove: (direction: "up" | "down") => void;
+  onOpen?: (issue: { id: string }) => void;
 }) {
   return (
     <div
@@ -3601,7 +3740,9 @@ function CycleIssueCard({
       }}
     >
       <span className="issue-id">{issue.identifier}</span>
-      <strong>{issue.title}</strong>
+      <strong>
+        <IssueTitleButton issue={issue} onOpen={onOpen} />
+      </strong>
       <span className="cycle-issue-status">{state.name}</span>
       <CycleReorderControls
         issue={issue}
@@ -3684,6 +3825,7 @@ export function CyclesView({
   startBusy,
   onClose,
   onStart,
+  onOpenIssue,
 }: {
   cycles: Cycle[];
   cycleId?: string;
@@ -3705,10 +3847,16 @@ export function CyclesView({
   onNavigateCycles: () => void;
   closeBusy: boolean;
   startBusy: boolean;
-  onClose: (cycle: Cycle) => void;
+  onClose: (cycle: Cycle) => void | Promise<void>;
   onStart: (cycle: Cycle) => Promise<boolean>;
+  onOpenIssue?: (issue: { id: string }) => void;
 }) {
   const [tab, setTab] = useState<CycleTab>("current");
+  const [confirmAction, setConfirmAction] = useState<{
+    kind: "close" | "start";
+    cycle: Cycle;
+  } | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(cycleId ?? null);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -3979,9 +4127,31 @@ export function CyclesView({
     setSelectedCycleId(cycle.id);
   }
 
+  async function runConfirmedAction() {
+    if (!confirmAction || confirming) return;
+    const { kind, cycle } = confirmAction;
+    setConfirming(true);
+    try {
+      if (kind === "close") {
+        await onClose(cycle);
+      } else if (await onStart(cycle)) {
+        setTab("current");
+      }
+    } finally {
+      setConfirming(false);
+      setConfirmAction(null);
+    }
+  }
+
+  // 完了対象は API（closeCycle）と同じく unstarted / started のIssueだけ繰り越される。
+  const carryoverCount = cycleIssues.filter((issue) => {
+    const category = workflowStates.find((state) => state.id === issue.statusId)?.category;
+    return category === "unstarted" || category === "started";
+  }).length;
+
   return (
     <div className="page">
-      {(closeBusy || startBusy) && (
+      {(closeBusy || startBusy) && !confirmAction && (
         <div
           className="cycle-blocking-overlay"
           role="status"
@@ -4009,11 +4179,7 @@ export function CyclesView({
           {nextCycle && (
             <button
               className="button primary"
-              onClick={() =>
-                void onStart(nextCycle).then((started) => {
-                  if (started) setTab("current");
-                })
-              }
+              onClick={() => setConfirmAction({ kind: "start", cycle: nextCycle })}
               disabled={closeBusy || startBusy}
             >
               {startBusy ? "開始中…" : "次のCycleを開始"}
@@ -4023,11 +4189,10 @@ export function CyclesView({
             <button
               className="button secondary"
               onClick={() => {
-                if (selectedCycle.status === "active") onClose(selectedCycle);
+                if (selectedCycle.status === "active")
+                  setConfirmAction({ kind: "close", cycle: selectedCycle });
                 if (selectedCycle.status === "upcoming")
-                  void onStart(selectedCycle).then((started) => {
-                    if (started) setTab("current");
-                  });
+                  setConfirmAction({ kind: "start", cycle: selectedCycle });
               }}
               disabled={closeBusy || startBusy || selectedCycle.status === "completed"}
             >
@@ -4042,14 +4207,39 @@ export function CyclesView({
           )}
         </div>
       </div>
-      <div className="cycle-tabs">
-        {(["current", "upcoming", "past"] as const).map((value) => (
+      <div className="cycle-tabs" role="tablist" aria-label="Cycleの種類">
+        {cycleTabValues.map((value) => (
           <button
             className={tab === value ? "selected" : ""}
+            role="tab"
+            id={`cycle-tab-${value}`}
             aria-selected={tab === value}
+            tabIndex={tab === value ? 0 : -1}
             disabled={closeBusy || startBusy || scheduleEditing}
             key={value}
             onClick={() => setTab(value)}
+            onKeyDown={(event) => {
+              const index = cycleTabValues.indexOf(value);
+              const last = cycleTabValues.length - 1;
+              const next =
+                event.key === "ArrowRight"
+                  ? index === last
+                    ? 0
+                    : index + 1
+                  : event.key === "ArrowLeft"
+                    ? index === 0
+                      ? last
+                      : index - 1
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? last
+                        : null;
+              if (next === null) return;
+              event.preventDefault();
+              setTab(cycleTabValues[next]);
+              document.getElementById(`cycle-tab-${cycleTabValues[next]}`)?.focus();
+            }}
           >
             {value === "current" ? "Current" : value === "upcoming" ? "Upcoming" : "Past"}
             <span className="cycle-tab-count">
@@ -4236,7 +4426,9 @@ export function CyclesView({
               {incomingCycleHistory.map((entry) => (
                 <div className="mini-issue cycle-carryover-row" key={entry.id}>
                   <span className="issue-id">{entry.issue.identifier}</span>
-                  <strong>{entry.issue.title}</strong>
+                  <strong>
+                    <IssueTitleButton issue={entry.issue} onOpen={onOpenIssue} />
+                  </strong>
                   <span className="cycle-carryover-origin">元Cycle: {entry.fromCycle.name}</span>
                 </div>
               ))}
@@ -4338,6 +4530,7 @@ export function CyclesView({
                       onDragOver={() => setDropTargetCycleIssueId(issue.id)}
                       onDrop={() => dropCycleIssue(issue.id, state.id)}
                       onMove={(direction) => moveCycleIssue(issue, direction, state.id)}
+                      onOpen={onOpenIssue}
                     />
                   ))}
                 </div>
@@ -4377,9 +4570,11 @@ export function CyclesView({
                     dropCycleIssue(issue.id);
                   }}
                 >
-                  <span className={`priority-dot ${priorityTone[issue.priority]}`} />
+                  <PriorityIcon priority={issue.priority} />
                   <span className="issue-id">{issue.identifier}</span>
-                  <strong>{issue.title}</strong>
+                  <strong>
+                    <IssueTitleButton issue={issue} onOpen={onOpenIssue} />
+                  </strong>
                   <span className="cycle-issue-status">
                     {workflowStates.find((state) => state.id === issue.statusId)?.name ?? "—"}
                   </span>
@@ -4399,7 +4594,7 @@ export function CyclesView({
                       onClick={() => onUpdateIssue(issue, { cycleId: null })}
                       disabled={closeBusy || pendingIssueId === issue.id || reorderBusy}
                     >
-                      解除
+                      Cycleから外す
                     </button>
                   )}
                 </div>
@@ -4466,6 +4661,39 @@ export function CyclesView({
           </button>
         ))}
       </div>
+      {confirmAction && (
+        <Modal
+          title={confirmAction.kind === "close" ? "Cycleを完了しますか？" : "Cycleを開始しますか？"}
+          onClose={() => {
+            if (!confirming) setConfirmAction(null);
+          }}
+        >
+          <p className="cycle-confirm-message">
+            {confirmAction.kind === "close"
+              ? `未完了のIssue ${carryoverCount}件を次のCycleへ繰り越します。`
+              : `${confirmAction.cycle.nameOverride ?? confirmAction.cycle.name}（${formatRange(confirmAction.cycle.startsAt, confirmAction.cycle.endsAt)}）を開始します。`}
+          </p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button ghost"
+              data-modal-autofocus
+              disabled={confirming}
+              onClick={() => setConfirmAction(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              disabled={confirming}
+              onClick={() => void runConfirmedAction()}
+            >
+              {confirmAction.kind === "close" ? "Cycleを完了" : "Cycleを開始"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -5167,6 +5395,7 @@ export function SearchView({
         <span>⌕</span>
         <input
           id="global-search-input"
+          aria-label="Issueを検索"
           autoFocus
           value={query}
           onChange={(event) => onQuery(event.target.value)}
@@ -5192,6 +5421,9 @@ export function SearchView({
           }}
         />
         <kbd>{modifierLabel} F</kbd>
+      </div>
+      <div className="visually-hidden" role="status">
+        {query ? (searchBusy ? "検索しています…" : `${results.length}件のIssue`) : ""}
       </div>
       <div className="search-filters" aria-label="検索Filter">
         <OrbitSelect
@@ -5515,19 +5747,17 @@ export function InboxView({
           </button>
         </div>
       )}
-      <div className="inbox-toolbar" role="tablist" aria-label="Inboxの表示範囲">
+      <div className="inbox-toolbar" role="group" aria-label="Inboxの表示範囲">
         <button
           className={`inbox-filter ${filter === "all" ? "selected" : ""}`}
-          role="tab"
-          aria-selected={filter === "all"}
+          aria-pressed={filter === "all"}
           onClick={() => setFilter("all")}
         >
           すべて <span>{notifications.length}</span>
         </button>
         <button
           className={`inbox-filter ${filter === "unread" ? "selected" : ""}`}
-          role="tab"
-          aria-selected={filter === "unread"}
+          aria-pressed={filter === "unread"}
           onClick={() => setFilter("unread")}
         >
           未読 <span>{unreadCount}</span>
@@ -6244,6 +6474,7 @@ export function SettingsView({
   const [colorThemeDraft, setColorThemeDraft] = useState(preferences.colorTheme);
   const [timezoneDraft, setTimezoneDraft] = useState(preferences.timezone);
   const [localeDraft, setLocaleDraft] = useState(preferences.locale);
+  const [singleKeyShortcuts, setSingleKeyShortcuts] = useState(() => readSingleKeyShortcuts());
   const [preferenceSaving, setPreferenceSaving] = useState(false);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const [preferenceFieldErrors, setPreferenceFieldErrors] = useState<Record<
@@ -6252,7 +6483,10 @@ export function SettingsView({
   > | null>(null);
   const [preferenceSaved, setPreferenceSaved] = useState<string | null>(null);
   const [preferenceRetry, setPreferenceRetry] = useState<(() => void) | null>(null);
-  const preferenceMutationKeyRef = useRef<{ key: string; patch: PreferencePatch } | null>(null);
+  const preferenceMutationKeyRef = useRef<{
+    key: string;
+    patch: PreferencePatch;
+  } | null>(null);
   const [cycleDurationDraft, setCycleDurationDraft] = useState(cycleSettings.durationWeeks);
   const [cycleStartWeekdayDraft, setCycleStartWeekdayDraft] = useState(cycleSettings.startWeekday);
   const [cycleSettingsSaving, setCycleSettingsSaving] = useState(false);
@@ -6499,7 +6733,7 @@ export function SettingsView({
           </div>
           <div className="setting-row">
             <div>
-              <strong>Theme</strong>
+              <strong id="setting-theme-label">Theme</strong>
               <span>ライト・ダーク・システム</span>
               {preferenceFieldErrors?.theme && (
                 <span id="preference-theme-error" className="setting-field-error" role="alert">
@@ -6508,7 +6742,7 @@ export function SettingsView({
               )}
             </div>
             <select
-              aria-label="表示モード"
+              aria-labelledby="setting-theme-label"
               aria-invalid={Boolean(preferenceFieldErrors?.theme)}
               aria-describedby={preferenceFieldErrors?.theme ? "preference-theme-error" : undefined}
               value={themeDraft}
@@ -6527,7 +6761,7 @@ export function SettingsView({
           </div>
           <div className="setting-row">
             <div>
-              <strong>Color theme</strong>
+              <strong id="setting-color-theme-label">Color theme</strong>
               <span>アクセントカラー</span>
             </div>
             <span className="color-theme-control">
@@ -6540,7 +6774,7 @@ export function SettingsView({
                 }}
               />
               <select
-                aria-label="カラーテーマ"
+                aria-labelledby="setting-color-theme-label"
                 value={colorThemeDraft}
                 disabled={colorThemeSaving}
                 onChange={(event) => {
@@ -6563,7 +6797,7 @@ export function SettingsView({
           </div>
           <div className="setting-row">
             <div>
-              <strong>Timezone</strong>
+              <strong id="setting-timezone-label">Timezone</strong>
               <span>Cycle境界と日付表示</span>
               {preferenceFieldErrors?.timezone && (
                 <span id="preference-timezone-error" className="setting-field-error" role="alert">
@@ -6572,7 +6806,7 @@ export function SettingsView({
               )}
             </div>
             <select
-              aria-label="タイムゾーン"
+              aria-labelledby="setting-timezone-label"
               aria-invalid={Boolean(preferenceFieldErrors?.timezone)}
               aria-describedby={
                 preferenceFieldErrors?.timezone ? "preference-timezone-error" : undefined
@@ -6597,7 +6831,7 @@ export function SettingsView({
           </div>
           <div className="setting-row">
             <div>
-              <strong>Language</strong>
+              <strong id="setting-language-label">Language</strong>
               <span>表示言語</span>
               {preferenceFieldErrors?.locale && (
                 <span id="preference-locale-error" className="setting-field-error" role="alert">
@@ -6606,7 +6840,7 @@ export function SettingsView({
               )}
             </div>
             <select
-              aria-label="表示言語"
+              aria-labelledby="setting-language-label"
               aria-invalid={Boolean(preferenceFieldErrors?.locale)}
               aria-describedby={
                 preferenceFieldErrors?.locale ? "preference-locale-error" : undefined
@@ -6621,8 +6855,26 @@ export function SettingsView({
               }}
             >
               <option value="ja">日本語</option>
-              <option value="en">English</option>
+              <option value="en" disabled>
+                English（準備中）
+              </option>
             </select>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>1文字ショートカット</strong>
+              <span>c / f / x / ? を1キーで実行します（この端末のみ）</span>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="1文字ショートカット"
+              checked={singleKeyShortcuts}
+              onChange={(event) => {
+                setSingleKeyShortcuts(event.target.checked);
+                writeSingleKeyShortcuts(event.target.checked);
+              }}
+            />
           </div>
           <div className="setting-row">
             <div>
@@ -7353,6 +7605,12 @@ function WorkflowSettingsCard({
   );
 }
 
+const runStepLabels: Record<string, string> = {
+  cycle_transition: "Cycleの切り替え",
+  purge: "ゴミ箱の整理",
+  outbox_retry: "通知の再送",
+};
+
 export function RunOverlay({
   run,
   busy,
@@ -7364,37 +7622,70 @@ export function RunOverlay({
 }) {
   const blocking = ["pending", "running"].includes(run.status);
   const overlayRef = useRef<HTMLDivElement>(null);
-  useDialogBoundary(overlayRef, { enabled: blocking, priority: 100, onEscape: () => undefined });
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  useDialogBoundary(overlayRef, {
+    enabled: blocking,
+    priority: 100,
+    onEscape: () => undefined,
+  });
+  // 処理が再開(pending/running)したら、次に止まったときは再表示する。
+  useEffect(() => {
+    if (blocking) setDismissedKey(null);
+  }, [blocking]);
+
+  if (!blocking) {
+    const key = `${run.run_id}:${run.status}`;
+    if (dismissedKey === key) return null;
+    const failed = run.status === "failed";
+    const step = run.error?.failed_step ?? run.progress.current_step;
+    return (
+      <div
+        className={`run-banner ${failed ? "failed" : "paused"}`}
+        role={failed ? "alert" : "status"}
+        aria-labelledby="run-banner-title"
+      >
+        <div className="run-banner-copy">
+          <strong id="run-banner-title">
+            {failed ? "処理が失敗しました" : "処理が一時停止しました"}
+          </strong>
+          {run.error?.message && <p className="run-banner-reason">{run.error.message}</p>}
+          {step && (
+            <p className="run-banner-step">
+              ステップ: {runStepLabels[step] ?? step} · {run.progress.percent ?? 0}%
+            </p>
+          )}
+        </div>
+        <div className="run-banner-actions">
+          <button className="button primary" onClick={onResume} disabled={busy}>
+            同じRunを再開
+          </button>
+          <button className="button ghost" onClick={() => setDismissedKey(key)}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       ref={overlayRef}
-      className={`run-overlay ${blocking ? "blocking" : ""}`}
-      role={blocking ? "dialog" : "status"}
-      aria-modal={blocking || undefined}
+      className="run-overlay blocking"
+      role="dialog"
+      aria-modal="true"
       aria-labelledby="run-overlay-title"
       tabIndex={-1}
       onKeyDown={(event) => {
-        if (!blocking || event.key !== "Tab") return;
+        if (event.key !== "Tab") return;
         event.preventDefault();
         overlayRef.current?.focus();
       }}
     >
       <div className="run-overlay-card">
-        <div className="run-spinner">
-          {blocking ? "◌" : run.status === "failed" || run.status === "paused" ? "!" : "✓"}
-        </div>
+        <div className="run-spinner">◌</div>
         <span className="eyebrow coral">BACKGROUND RUN</span>
         <h2 id="run-overlay-title">
-          {run.status === "pending"
-            ? "処理を開始しています"
-            : run.status === "running"
-              ? "ワークスペースを整えています"
-              : run.status === "paused"
-                ? "処理が一時停止しました"
-                : run.status === "failed"
-                  ? "処理の再開が必要です"
-                  : "Maintenance complete"}
+          {run.status === "pending" ? "処理を開始しています" : "ワークスペースを整えています"}
         </h2>
         <p>
           {run.progress.current_step
@@ -7404,17 +7695,6 @@ export function RunOverlay({
         <div className="progress-line">
           <span style={{ width: `${run.progress.percent ?? 0}%` }} />
         </div>
-        {run.status === "paused" || run.status === "failed" ? (
-          <button className="button primary" onClick={onResume} disabled={busy}>
-            同じRunを再開
-          </button>
-        ) : (
-          !blocking && (
-            <button className="button ghost" onClick={() => undefined}>
-              閉じる
-            </button>
-          )
-        )}
         <span className="run-safe-note">
           個人データはこのRunの所有者スコープ内だけを処理します。
         </span>
@@ -7482,6 +7762,7 @@ export function IssueDetailPanel({
   fallbackIssue,
   knownIssues,
   projects,
+  cycles = [],
   labels = [],
   onUpdate,
   pending,
@@ -7494,6 +7775,7 @@ export function IssueDetailPanel({
   fallbackIssue?: Issue;
   knownIssues: Issue[];
   projects: Project[];
+  cycles?: Cycle[];
   labels?: Label[];
   onUpdate: (issue: Issue, patch: Partial<Issue>) => void;
   pending: boolean;
@@ -8295,6 +8577,22 @@ export function IssueDetailPanel({
                     保存中…
                   </span>
                 )}
+                <label className="field-label" htmlFor="issue-cycle">
+                  Cycle
+                </label>
+                <select
+                  id="issue-cycle"
+                  aria-label="IssueのCycle"
+                  value={issue.cycleId ?? ""}
+                  disabled={pending || saving || propertySaving}
+                  onChange={(event) =>
+                    onUpdate(issue, {
+                      cycleId: event.target.value === "" ? null : event.target.value,
+                    })
+                  }
+                >
+                  <CycleSelectOptions cycles={cycles} currentId={issue.cycleId ?? ""} />
+                </select>
               </div>
               <div className="detail-property-editor issue-core-properties">
                 <label className="field-label" htmlFor="issue-due-date">
@@ -8705,12 +9003,43 @@ export function IssueDetailPanel({
   );
 }
 
+function cycleSelectOptions(cycles: Cycle[], currentId: string) {
+  const suffix = {
+    active: "Current",
+    upcoming: "Upcoming",
+    completed: "Completed",
+  } as const;
+  return cycles
+    .filter((cycle) => cycle.status !== "completed" || cycle.id === currentId)
+    .sort((left, right) => left.number - right.number)
+    .map((cycle) => ({
+      id: cycle.id,
+      label: `${cycle.nameOverride ?? cycle.name}（${suffix[cycle.status]}）`,
+    }));
+}
+
+function CycleSelectOptions({ cycles, currentId }: { cycles: Cycle[]; currentId: string }) {
+  return (
+    <>
+      <option value="">なし</option>
+      {cycleSelectOptions([...cycles], currentId).map((option) => (
+        <option value={option.id} key={option.id}>
+          {option.label}
+        </option>
+      ))}
+    </>
+  );
+}
+
 export function IssueComposer({
   title,
   setTitle,
   projects,
   projectId,
   setProjectId,
+  cycles = [],
+  cycleId = "",
+  setCycleId,
   priority,
   setPriority,
   dueAt,
@@ -8728,6 +9057,9 @@ export function IssueComposer({
   projects: Project[];
   projectId: string;
   setProjectId: (value: string) => void;
+  cycles?: Cycle[];
+  cycleId?: string;
+  setCycleId?: (value: string) => void;
   priority: Issue["priority"];
   setPriority: (value: Issue["priority"]) => void;
   dueAt: number | null;
@@ -8767,7 +9099,7 @@ export function IssueComposer({
           <h2 id="issue-composer-title" className="visually-hidden">
             {existingIssue ? "Issue詳細" : "新しいIssue"}
           </h2>
-          <button className="icon-button" onClick={onClose}>
+          <button className="icon-button" aria-label="閉じる" onClick={onClose}>
             ×
           </button>
         </div>
@@ -8824,6 +9156,18 @@ export function IssueComposer({
                   {project.name}
                 </option>
               ))}
+            </select>
+            <label className="field-label" htmlFor="new-issue-cycle">
+              Cycle
+            </label>
+            <select
+              id="new-issue-cycle"
+              aria-label="新しいIssueのCycle"
+              className="text-input"
+              value={cycleId}
+              onChange={(event) => setCycleId?.(event.target.value)}
+            >
+              <CycleSelectOptions cycles={cycles} currentId={cycleId} />
             </select>
             <label className="field-label" htmlFor="new-issue-priority">
               Priority
@@ -8975,6 +9319,7 @@ export function CommandPalette({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="コマンドやページを検索…"
+            aria-label="コマンドを検索"
             role="combobox"
             aria-controls="command-palette-options"
             aria-expanded="true"
@@ -8999,7 +9344,12 @@ export function CommandPalette({
             }}
           />
         </div>
-        <div className="command-list" id="command-palette-options" role="listbox">
+        <div
+          className="command-list"
+          id="command-palette-options"
+          role="listbox"
+          aria-label="コマンド"
+        >
           {filtered.map((command, index) => (
             <button
               key={command.label}
@@ -9056,7 +9406,7 @@ function Modal({
       >
         <div className="modal-title">
           <h2 id="generic-modal-title">{title}</h2>
-          <button className="icon-button" onClick={onClose}>
+          <button className="icon-button" aria-label="閉じる" onClick={onClose}>
             ×
           </button>
         </div>

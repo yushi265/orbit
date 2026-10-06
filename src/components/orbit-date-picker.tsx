@@ -57,6 +57,10 @@ export function OrbitDatePicker({
     <div
       ref={pickerRef}
       className="orbit-date-picker"
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (open && next && !event.currentTarget.contains(next)) setOpen(false);
+      }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
           event.stopPropagation();

@@ -274,7 +274,7 @@ describe("Cycle reorder UI", () => {
       );
     });
     expect(dom.window.document.querySelectorAll(".cycle-reorder-controls")).toHaveLength(0);
-    expect(dom.window.document.body.textContent).not.toContain("解除");
+    expect(dom.window.document.body.textContent).not.toContain("Cycleから外す");
     await act(async () => root.unmount());
   });
 

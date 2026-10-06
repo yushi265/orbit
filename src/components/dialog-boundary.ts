@@ -45,31 +45,17 @@ function lockScroll(doc: Document) {
   };
 }
 
-/** Set the opening caret once, after asynchronous text arrives, unless editing has begun. */
-export function useInitialTextCaretEnd(
-  ref: RefObject<HTMLTextAreaElement | null>,
-  value: string,
-  ready = true,
-) {
+/** Set the opening caret at the end of the text once; later selections are left alone. */
+export function useInitialTextCaretEnd(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
   const handled = useRef(false);
   useEffect(() => {
     const input = ref.current;
-    if (!input) return;
-    const touched = () => {
-      handled.current = true;
-    };
-    const events = ["pointerdown", "keydown", "input", "compositionstart"];
-    events.forEach((name) => input.addEventListener(name, touched));
-    return () => events.forEach((name) => input.removeEventListener(name, touched));
-  }, [ref]);
-  useEffect(() => {
-    const input = ref.current;
-    if (handled.current || !ready || !input) return;
+    if (handled.current || !input) return;
     handled.current = true;
     if (input.ownerDocument.activeElement === input) {
       input.setSelectionRange(value.length, value.length);
     }
-  }, [ref, ready, value]);
+  }, [ref, value]);
 }
 
 function topEntry(registry: Registry) {
@@ -114,6 +100,9 @@ function focusables(element: HTMLElement) {
   });
 }
 
+/** `initialFocus` sentinel: focus the Dialog element itself (no control, so no touch keyboard). */
+export const DIALOG_ITSELF = ":self";
+
 /** Owns Focus and inert for the top Dialog, including nested modals and a running Run. */
 export function useDialogBoundary(
   ref: RefObject<HTMLElement | null>,
@@ -144,9 +133,12 @@ export function useDialogBoundary(
       element,
       priority: optionsRef.current.priority ?? 0,
       initial: () => {
-        const target = optionsRef.current.initialFocus
-          ? element.querySelector<HTMLElement>(optionsRef.current.initialFocus)
-          : null;
+        const selector = optionsRef.current.initialFocus;
+        if (selector === DIALOG_ITSELF) {
+          element.focus({ preventScroll: true });
+          return;
+        }
+        const target = selector ? element.querySelector<HTMLElement>(selector) : null;
         const initial =
           target && !target.hasAttribute("disabled") && !target.closest("[hidden], [inert]")
             ? target

@@ -259,7 +259,9 @@ describe("review Detail Escape save boundary", () => {
   it("[Window Escape経路] Windowへ直接届くEscapeもDetailを一度だけ閉じる", async () => {
     queryClient.setQueryData(["issue-detail", "issue-1"], reviewDetail());
     await render("issues", "issue-1");
-    expect(dom.window.document.activeElement?.id).toBe("issue-detail-title");
+    expect(dom.window.document.activeElement).toBe(
+      dom.window.document.querySelector('[role="dialog"]'),
+    );
     await act(async () =>
       dom.window.dispatchEvent(
         new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -278,7 +280,9 @@ describe("review Detail Escape save boundary", () => {
       queryClient.setQueryData(["issue-detail", "issue-1"], reviewDetail());
       await render("issues", "issue-1");
       const title = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
-      expect(dom.window.document.activeElement).toBe(title);
+      expect(dom.window.document.activeElement).toBe(
+        dom.window.document.querySelector('[role="dialog"]'),
+      );
       await act(async () => {
         setValue(title, "Escape保存draft");
         dom.window.document.body.dispatchEvent(

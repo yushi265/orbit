@@ -187,7 +187,9 @@ describe("review Issues URL navigation", () => {
     await settled();
     expect(router.state.location.pathname).toBe("/issues/issue-1");
     expect(router.state.location.search).toEqual(search);
-    expect(dom.window.document.activeElement?.id).toBe("issue-detail-title");
+    expect(dom.window.document.activeElement).toBe(
+      dom.window.document.querySelector('[role="dialog"]'),
+    );
     await act(async () =>
       (
         dom.window.document.querySelector('[aria-label="Issue詳細を閉じる"]') as HTMLButtonElement

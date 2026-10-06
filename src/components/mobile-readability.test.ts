@@ -304,13 +304,13 @@ describe("mobile readability baseline (<=767px)", () => {
     expect(mobileValue(".setting-row > select", "max-width")).toBe("55%");
   });
 
-  it("[境界値] 詳細アクションは保存状態を別行にし、3ボタンが320pxに収まる", () => {
-    expect(mobileValue(".detail-save-status", "flex")).toBe("0 0 100%");
+  it("[境界値] 詳細アクションは保存状態をボタン間で縮ませて1行にし、2ボタンが320pxに収まる", () => {
+    expect(mobileValue(".detail-save-status", "flex")).toBe("1 1 0");
+    expect(mobileValue(".detail-save-status", "min-width")).toBe("0");
     expect(mobileValue(".detail-save-status", "margin-right")).toBe("0");
     expect(mobileValue(".detail-save-status:empty", "display")).toBe("none");
     // 320px - 左右padding 30px = 290px。ボタン最小幅の合計 + gap が収まること。
     const labelEm: Record<string, number> = {
-      閉じる: 3,
       アーカイブ: 5,
       ゴミ箱へ: 4,
     };
@@ -320,7 +320,7 @@ describe("mobile readability baseline (<=767px)", () => {
     const gap = 8;
     const total =
       Object.values(labelEm).reduce((sum, chars) => sum + chars * fontSize + padding * 2, 0) +
-      gap * 2;
+      gap * (Object.keys(labelEm).length - 1);
     expect(total).toBeLessThanOrEqual(320 - 30);
   });
 });

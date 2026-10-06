@@ -311,7 +311,9 @@ describe("AC-7 language", () => {
 
   it("[代表値] English は disabled の「English（準備中）」で、保存済み locale は選択値のまま", async () => {
     await renderApp("/settings", "en");
-    const select = doc().querySelector('select[aria-label="表示言語"]') as HTMLSelectElement;
+    const select = doc().querySelector(
+      'select[aria-labelledby="setting-language-label"]',
+    ) as HTMLSelectElement;
     const english = [...select.options].find((option) => option.value === "en")!;
     expect(english.textContent).toBe("English（準備中）");
     expect(english.disabled).toBe(true);
@@ -360,7 +362,9 @@ describe("AC-11 single-key shortcut setting", () => {
 
   it("[代表値] SELECT にフォーカスがあると c は Composer を開かない", async () => {
     await renderApp("/settings");
-    const select = doc().querySelector('select[aria-label="表示言語"]') as HTMLSelectElement;
+    const select = doc().querySelector(
+      'select[aria-labelledby="setting-language-label"]',
+    ) as HTMLSelectElement;
     await act(async () => {
       select.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "c", bubbles: true }));
     });

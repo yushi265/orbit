@@ -122,9 +122,12 @@
 - `html lang` は翻訳が入るまで `ja` に固定。保存済みの `locale: "en"` はサーバーの値を変えずに残す。
 - Cycle の完了 API は次の Cycle が無ければ作ってから繰り越すので、「次の Cycle が無い」場合の分岐は UI に不要。繰越の件数は category が `unstarted` / `started` の Issue（参照: `src/server/store.ts` の `closeCycle`）。
 
+- WCAG の残り（FIX-a11y-aa-remaining）: 入力欄の枠線は `--orbit-input-border`（ダークは `:root[data-theme="dark"] <sel>:not(:focus)` で上書き）。`document.title` は `OrbitApp` の effect で「<画面名> — Orbit」（`src/routes/**` の `head()` は使わない）。Settings の select は見出しの `<strong id="setting-*-label">` を `aria-labelledby` で参照する。Inbox の切替は `aria-pressed` のトグル、Cycle のタブは roving tabindex の tab パターン。Issue 一覧は div のまま `role="table"` などを付けている。
+- 罠: `styles.css` の末尾にトップレベルのルールを足すと、前にある `@media (max-width: 767px)` 内の同じ詳細度のルール（モバイルの 44px など）を後勝ちで上書きする。デスクトップだけの値は `@media (min-width: 768px)` に入れる（`a11y-contrast.test.ts` に検出テストあり）。
+
 ## 最終更新
 
-FIX-ux-a11y-high / 2026-10-06
+FIX-ux-a11y-high / FIX-a11y-aa-remaining / 2026-10-06
 
 FEAT-project-manual-order / FEAT-issue-hierarchy-list / FIX-mobile-nav-filter-sheet / FIX-snapshot-growth / FIX-mobile-workspace-ux / FIX-main-review / FEAT-review-followup修正 / FIX-rollback-compatibility / 2026-10-05
 

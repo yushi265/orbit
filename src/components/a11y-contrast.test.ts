@@ -7,7 +7,7 @@ const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").repla
   "",
 );
 
-type Rule = { selectors: string[]; decls: Map<string, string> };
+type Rule = { selectors: string[]; decls: Map<string, string>; start: number };
 
 // at-rule (@media 等) の中身は読み飛ばし、トップレベルのルールだけを順序つきで取り出す。
 function topLevelRules(source: string): Rule[] {
@@ -16,6 +16,7 @@ function topLevelRules(source: string): Rule[] {
   while (i < source.length) {
     const open = source.indexOf("{", i);
     if (open < 0) break;
+    const start = i;
     const prelude = source.slice(i, open).trim();
     let depth = 1;
     let j = open + 1;
@@ -33,7 +34,7 @@ function topLevelRules(source: string): Rule[] {
       if (colon < 0) continue;
       decls.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
     }
-    rules.push({ selectors: prelude.split(",").map((s) => s.trim()), decls });
+    rules.push({ selectors: prelude.split(",").map((s) => s.trim()), decls, start });
   }
   return rules;
 }
@@ -203,5 +204,92 @@ describe("AC-12 並び替えボタン", () => {
     expect(rule.decls.get("display")).not.toBe("none");
     expect(parseInt(rule.decls.get("min-width") ?? "0", 10)).toBeGreaterThanOrEqual(24);
     expect(parseInt(rule.decls.get("min-height") ?? "0", 10)).toBeGreaterThanOrEqual(24);
+  });
+});
+
+describe("FIX-a11y-aa-remaining AC-5 入力欄の枠線", () => {
+  it("[境界値] --orbit-input-border がライトで #fff・#f7f8fa に、ダークで #19202b に 3:1 以上", () => {
+    const light = cssVar("--orbit-input-border");
+    const dark = cssVar("--orbit-input-border", ':root[data-theme="dark"]');
+    for (const bg of ["#ffffff", "#f7f8fa"]) expect(contrast(light, bg)).toBeGreaterThanOrEqual(3);
+    expect(contrast(dark, "#19202b")).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each([".text-input", ".filter-select", ".orbit-select-trigger", 'input[type="date"]'])(
+    "[代表値] %s の枠線が --orbit-input-border を参照する（ライト・ダーク）",
+    (sel) => {
+      expect(lastDecl(sel, "border-color")).toContain("var(--orbit-input-border)");
+      expect(lastDecl(`:root[data-theme="dark"] ${sel}:not(:focus)`, "border-color")).toContain(
+        "var(--orbit-input-border)",
+      );
+    },
+  );
+});
+
+describe("FIX-a11y-aa-remaining AC-6 OrbitSelect の active 候補", () => {
+  it("[境界値] .orbit-select-option.active の outline 色が背景に対して 3:1 以上", () => {
+    const outline = lastDecl(".orbit-select-option.active", "outline");
+    expect(outline, "active outline").toContain("var(--orbit-focus)");
+    const focus = cssVar("--orbit-focus");
+    for (const bg of ["#ffffff", "#f7f8fa"]) expect(contrast(focus, bg)).toBeGreaterThanOrEqual(3);
+    const darkFocus = cssVar("--orbit-focus", ':root[data-theme="dark"]');
+    for (const bg of [
+      cssVar("--orbit-surface", ':root[data-theme="dark"]'),
+      cssVar("--orbit-surface-raised", ':root[data-theme="dark"]'),
+    ])
+      expect(contrast(darkFocus, bg)).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("FIX-a11y-aa-remaining AC-7 カレンダーの選択日", () => {
+  it('[代表値] .orbit-calendar-grid button[aria-pressed="true"] の背景が --orbit-accent-solid', () => {
+    const bg = lastDecl('.orbit-calendar-grid button[aria-pressed="true"]', "background");
+    expect(bg).toContain("var(--orbit-accent-solid");
+  });
+});
+
+describe("FIX-a11y-aa-remaining AC-8 scroll-padding-bottom", () => {
+  it("[代表値] 767px 以下のメディアクエリで下部ナビ分の scroll-padding-bottom がある", () => {
+    const m =
+      /@media \(max-width: 767px\)\s*\{\s*html\s*\{[^}]*scroll-padding-bottom:\s*([^;}]+)/.exec(
+        css,
+      );
+    expect(m, "scroll-padding-bottom in 767px block").not.toBeNull();
+    expect(m![1]).toContain("env(safe-area-inset-bottom)");
+    expect(parseInt(/(\d+)px/.exec(m![1])![1], 10)).toBeGreaterThanOrEqual(70);
+  });
+});
+
+describe("FIX-a11y-aa-remaining AC-13 text-button / skip-link", () => {
+  it("[境界値] デスクトップ（768px 以上）の .text-button の min-height が 24px 以上", () => {
+    const desktop = css.match(
+      /@media \(min-width: 768px\) \{\s*\.text-button \{[^}]*min-height: (\d+)px/,
+    );
+    expect(desktop, "768px 以上の .text-button min-height").not.toBeNull();
+    expect(Number(desktop![1])).toBeGreaterThanOrEqual(24);
+  });
+
+  it("[代表値] モバイルの .text-button の 44px が後続のメディアクエリ外のルールで上書きされない", () => {
+    const mobile = css.indexOf(".text-button { min-width: 44px; min-height: 44px; }");
+    expect(mobile).toBeGreaterThan(-1);
+    const later = rules.filter(
+      (r) => r.selectors.includes(".text-button") && r.decls.has("min-height") && r.start > mobile,
+    );
+    expect(later).toEqual([]);
+  });
+
+  it("[代表値] .skip-link はフォーカスまで見えず、フォーカス時に左上へ高 z-index で表示される", () => {
+    expect(lastDecl(".skip-link", "position")).toMatch(/absolute|fixed/);
+    expect(lastDecl(".skip-link", "transform")).toContain("translateY(-");
+    expect(lastDecl(".skip-link:focus", "transform")).toBe("none");
+    expect(parseInt(lastDecl(".skip-link:focus", "z-index") ?? "0", 10)).toBeGreaterThanOrEqual(
+      100,
+    );
+  });
+
+  it("[境界値] .skip-link の文字色と背景が不透明で 4.5:1 以上", () => {
+    const fg = lastDecl(".skip-link", "color")!;
+    const bg = lastDecl(".skip-link", "background")!;
+    expect(contrast(fg, bg)).toBeGreaterThanOrEqual(4.5);
   });
 });

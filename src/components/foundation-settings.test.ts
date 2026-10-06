@@ -58,8 +58,8 @@ describe("Phase 1 Settings UI contract", () => {
       createElement(SettingsView, { ...settingsProps, workflowStates }),
     );
 
-    expect(markup).toContain('aria-label="タイムゾーン"');
-    expect(markup).toContain('aria-label="表示言語"');
+    expect(markup).toContain('aria-labelledby="setting-timezone-label"');
+    expect(markup).toContain('aria-labelledby="setting-language-label"');
     expect(markup).not.toContain("Estimate");
     expect(markup).toContain('aria-label="Workflow名"');
     expect(markup).toContain("Todo");

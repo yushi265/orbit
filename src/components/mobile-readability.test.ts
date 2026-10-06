@@ -209,7 +209,9 @@ describe("mobile readability baseline (<=767px)", () => {
 
   it("[代表値] 行チェックボックスはlabelでタップ領域を広げる", () => {
     const app = readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
-    expect(app.match(/<label className="check-cell">/g)).toHaveLength(2);
+    expect(app.match(/<label className="check-cell" role="(?:cell|columnheader)">/g)).toHaveLength(
+      2,
+    );
     expect(app).not.toContain('<span className="check-cell">');
   });
 

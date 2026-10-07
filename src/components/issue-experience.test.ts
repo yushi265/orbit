@@ -1,19 +1,12 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "../routeTree.gen";
-import { queryClient } from "../lib/query";
-import { IssuesView, OrbitApp } from "./OrbitApp";
+import { IssuesView } from "./OrbitApp";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 const issuesViewProps = (overrides: Record<string, unknown> = {}) => ({
   issues: [],
@@ -64,7 +57,7 @@ const renderIssues = (overrides: Record<string, unknown> = {}) =>
 describe("Issue experience UI contract", () => {
   describe("colorThemeの導線", () => {
     let dom: JSDOM;
-    let root: Root;
+    let app: RenderedApp | undefined;
     let patches: Array<Record<string, unknown>>;
     let failPatch: boolean;
 
@@ -91,15 +84,14 @@ describe("Issue experience UI contract", () => {
         });
       }
       vi.stubGlobal("window", dom.window);
+      vi.stubGlobal("self", dom.window);
+      vi.stubGlobal("scrollTo", vi.fn());
       vi.stubGlobal("document", dom.window.document);
       vi.stubGlobal("navigator", dom.window.navigator);
       vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
       vi.stubGlobal("Node", dom.window.Node);
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-      root = createRoot(dom.window.document.getElementById("root")!);
-      queryClient.clear();
       const boot = reviewBootstrap();
-      queryClient.setQueryData(["bootstrap"], boot);
       patches = [];
       failPatch = false;
       const json = (payload: unknown, status = 200) =>
@@ -126,8 +118,8 @@ describe("Issue experience UI contract", () => {
       );
     });
     afterEach(async () => {
-      await act(async () => root.unmount());
-      queryClient.clear();
+      await app?.unmount();
+      app = undefined;
       dom.window.close();
       vi.useRealTimers();
       vi.unstubAllGlobals();
@@ -138,7 +130,10 @@ describe("Issue experience UI contract", () => {
         'select[aria-labelledby="setting-color-theme-label"]',
       ) as HTMLSelectElement;
     async function changeColorTheme(value: string) {
-      await act(async () => root.render(createElement(OrbitApp, { initialSection: "settings" })));
+      app = await renderApp({
+        url: "/settings",
+        container: dom.window.document.getElementById("root")!,
+      });
       await act(async () => vi.advanceTimersByTimeAsync(0));
       Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!.call(
         select(),

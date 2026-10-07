@@ -1,22 +1,16 @@
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicRunViewModel } from "../shared/view-models";
-import { OrbitApp, RunOverlay, ToastRegion, useToast } from "./OrbitApp";
+import { RunOverlay, ToastRegion, useToast } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap } from "./review-ui.test-fixtures";
 
 let dom: JSDOM;
 let root: Root;
+let app: RenderedApp | undefined;
 const doc = () => dom.window.document;
 
 beforeEach(() => {
@@ -52,6 +46,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await app?.unmount();
+  app = undefined;
   await act(async () => root.unmount());
   queryClient.clear();
   dom.window.close();
@@ -260,40 +256,20 @@ describe("AC-4 toast", () => {
 });
 
 const bootstrap = reviewBootstrap();
-function makeRouter(entry: string) {
-  const base = createRootRoute({ component: Outlet });
-  const route = (path: string, section: "home" | "settings") =>
-    createRoute({
-      getParentRoute: () => base,
-      path,
-      component: () => createElement(OrbitApp, { initialSection: section }),
-    });
-  return createRouter({
-    routeTree: base.addChildren([route("/", "home"), route("/settings", "settings")]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
-}
-async function renderApp(entry: string, locale: "ja" | "en" = "ja") {
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], {
-    ...bootstrap,
-    preferences: { ...bootstrap.preferences, locale },
-  });
+async function openApp(entry: string, locale: "ja" | "en" = "ja") {
+  const payload = { ...bootstrap, preferences: { ...bootstrap.preferences, locale } };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string) => {
-      const body = path === "/api/v1/bootstrap" ? bootstrap : { run: null };
+      const body = path === "/api/v1/bootstrap" ? payload : { run: null };
       return new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" },
       });
     }),
   );
-  const router = makeRouter(entry);
-  await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
-  });
+  const container = doc().createElement("div");
+  doc().body.append(container);
+  app = await renderApp({ url: entry, container });
   await advance(0);
 }
 function pressKey(key: string) {
@@ -304,13 +280,13 @@ describe("AC-7 language", () => {
   it.each(["ja", "en"] as const)(
     "[同値分割] preferences.locale=%s でも html lang は ja",
     async (locale) => {
-      await renderApp("/", locale);
+      await openApp("/", locale);
       expect(doc().documentElement.lang).toBe("ja");
     },
   );
 
   it("[代表値] English は disabled の「English（準備中）」で、保存済み locale は選択値のまま", async () => {
-    await renderApp("/settings", "en");
+    await openApp("/settings", "en");
     const select = doc().querySelector(
       'select[aria-labelledby="setting-language-label"]',
     ) as HTMLSelectElement;
@@ -326,7 +302,7 @@ describe("AC-11 single-key shortcut setting", () => {
     doc().querySelector('input[aria-label="1文字ショートカット"]') as HTMLInputElement;
 
   it("[代表値] 初期値は ON で、c で Composer が開く", async () => {
-    await renderApp("/settings");
+    await openApp("/settings");
     expect(toggle().checked).toBe(true);
     await act(async () => pressKey("c"));
     expect(doc().querySelector("#issue-composer-title")).not.toBeNull();
@@ -334,14 +310,14 @@ describe("AC-11 single-key shortcut setting", () => {
 
   it("[代表値] localStorage が off なら OFF 表示で c は Composer を開かない", async () => {
     dom.window.localStorage.setItem("orbit.singleKeyShortcuts", "off");
-    await renderApp("/settings");
+    await openApp("/settings");
     expect(toggle().checked).toBe(false);
     await act(async () => pressKey("c"));
     expect(doc().querySelector("#issue-composer-title")).toBeNull();
   });
 
   it("[代表値] トグルを OFF にすると off を保存し c が効かず、修飾キー付きは効く。ON に戻すと復帰する", async () => {
-    await renderApp("/settings");
+    await openApp("/settings");
     await act(async () => toggle().click());
     expect(dom.window.localStorage.getItem("orbit.singleKeyShortcuts")).toBe("off");
     expect(toggle().checked).toBe(false);
@@ -361,7 +337,7 @@ describe("AC-11 single-key shortcut setting", () => {
   });
 
   it("[代表値] SELECT にフォーカスがあると c は Composer を開かない", async () => {
-    await renderApp("/settings");
+    await openApp("/settings");
     const select = doc().querySelector(
       'select[aria-labelledby="setting-language-label"]',
     ) as HTMLSelectElement;
@@ -374,7 +350,7 @@ describe("AC-11 single-key shortcut setting", () => {
   it.each(["combobox", "listbox"])(
     "[代表値] role=%s にフォーカスがあると c は Composer を開かない",
     async (role) => {
-      await renderApp("/settings");
+      await openApp("/settings");
       const control = doc().createElement("div");
       control.setAttribute("role", role);
       control.tabIndex = 0;
@@ -395,7 +371,7 @@ describe("AC-11 single-key shortcut setting", () => {
     vi.spyOn(dom.window.Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("denied");
     });
-    await renderApp("/settings");
+    await openApp("/settings");
     expect(toggle().checked).toBe(true);
     await act(async () => pressKey("c"));
     expect(doc().querySelector("#issue-composer-title")).not.toBeNull();

@@ -1,13 +1,5 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -16,13 +8,14 @@ import type {
   IssueViewModel,
   WorkflowStateViewModel,
 } from "../shared/view-models";
-import { CyclesView, OrbitApp } from "./OrbitApp";
+import { CyclesView } from "./OrbitApp";
 import { queryClient } from "../lib/query";
-import { normalizeIssueSearch } from "../lib/url-state/issues";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 let dom: JSDOM;
 let root: Root;
+let app: RenderedApp | undefined;
 const doc = () => dom.window.document;
 
 beforeEach(() => {
@@ -59,6 +52,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await app?.unmount();
+  app = undefined;
   await act(async () => root.unmount());
   queryClient.clear();
   dom.window.close();
@@ -393,46 +388,6 @@ type Call = {
 let calls: Call[];
 let payload: BootstrapViewModel;
 
-function makeRouter(entry: string) {
-  const base = createRootRoute({ component: Outlet });
-  const issues = createRoute({
-    getParentRoute: () => base,
-    path: "/issues",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueSearch: issues.useSearch(),
-      }),
-  });
-  const detail = createRoute({
-    getParentRoute: () => base,
-    path: "/issues/$issueId",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueId: detail.useParams().issueId,
-        issueSearch: detail.useSearch(),
-      }),
-  });
-  const cycles = createRoute({
-    getParentRoute: () => base,
-    path: "/cycles",
-    component: () => createElement(OrbitApp, { initialSection: "cycles" }),
-  });
-  const home = createRoute({
-    getParentRoute: () => base,
-    path: "/",
-    component: () => createElement(OrbitApp, { initialSection: "home" }),
-  });
-  return createRouter({
-    routeTree: base.addChildren([home, issues, detail, cycles]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
-}
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -440,9 +395,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function renderApp(entry: string, options: { failOn?: (call: Call) => boolean } = {}) {
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], payload);
+async function openApp(entry: string, options: { failOn?: (call: Call) => boolean } = {}) {
   calls = [];
   vi.stubGlobal(
     "fetch",
@@ -484,13 +437,10 @@ async function renderApp(entry: string, options: { failOn?: (call: Call) => bool
       return json({});
     }),
   );
-  const router = makeRouter(entry);
-  await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
-  });
+  const container = doc().createElement("div");
+  doc().body.append(container);
+  app = await renderApp({ url: entry, container });
   await settle();
-  return router;
 }
 const mutations = () => calls.filter((call) => call.method !== "GET");
 function setSelect(select: HTMLSelectElement, value: string) {
@@ -518,7 +468,7 @@ beforeEach(() => {
 
 describe("AC-3 bulk Label confirm", () => {
   async function openBulk(field: string, value: string) {
-    await renderApp("/issues");
+    await openApp("/issues");
     const selectAll = doc().querySelector('input[aria-label="全選択"]') as HTMLInputElement;
     await act(async () => selectAll.click());
     await act(async () => setSelect(selectByLabel("一括更新属性"), field));
@@ -529,7 +479,7 @@ describe("AC-3 bulk Label confirm", () => {
     [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === label)!;
 
   it("[代表値] 一括更新の属性に「Label（置き換え）」の表記がある", async () => {
-    await renderApp("/issues");
+    await openApp("/issues");
     await act(async () =>
       (doc().querySelector('input[aria-label="全選択"]') as HTMLInputElement).click(),
     );
@@ -590,7 +540,7 @@ describe("AC-3 bulk Label confirm", () => {
 
 describe("AC-2 Cycle confirm in the app (failure toast)", () => {
   it("[異常系] 完了 API が失敗したらダイアログを閉じ、エラートーストを出す", async () => {
-    await renderApp("/cycles", {
+    await openApp("/cycles", {
       failOn: (call) => call.method === "POST" && call.path === "/api/v1/cycles/cycle-1",
     });
     await act(async () => buttonByText("Cycleを完了")!.click());
@@ -605,7 +555,7 @@ describe("AC-2 Cycle confirm in the app (failure toast)", () => {
   });
 
   it("[代表値] 確定で完了 API を 1 回だけ呼ぶ", async () => {
-    await renderApp("/cycles");
+    await openApp("/cycles");
     await act(async () => buttonByText("Cycleを完了")!.click());
     expect(mutations()).toHaveLength(0);
     await act(async () =>
@@ -627,13 +577,14 @@ describe("AC-5 open issue wiring", () => {
         title: "Open me",
       }),
     ];
-    await renderApp("/cycles");
+    await openApp("/cycles");
     const title = [...doc().querySelectorAll(".cycle-issue-row button")].find(
       (button) => button.textContent === "Open me",
     ) as HTMLButtonElement;
     await act(async () => title.click());
     await settle();
     expect(doc().querySelector("#issue-detail-title")).not.toBeNull();
+    expect(app!.router.state.location.pathname).toBe("/issues/i1");
     expect(
       calls.some((call) => call.method === "GET" && call.path.includes("/api/v1/issues/i1")),
     ).toBe(true);
@@ -644,7 +595,7 @@ describe("AC-6 Cycle select", () => {
   const composerCycle = () => selectByLabel("新しいIssueのCycle");
   const detailCycle = () => selectByLabel("IssueのCycle");
   async function openComposer() {
-    await renderApp("/issues");
+    await openApp("/issues");
     await act(async () =>
       doc().body.dispatchEvent(
         new dom.window.KeyboardEvent("keydown", { key: "c", bubbles: true }),
@@ -717,7 +668,7 @@ describe("AC-6 Cycle select", () => {
   });
 
   it("[代表値] 詳細で Cycle を変更すると PATCH に cycleId が入る", async () => {
-    await renderApp("/issues/i1");
+    await openApp("/issues/i1");
     await settle();
     expect(detailCycle().value).toBe("");
     await act(async () => setSelect(detailCycle(), "cycle-2"));
@@ -727,7 +678,7 @@ describe("AC-6 Cycle select", () => {
   });
 
   it("[同値分割] 詳細の選択肢に Completed は出ない", async () => {
-    await renderApp("/issues/i1");
+    await openApp("/issues/i1");
     await settle();
     expect(optionTexts(detailCycle())).toEqual([
       "なし",
@@ -738,7 +689,7 @@ describe("AC-6 Cycle select", () => {
 
   it("[同値分割] 現在値が Completed の Cycle のときはその 1 件だけ出る", async () => {
     payload.issues = [reviewIssue("i1", { statusId: "todo", cycleId: "cycle-0" })];
-    await renderApp("/issues/i1");
+    await openApp("/issues/i1");
     await settle();
     expect(detailCycle().value).toBe("cycle-0");
     expect(optionTexts(detailCycle())).toEqual([

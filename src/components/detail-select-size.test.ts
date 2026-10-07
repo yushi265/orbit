@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IssueDetailPanel } from "./OrbitApp";
+import { parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 vi.mock("@tanstack/react-router", async () => ({
@@ -16,46 +15,14 @@ vi.mock("@tanstack/react-router", async () => ({
 
 // --- minimal CSS model: cascade by !important, specificity, order -------------------------------
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-type CssRule = { selector: string; decl: Map<string, string>; media: string; order: number };
+type CssRule = { selector: string; decl: Map<string, string>; media: string | null; order: number };
 
-function parseCss(source: string): CssRule[] {
-  const css = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const out: CssRule[] = [];
-  let order = 0;
-  function block(text: string, media: string) {
-    let i = 0;
-    while (i < text.length) {
-      const open = text.indexOf("{", i);
-      if (open === -1) break;
-      const head = text.slice(i, open).trim();
-      let depth = 1;
-      let j = open + 1;
-      while (j < text.length && depth > 0) {
-        if (text[j] === "{") depth += 1;
-        if (text[j] === "}") depth -= 1;
-        j += 1;
-      }
-      const body = text.slice(open + 1, j - 1);
-      if (head.startsWith("@media")) {
-        block(body, head.slice(6).replace(/\s+/g, " ").trim());
-      } else if (!head.startsWith("@")) {
-        const decl = new Map<string, string>();
-        for (const part of body.split(";")) {
-          const k = part.indexOf(":");
-          if (k > 0) decl.set(part.slice(0, k).trim(), part.slice(k + 1).trim());
-        }
-        for (const selector of head.split(",")) {
-          out.push({ selector: selector.replace(/\s+/g, " ").trim(), decl, media, order: order++ });
-        }
-      }
-      i = j;
-    }
-  }
-  block(css, "");
-  return out;
-}
-const rules = parseCss(styles);
+// parseStyleRules（postcss）の結果を、selector 単位・ソース順の rule に展開する。
+const rules: CssRule[] = parseStyleRules()
+  .flatMap((rule) =>
+    rule.selectors.map((selector) => ({ selector, decl: rule.declarations, media: rule.media })),
+  )
+  .map((rule, order) => ({ ...rule, order }));
 
 function specificity(selector: string): number {
   const probe = selector;
@@ -67,7 +34,7 @@ function specificity(selector: string): number {
   return ids * 10000 + classes * 100 + types;
 }
 
-const PC = "";
+const PC = null;
 const MOBILE = "(max-width: 767px)";
 
 /** Resolved declaration for an element: !important, then specificity, then source order. */

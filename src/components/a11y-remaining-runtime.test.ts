@@ -1,23 +1,17 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CycleViewModel } from "../shared/view-models";
-import { CommandPalette, CyclesView, InboxView, OrbitApp, SearchView } from "./OrbitApp";
+import { CommandPalette, CyclesView, InboxView, SearchView } from "./OrbitApp";
 import { OrbitDatePicker } from "./orbit-date-picker";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 let dom: JSDOM;
 let root: Root;
+let app: RenderedApp | undefined;
 const doc = () => dom.window.document;
 
 beforeEach(() => {
@@ -51,6 +45,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await app?.unmount();
+  app = undefined;
   await act(async () => root.unmount());
   queryClient.clear();
   dom.window.close();
@@ -70,40 +66,9 @@ const key = (target: Element, name: string) =>
 // ---- アプリ全体（実 Router） ----
 const issueA = reviewIssue("issue-1", { title: "Alpha", cycleId: "cycle-1" });
 type Bootstrap = ReturnType<typeof reviewBootstrap>;
-function makeRouter(entry: string) {
-  const base = createRootRoute({ component: Outlet });
-  const sections = [
-    ["/", "home"],
-    ["/issues", "issues"],
-    ["/cycles", "cycles"],
-    ["/projects", "projects"],
-    ["/views", "views"],
-    ["/search", "search"],
-    ["/inbox", "inbox"],
-    ["/settings", "settings"],
-  ] as const;
-  const routes = sections.map(([path, section]) =>
-    createRoute({
-      getParentRoute: () => base,
-      path,
-      component: () => createElement(OrbitApp, { initialSection: section }),
-    }),
-  );
-  const detail = createRoute({
-    getParentRoute: () => base,
-    path: "/issues/$issueId",
-    component: () =>
-      createElement(OrbitApp, { initialSection: "issues", issueId: detail.useParams().issueId }),
-  });
-  return createRouter({
-    routeTree: base.addChildren([...routes, detail]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
-}
-async function renderApp(entry: string, bootstrap: Bootstrap = reviewBootstrap([issueA])) {
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], bootstrap);
+async function openApp(entry: string, bootstrap: Bootstrap = reviewBootstrap([issueA])) {
+  await app?.unmount();
+  app = undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string) => {
@@ -118,11 +83,9 @@ async function renderApp(entry: string, bootstrap: Bootstrap = reviewBootstrap([
       });
     }),
   );
-  const router = makeRouter(entry);
-  await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
-  });
+  const container = doc().createElement("div");
+  doc().body.append(container);
+  app = await renderApp({ url: entry, container });
   await settle();
 }
 
@@ -133,7 +96,7 @@ describe("AC-1 Settings select の名前", () => {
     ["Timezone", 2],
     ["Language", 3],
   ])("[代表値] %s の select は見出しを aria-labelledby で参照する", async (heading, index) => {
-    await renderApp("/settings");
+    await openApp("/settings");
     const select = all(".setting-row select")[index];
     const ids = (select.getAttribute("aria-labelledby") ?? "").split(" ").filter(Boolean);
     expect(ids.length).toBeGreaterThan(0);
@@ -327,7 +290,7 @@ describe("AC-8 カレンダーの focusout", () => {
 
 describe("AC-9 名前", () => {
   it("[代表値] Issue 絞り込み入力に名前がある", async () => {
-    await renderApp("/issues");
+    await openApp("/issues");
     const input = one("#issues-filter-input");
     expect(input.getAttribute("aria-label") || input.getAttribute("aria-labelledby")).toBeTruthy();
   });
@@ -353,7 +316,7 @@ describe("AC-9 名前", () => {
 
 describe("AC-10 ボタン名・優先度", () => {
   it("[代表値] 「×」だけの button は全て aria-label を持つ（Composer・Modal・メニュー）", async () => {
-    await renderApp("/issues");
+    await openApp("/issues");
     await act(async () => {
       doc().body.dispatchEvent(
         new dom.window.KeyboardEvent("keydown", { key: "c", bubbles: true }),
@@ -365,7 +328,7 @@ describe("AC-10 ボタン名・優先度", () => {
     for (const b of bare) expect(b.getAttribute("aria-label")).toBeTruthy();
   });
   it("[代表値] Modal の × にも aria-label がある", async () => {
-    await renderApp("/issues");
+    await openApp("/issues");
     await act(async () => {
       doc().body.dispatchEvent(
         new dom.window.KeyboardEvent("keydown", { key: "?", bubbles: true }),
@@ -380,7 +343,7 @@ describe("AC-10 ボタン名・優先度", () => {
     for (const b of bare) expect(b.getAttribute("aria-label")).toBe("閉じる");
   });
   it("[同値分割] 未読 0 件 → 「通知」、未読 3 件 → 「通知（未読3件）」", async () => {
-    await renderApp("/");
+    await openApp("/");
     expect(one(".topbar-actions .icon-button").getAttribute("aria-label")).toBe("通知");
     const unread = (i: number) => ({
       id: `n${i}`,
@@ -394,9 +357,7 @@ describe("AC-10 ボタン名・優先度", () => {
       deletedAt: null,
       createdAt: 1,
     });
-    await root.unmount();
-    root = createRoot(doc().getElementById("root")!);
-    await renderApp("/", {
+    await openApp("/", {
       ...reviewBootstrap([issueA]),
       notifications: [unread(1), unread(2), unread(3)],
     });
@@ -421,29 +382,29 @@ describe("AC-11 document.title", () => {
     ["/inbox", "Inbox"],
     ["/settings", "Settings"],
   ])("[同値分割] %s の title は「%s — Orbit」", async (path, label) => {
-    await renderApp(path);
+    await openApp(path);
     expect(doc().title).toBe(`${label} — Orbit`);
   });
   it("[代表値] Issue 詳細は「<識別子> <タイトル> — Orbit」", async () => {
-    await renderApp("/issues/issue-1");
+    await openApp("/issues/issue-1");
     expect(doc().title).toBe(`${issueA.identifier} ${issueA.title} — Orbit`);
   });
   it("[異常系] 一覧に無い Issue の詳細は Issues — Orbit", async () => {
-    await renderApp("/issues/unknown");
+    await openApp("/issues/unknown");
     expect(doc().title).toBe("Issues — Orbit");
   });
 });
 
 describe("AC-12 非ボタン要素・NavItem", () => {
   it("[代表値] 「OU」とワークスペース切替は button ではない", async () => {
-    await renderApp("/");
+    await openApp("/");
     const ou = all(".avatar");
     expect(ou.length).toBeGreaterThanOrEqual(2);
     for (const el of ou) expect(el.tagName).not.toBe("BUTTON");
     expect(one(".workspace-switcher").tagName).not.toBe("BUTTON");
   });
   it("[代表値] NavItem のアイコン記号は aria-hidden で名前に含まれない", async () => {
-    await renderApp("/");
+    await openApp("/");
     const icons = all(".nav-item .nav-icon");
     expect(icons.length).toBeGreaterThan(0);
     for (const icon of icons) expect(icon.getAttribute("aria-hidden")).toBe("true");
@@ -452,7 +413,7 @@ describe("AC-12 非ボタン要素・NavItem", () => {
 
 describe("AC-13 table roles・スキップリンク", () => {
   it("[代表値] List 表示に table / row / columnheader / cell が付く", async () => {
-    await renderApp("/issues");
+    await openApp("/issues");
     const table = one(".issue-table");
     expect(table.getAttribute("role")).toBe("table");
     const rows = all('.issue-table [role="row"]');
@@ -462,7 +423,7 @@ describe("AC-13 table roles・スキップリンク", () => {
     expect(rows[1].querySelector('[role="columnheader"]')).toBeNull();
   });
   it("[代表値] 最初の Tab 可能要素が a.skip-link で、main#main-content がある", async () => {
-    await renderApp("/");
+    await openApp("/");
     const first = doc().querySelector(
       'a[href], button:not([disabled]), input:not([disabled]), select, [tabindex="0"]',
     );

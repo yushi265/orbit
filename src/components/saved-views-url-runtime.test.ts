@@ -1,21 +1,10 @@
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { normalizeViewSearch } from "./saved-views";
-import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 const data = reviewBootstrap([reviewIssue("high"), reviewIssue("low", { priority: "low" })]);
 data.views = [
   {
@@ -35,21 +24,6 @@ data.views = [
     layout: {},
   },
 ];
-function makeRouter(entry: string) {
-  const base = createRootRoute({ component: Outlet });
-  const views = createRoute({
-    getParentRoute: () => base,
-    path: "/views",
-    validateSearch: normalizeViewSearch,
-    component: () =>
-      createElement(OrbitApp, { initialSection: "views", viewSearch: views.useSearch() }),
-  });
-  return createRouter({
-    routeTree: base.addChildren([views]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
-}
 beforeEach(() => {
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/views" });
   Object.defineProperty(dom.window, "matchMedia", {
@@ -70,9 +44,6 @@ beforeEach(() => {
     IS_REACT_ACT_ENVIRONMENT: true,
   }))
     vi.stubGlobal(name, value);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], data);
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -85,31 +56,28 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.unstubAllGlobals();
 });
-async function render(router: ReturnType<typeof makeRouter>) {
-  await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
-  });
+async function render(url: string) {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await act(async () => new Promise((resolve) => setTimeout(resolve, 5)));
+  return app;
 }
 describe("Saved View URL", () => {
   it("[URL/再読込] selecting updates the URL and a fresh router restores the filtered workspace", async () => {
-    const router = makeRouter("/views");
-    await render(router);
+    const { router } = await render("/views");
     await act(async () => {
       (dom.window.document.querySelector(".saved-view-select") as HTMLButtonElement).click();
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
     expect(router.state.location.search).toEqual({ view: "high-view" });
     const href = router.state.location.href;
-    await act(async () => root.unmount());
-    root = createRoot(dom.window.document.getElementById("root")!);
-    await render(makeRouter(href));
+    await app!.unmount();
+    app = undefined;
+    await render(href);
     expect(dom.window.document.querySelector('[aria-label="HighのIssue"]')?.textContent).toContain(
       "TASK-high",
     );

@@ -1,4 +1,4 @@
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
@@ -7,15 +7,10 @@ import type {
   IssueViewModel as Issue,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
-import { CyclesView, OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
+import { CyclesView } from "./OrbitApp";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 const MOBILE_HINT = "↑ / ↓ ボタンで並び替えます。";
 const DESKTOP_HINT = "ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。";
@@ -69,7 +64,7 @@ describe("touch reorder CSS contract", () => {
 
 describe("Issue list touch reorder", () => {
   let dom: JSDOM;
-  let root: Root;
+  let app: RenderedApp | undefined;
   let data: ReturnType<typeof reviewBootstrap>;
   let posts: Array<{
     body: Record<string, unknown>;
@@ -96,6 +91,8 @@ describe("Issue list touch reorder", () => {
       }),
     });
     vi.stubGlobal("window", dom.window);
+    vi.stubGlobal("self", dom.window);
+    vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal("document", dom.window.document);
     vi.stubGlobal("navigator", dom.window.navigator);
     vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
@@ -111,14 +108,11 @@ describe("Issue list touch reorder", () => {
         this.removeEventListener(name.replace(/^on/, ""), listener);
       },
     });
-    root = createRoot(dom.window.document.getElementById("root")!);
-    queryClient.clear();
     data = reviewBootstrap([
       reviewIssue("one", { identifier: "TASK-1", position: 0 }),
       reviewIssue("two", { identifier: "TASK-2", position: 1 }),
       reviewIssue("three", { identifier: "TASK-3", position: 2 }),
     ]);
-    queryClient.setQueryData(["bootstrap"], data);
     posts = [];
     patches = [];
     vi.stubGlobal(
@@ -143,22 +137,18 @@ describe("Issue list touch reorder", () => {
     );
   });
   afterEach(async () => {
-    await act(async () => root.unmount());
-    queryClient.clear();
+    await app?.unmount();
+    app = undefined;
     dom.window.close();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
   async function render(order: "manual" | "updated_desc" = "manual") {
-    await act(async () =>
-      root.render(
-        createElement(OrbitApp, {
-          initialSection: "issues",
-          issueSearch: { order, completed: true },
-        }),
-      ),
-    );
+    app = await renderApp({
+      url: `/issues?order=${order}&completed=true`,
+      container: dom.window.document.getElementById("root")!,
+    });
     await act(async () => vi.advanceTimersByTimeAsync(0));
   }
   function touch(id: string, dir: "上" | "下") {
@@ -229,7 +219,6 @@ describe("Issue list touch reorder", () => {
 
   it("[境界値] Issueが1件だけなら↑/↓の両方がdisabled", async () => {
     data = reviewBootstrap([reviewIssue("one", { identifier: "TASK-1", position: 0 })]);
-    queryClient.setQueryData(["bootstrap"], data);
     await render();
     expect(touch("1", "上")!.disabled).toBe(true);
     expect(touch("1", "下")!.disabled).toBe(true);
@@ -242,7 +231,6 @@ describe("Issue list touch reorder", () => {
       reviewIssue("three", { identifier: "TASK-3", position: 2, parentId: "one" }),
       reviewIssue("four", { identifier: "TASK-4", position: 3 }),
     ]);
-    queryClient.setQueryData(["bootstrap"], data);
     await render();
     // moveIssue は同じ親を持つ兄弟の間だけで動くため、表示行の位置ではなく兄弟内の位置で判定する
     expect(touch("1", "上")!.disabled).toBe(true);

@@ -1,22 +1,12 @@
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
 import { queryClient } from "../lib/query";
-import { normalizeIssueSearch, type IssueSearch } from "../lib/url-state/issues";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let unexpected: string[];
 let bootstrapResponse: (() => void) | undefined;
 let deferBootstrap = false;
@@ -27,40 +17,6 @@ const second = reviewIssue("issue-2", { title: "other", priority: "low", labelId
 const payload = reviewBootstrap([first, second]);
 function json(value: unknown) {
   return new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-}
-function makeRouter(entry: string) {
-  const base = createRootRoute({ component: Outlet });
-  const list = createRoute({
-    getParentRoute: () => base,
-    path: "/issues",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueSearch: list.useSearch(),
-      } as Parameters<typeof OrbitApp>[0] & { issueSearch: IssueSearch }),
-  });
-  const detail = createRoute({
-    getParentRoute: () => base,
-    path: "/issues/$issueId",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueId: detail.useParams().issueId,
-        issueSearch: detail.useSearch(),
-      } as Parameters<typeof OrbitApp>[0] & { issueSearch: IssueSearch }),
-  });
-  const home = createRoute({
-    getParentRoute: () => base,
-    path: "/",
-    component: () => createElement(OrbitApp, { initialSection: "home" }),
-  });
-  return createRouter({
-    routeTree: base.addChildren([list, detail, home]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
 }
 beforeEach(() => {
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/issues" });
@@ -89,8 +45,6 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   deferBootstrap = false;
   bootstrapResponse = undefined;
   unexpected = [];
@@ -132,20 +86,18 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.unstubAllGlobals();
   expect(unexpected).toEqual([]);
 });
 async function render(entry: string) {
-  const router = makeRouter(entry);
+  app = await renderApp({ url: entry, container: dom.window.document.getElementById("root")! });
   await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  return router;
+  return app.router;
 }
 async function settled() {
   await act(async () => {
@@ -241,22 +193,22 @@ describe("review Issues URL navigation", () => {
     expect(
       (dom.window.document.querySelector(".completed-toggle input") as HTMLInputElement).checked,
     ).toBe(false);
-    const navigate = vi.spyOn(router, "navigate");
     const priority = dom.window.document.querySelector(
       "#issues-priority-filter",
     ) as HTMLSelectElement;
+    const navigate = vi.spyOn(router, "navigate");
     await act(async () => {
       priority.value = "low";
       priority.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     });
     await settled();
     expect(router.state.location.search).toEqual({ priority: "low", completed: false });
-    expect(value("#issues-priority-filter")).toBe("low");
-    expect(dom.window.document.querySelector('button[data-issue-id="issue-1"]')).toBeNull();
-    expect(dom.window.document.querySelector('button[data-issue-id="issue-2"]')).not.toBeNull();
     expect(navigate).toHaveBeenLastCalledWith(
       expect.objectContaining({ replace: true, resetScroll: false }),
     );
+    expect(value("#issues-priority-filter")).toBe("low");
+    expect(dom.window.document.querySelector('button[data-issue-id="issue-1"]')).toBeNull();
+    expect(dom.window.document.querySelector('button[data-issue-id="issue-2"]')).not.toBeNull();
     expect(router.history.length).toBe(1);
     await act(async () =>
       dom.window.document.body.dispatchEvent(
@@ -324,6 +276,7 @@ describe("review Issues URL navigation", () => {
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({ replace: true, resetScroll: false }),
     );
+    expect(router.history.length).toBe(1);
     expect(router.state.location.search).toEqual({
       order: "manual",
       mode: "board",
@@ -334,13 +287,17 @@ describe("review Issues URL navigation", () => {
     const archived = { ...first, title: "古いArchived", archivedAt: 100 };
     const other = reviewIssue("issue-3", { title: "別のArchived", archivedAt: 100 });
     const latest = { ...archived, title: "最新Archived", version: 2 };
+    // renderApp は描画前に queryClient を clear するため、描画後に Cache を仕込んでから一覧へ遷移する。
+    const router = await render("/");
     queryClient.setQueryData(["bootstrap"], reviewBootstrap([second]));
     queryClient.setQueryData(["issues", "archived"], {
       items: [archived, other],
       cacheMarker: "keep",
     });
     queryClient.setQueryData(["issue-detail", first.id], reviewDetail(archived));
-    const router = await render("/issues?scope=archived&completed=true");
+    await act(async () =>
+      router.navigate({ to: "/issues", search: { scope: "archived", completed: true } }),
+    );
     await settled();
     const trigger = dom.window.document.querySelector(
       'button[data-issue-id="issue-1"]',

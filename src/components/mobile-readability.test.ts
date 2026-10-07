@@ -1,16 +1,9 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { declarationsFor, parseStyleRules, type StyleRule } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 // --- CSS: media × selector × property（parseStyleRules / declarationsFor）-------------------
 
@@ -89,7 +82,7 @@ function isHiddenOnMobile(selector: string): boolean {
 // --- DOM: Issue 一覧を OrbitApp 経由で描画する -------------------------------------------------
 
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 
 beforeEach(() => {
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/" });
@@ -108,8 +101,6 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   const json = (value: unknown) =>
     new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   vi.stubGlobal(
@@ -123,8 +114,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.unstubAllGlobals();
 });
@@ -177,7 +168,10 @@ describe("mobile readability baseline (<=767px)", () => {
   });
 
   it("[代表値] 行チェックボックスはlabelでタップ領域を広げる", async () => {
-    await act(async () => root.render(createElement(OrbitApp, { initialSection: "issues" })));
+    app = await renderApp({
+      url: "/issues",
+      container: dom.window.document.getElementById("root")!,
+    });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });

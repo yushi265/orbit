@@ -1,18 +1,15 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp, IssuesView } from "./OrbitApp";
+import { IssuesView } from "./OrbitApp";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { queryClient } from "../lib/query";
 import type { BootstrapViewModel, IssueViewModel } from "../shared/view-models";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let data: BootstrapViewModel;
 let requests: Array<{ path: string; init: RequestInit }>;
 let unexpected: string[];
@@ -28,8 +25,8 @@ function setValue(input: HTMLInputElement | HTMLTextAreaElement, value: string) 
     }),
   );
 }
-async function render(props: Parameters<typeof OrbitApp>[0] = { initialSection: "issues" }) {
-  await act(async () => root.render(createElement(OrbitApp, props)));
+async function render(url = "/issues") {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await act(async () => vi.advanceTimersByTimeAsync(0));
 }
 async function timezone(value: string) {
@@ -62,18 +59,18 @@ beforeEach(() => {
     },
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
   queryClient.clear();
   data = reviewBootstrap([
     reviewIssue("issue-1", { dueAt: Date.UTC(2026, 9, 2) }),
     reviewIssue("issue-2", { dueAt: Date.UTC(2026, 9, 3) }),
   ]);
-  queryClient.setQueryData(["bootstrap"], data);
   requests = [];
   unexpected = [];
   vi.stubGlobal(
@@ -103,8 +100,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -161,18 +158,17 @@ describe("Issue date inputs and current calendar", () => {
     "[表示日] browser=%sでもreadonly ListのUTC期限日を動かさない",
     async (browserTimezone) => {
       vi.stubEnv("TZ", browserTimezone);
-      await act(async () =>
-        root.render(readonlyList(reviewIssue("read-only", { dueAt: Date.UTC(2026, 9, 2) }))),
+      const markup = renderToStaticMarkup(
+        readonlyList(reviewIssue("read-only", { dueAt: Date.UTC(2026, 9, 2) })),
       );
-      expect(dom.window.document.querySelector(".issue-row .due-cell")?.textContent).toBe(
-        "10月2日",
-      );
+      expect(
+        new JSDOM(markup).window.document.querySelector(".issue-row .due-cell")?.textContent,
+      ).toBe("10月2日");
     },
   );
   it("[Home/設定変更] todayだけをOwnerTZで切り替え、同じ期限日は書き換えない", async () => {
     vi.setSystemTime(Date.UTC(2026, 9, 1, 15));
-    queryClient.setQueryData(["bootstrap"], data);
-    await render({ initialSection: "home" });
+    await render("/");
     const section = (label: string) =>
       [...dom.window.document.querySelectorAll(".home-issue-section")].find(
         (item) => item.querySelector(".eyebrow")?.textContent === label,
@@ -200,8 +196,6 @@ describe("Issue date inputs and current calendar", () => {
   });
   it("[入力/設定変更] ListとDetailはOwnerTZ変更後も旧non-midnightのUTC日を保持しUTC midnightを保存する", async () => {
     data.issues[0] = { ...data.issues[0], dueAt: Date.UTC(2026, 9, 2, 23, 59) };
-    queryClient.setQueryData(["bootstrap"], data);
-    queryClient.setQueryData(["issue-detail", "issue-1"], reviewDetail(data.issues[0]));
     await render();
     expect(dueInput().value).toBe("2026-10-02");
     await timezone("America/Los_Angeles");
@@ -209,12 +203,9 @@ describe("Issue date inputs and current calendar", () => {
     expect(data.issues[0].dueAt).toBe(Date.UTC(2026, 9, 2, 23, 59));
     await act(async () => setValue(dueInput(), "2026-10-03"));
     expect(dueInput().value).toBe("2026-10-03");
-    // A Route normally remounts the App; render a fresh instance for the Deep link.
-    await act(async () => {
-      root.unmount();
-      root = createRoot(dom.window.document.getElementById("root")!);
-    });
-    await render({ initialSection: "issues", issueId: "issue-1" });
+    // Deep link は新しい URL で描画し直す。
+    await app!.unmount();
+    await render("/issues/issue-1");
     const detailDue = dom.window.document.querySelector("#issue-due-date") as HTMLInputElement;
     expect(detailDue.value).toBe("2026-10-03");
     await act(async () => setValue(detailDue, "2026-10-04"));
@@ -251,7 +242,7 @@ describe("Issue date inputs and current calendar", () => {
     expect(JSON.parse(post.init.body as string).dueAt).toBe(Date.UTC(2026, 9, 4));
   });
   it("[日付境界/常時表示] 23:59から00:00を越えるとtoday Filterを再計算する", async () => {
-    await render({ initialSection: "issues", issueSearch: { due: "today", completed: true } });
+    await render("/issues?due=today&completed=true");
     expect(dom.window.document.querySelector('button[data-issue-id="issue-1"]')).not.toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(dom.window.document.querySelector('button[data-issue-id="issue-1"]')).toBeNull();
@@ -260,7 +251,7 @@ describe("Issue date inputs and current calendar", () => {
   it.each(["focus", "online"])(
     "[日付境界/復帰] %s復帰時にタイマーを待たずtodayを再計算する",
     async (event) => {
-      await render({ initialSection: "issues", issueSearch: { due: "today", completed: true } });
+      await render("/issues?due=today&completed=true");
       vi.setSystemTime(Date.UTC(2026, 9, 2, 15, 0, 20));
       await act(async () => dom.window.dispatchEvent(new dom.window.Event(event)));
       expect(dom.window.document.querySelector('button[data-issue-id="issue-1"]')).toBeNull();

@@ -1,24 +1,16 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { IssueDetailPanel, OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
+import { renderApp as mountApp, type RenderedApp } from "./render-app.test-fixtures";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 const rules = parseStyleRules();
 const MOBILE = "(max-width: 767px)";
 const issue = reviewIssue("issue-1", { title: "layout" });
 
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 const doc = () => dom.window.document as unknown as Document;
 
 beforeEach(() => {
@@ -50,8 +42,6 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(doc().getElementById("root")!);
-  queryClient.clear();
   const json = (value: unknown) =>
     new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   vi.stubGlobal(
@@ -66,8 +56,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.unstubAllGlobals();
 });
@@ -78,34 +68,15 @@ async function settled() {
   });
 }
 
-async function renderApp() {
-  await act(async () => root.render(createElement(OrbitApp, { initialSection: "home" })));
+async function renderApp(url: string) {
+  app = await mountApp({ url, container: doc().getElementById("root")! });
   await settled();
   await settled();
 }
 
 describe("mobile issue detail layout", () => {
   it("lets the issue detail title wrap without clipping", async () => {
-    await act(async () =>
-      root.render(
-        createElement(
-          QueryClientProvider,
-          { client: queryClient },
-          createElement(IssueDetailPanel, {
-            issueId: issue.id,
-            fallbackIssue: issue,
-            knownIssues: [issue],
-            projects: [],
-            onUpdate: () => undefined,
-            pending: false,
-            workflowStates: [],
-            onArchive: async () => undefined,
-            onClose: () => undefined,
-          }),
-        ),
-      ),
-    );
-    await settled();
+    await renderApp("/issues/issue-1");
 
     const title = doc().querySelector<HTMLTextAreaElement>("#issue-detail-title")!;
     expect(title).not.toBeNull();
@@ -122,7 +93,7 @@ describe("mobile issue detail layout", () => {
   });
 
   it("exposes Cycles in the mobile Menu sheet within a five-column bottom nav", async () => {
-    await renderApp();
+    await renderApp("/");
     expect(doc().querySelector(".mobile-nav")?.children).toHaveLength(5);
     expect(doc().querySelector(".mobile-menu-sheet")).toBeNull();
 

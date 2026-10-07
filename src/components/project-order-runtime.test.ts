@@ -1,43 +1,12 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap } from "./review-ui.test-fixtures";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
-const navigate = vi.hoisted(() => vi.fn());
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    children,
-    to,
-    onClick,
-    ...props
-  }: {
-    children?: ReactNode;
-    to?: string;
-    onClick?: (event: { preventDefault: () => void; defaultPrevented: boolean }) => void;
-    [key: string]: unknown;
-  }) =>
-    createElement(
-      "a",
-      {
-        ...props,
-        href: to,
-        onClick: (event: { preventDefault: () => void; defaultPrevented: boolean }) => {
-          onClick?.(event);
-          if (!event.defaultPrevented) navigate({ to });
-          event.preventDefault();
-        },
-      },
-      children,
-    ),
-  useRouter: () => ({ navigate }),
-}));
-
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let data: ReturnType<typeof reviewBootstrap>;
 let posts: Array<Record<string, unknown>>;
 let unexpected: string[];
@@ -59,7 +28,6 @@ function buildData(ids: string[]) {
 }
 beforeEach(() => {
   vi.useFakeTimers();
-  navigate.mockReset();
   dom = new JSDOM("<!doctype html><div id='root'></div>", {
     url: "https://orbit.example/projects",
   });
@@ -71,6 +39,8 @@ beforeEach(() => {
     }),
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
@@ -86,10 +56,7 @@ beforeEach(() => {
       this.removeEventListener(name.replace(/^on/, ""), listener);
     },
   });
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   data = buildData(["A", "B", "C"]);
-  queryClient.setQueryData(["bootstrap"], data);
   posts = [];
   unexpected = [];
   bootstrapGets = 0;
@@ -115,8 +82,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -126,7 +93,10 @@ async function settle() {
   await act(async () => vi.advanceTimersByTimeAsync(0));
 }
 async function render() {
-  await act(async () => root.render(createElement(OrbitApp, { initialSection: "projects" })));
+  app = await renderApp({
+    url: "/projects",
+    container: dom.window.document.getElementById("root")!,
+  });
   await settle();
 }
 const doc = () => dom.window.document;
@@ -149,7 +119,6 @@ function serverProjects(ids: string[]) {
 }
 function setProjects(ids: string[]) {
   data = buildData(ids);
-  queryClient.setQueryData(["bootstrap"], data);
 }
 function errorResponse(status: number, code: string, message: string) {
   return response({ error: { code, message, details: {}, requestId: "r" } }, status);
@@ -182,8 +151,8 @@ describe("Projects一覧の並べ替えボタン", () => {
     await render();
     expect(button("Project Aを上へ移動").disabled).toBe(true);
     expect(button("Project Aを下へ移動").disabled).toBe(true);
-    await act(async () => root.unmount());
-    root = createRoot(doc().getElementById("root")!);
+    await app!.unmount();
+    app = undefined;
     setProjects([]);
     await render();
     expect(doc().querySelectorAll("button.project-order-button")).toHaveLength(0);
@@ -267,10 +236,13 @@ describe("Projects一覧の並べ替えボタン", () => {
 
   it("[代表値] ボタンでは遷移せず、カード本体を押すと従来どおり遷移する（AC-10）", async () => {
     await render();
+    const historyLength = app!.router.history.length;
     await click(button("Project Bを下へ移動"));
-    expect(navigate).not.toHaveBeenCalled();
+    expect(app!.router.state.location.pathname).toBe("/projects");
+    expect(app!.router.history.length).toBe(historyLength);
     await click(doc().querySelector('a.project-card[data-project-id="B"]')!);
-    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(app!.router.state.location.pathname).toBe("/projects/B");
+    expect(app!.router.history.length).toBe(historyLength + 1);
   });
 
   it("[状態遷移] 先頭へ着いたら同じカードの下へへ、途中の移動では押したボタンへフォーカスが残る", async () => {

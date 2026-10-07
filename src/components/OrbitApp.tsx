@@ -73,7 +73,7 @@ import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { isImeComposing } from "./ime";
-import { projectDetailPath } from "./navigation";
+import { NAV_PATHS, type NavId } from "../features/shell/navigation";
 import { colorThemeOptions, resolveTheme } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
 import {
@@ -137,15 +137,7 @@ import {
   type ProjectSearch,
 } from "../lib/url-state/issues";
 
-type Section =
-  | "home"
-  | "issues"
-  | "cycles"
-  | "projects"
-  | "search"
-  | "inbox"
-  | "views"
-  | "settings";
+type Section = NavId;
 type Props = {
   initialSection?: Section;
   issueId?: string;
@@ -719,7 +711,7 @@ function OrbitAppInner(props: Props) {
           document.querySelector<HTMLInputElement>("#global-search-input")?.focus();
         else {
           setSection("search");
-          void router.navigate({ to: "/search" as never }).then(() => {
+          void router.navigate({ to: "/search" }).then(() => {
             window.setTimeout(() => {
               document.querySelector<HTMLInputElement>("#global-search-input")?.focus();
             }, 0);
@@ -1019,10 +1011,9 @@ function OrbitAppInner(props: Props) {
   async function navigate(next: Section) {
     setSection(next);
     setSelected([]);
-    const path = next === "home" ? "/" : next === "settings" ? "/settings" : `/${next}`;
     if (next === "issues")
       await router.navigate({ to: "/issues", search: { completed: completedFallback } });
-    else await router.navigate({ to: path as never });
+    else await router.navigate({ to: NAV_PATHS[next] });
   }
 
   function openIssueComposer(projectId = "") {
@@ -1053,10 +1044,16 @@ function OrbitAppInner(props: Props) {
       openIssue(notification.entityId);
     } else if (notification.entityType === "project" && notification.entityId) {
       setSection("projects");
-      await router.navigate({ to: `/projects/${notification.entityId}` as never });
+      await router.navigate({
+        to: "/projects/$projectId",
+        params: { projectId: notification.entityId },
+      });
     } else if (notification.entityType === "cycle" && notification.entityId) {
       setSection("cycles");
-      await router.navigate({ to: `/cycles/${notification.entityId}` as never });
+      await router.navigate({
+        to: "/cycles/$cycleId",
+        params: { cycleId: notification.entityId },
+      });
     } else {
       await navigate("inbox");
     }
@@ -2170,7 +2167,8 @@ export function HomeView({
               <Link
                 className="home-project-item"
                 key={project.id}
-                to={projectDetailPath(project.id) as never}
+                to="/projects/$projectId"
+                params={{ projectId: project.id }}
               >
                 <span className="project-icon" style={{ background: project.color }}>
                   {project.icon}
@@ -5016,7 +5014,8 @@ export function ProjectsView({
               <Link
                 className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
                 data-project-id={project.id}
-                to={projectDetailPath(project.id) as never}
+                to="/projects/$projectId"
+                params={{ projectId: project.id }}
                 onClick={(event) => {
                   if (saving) {
                     event.preventDefault();
@@ -7833,21 +7832,22 @@ export function IssueDetailPanel({
     if (targetIssue) onUpdate(targetIssue, patch);
   }
 
-  async function navigateAfterDescriptionSave(path: string) {
+  async function navigateAfterDescriptionSave(target: { issueId: string } | "settings") {
     await waitForParentMutation();
     if (!(await flushDescriptionAutosave())) return;
-    if (issueSearch && path.startsWith("/issues/")) {
+    if (target === "settings") await router.navigate({ to: "/settings" });
+    else if (issueSearch)
       await router.navigate({
         to: "/issues/$issueId",
-        params: { issueId: decodeURIComponent(path.slice("/issues/".length)) },
+        params: { issueId: target.issueId },
         search: issueSearch,
         resetScroll: false,
       });
-    } else await router.navigate({ to: path as never });
+    else await router.navigate({ to: "/issues/$issueId", params: { issueId: target.issueId } });
   }
 
   async function openLabelSettings() {
-    await navigateAfterDescriptionSave("/settings");
+    await navigateAfterDescriptionSave("settings");
     window.requestAnimationFrame(() =>
       document.getElementById("settings-labels")?.scrollIntoView({ block: "start" }),
     );
@@ -8319,7 +8319,7 @@ export function IssueDetailPanel({
                     <button
                       className="text-button hierarchy-parent"
                       onClick={() =>
-                        void navigateAfterDescriptionSave(`/issues/${detail.parent!.id}`)
+                        void navigateAfterDescriptionSave({ issueId: detail.parent!.id })
                       }
                     >
                       ↑ {detail.parent.identifier} · {detail.parent.title}
@@ -8334,7 +8334,7 @@ export function IssueDetailPanel({
                       <button
                         className="text-button child-issue-link"
                         key={child.id}
-                        onClick={() => void navigateAfterDescriptionSave(`/issues/${child.id}`)}
+                        onClick={() => void navigateAfterDescriptionSave({ issueId: child.id })}
                       >
                         {child.identifier} · {child.title}
                       </button>
@@ -8402,7 +8402,7 @@ export function IssueDetailPanel({
                       <button
                         className="relation-target"
                         onClick={() =>
-                          void navigateAfterDescriptionSave(`/issues/${relation.target.id}`)
+                          void navigateAfterDescriptionSave({ issueId: relation.target.id })
                         }
                       >
                         <span className="issue-id">{relation.target.identifier}</span>

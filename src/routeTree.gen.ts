@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as IssuesRouteImport } from './routes/issues'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as ViewsRouteImport } from './routes/views'
 import { Route as CyclesIndexRouteImport } from './routes/cycles/index'
@@ -67,6 +68,11 @@ const InboxRoute = InboxRouteImport.update({
   path: '/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IssuesRoute = IssuesRouteImport.update({
+  id: '/issues',
+  path: '/issues',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
@@ -88,14 +94,14 @@ const CyclesCycleIdRoute = CyclesCycleIdRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesIndexRoute = IssuesIndexRouteImport.update({
-  id: '/issues/',
-  path: '/issues/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => IssuesRoute,
 } as any)
 const IssuesIssueIdRoute = IssuesIssueIdRouteImport.update({
-  id: '/issues/$issueId',
-  path: '/issues/$issueId',
-  getParentRoute: () => rootRouteImport,
+  id: '/$issueId',
+  path: '/$issueId',
+  getParentRoute: () => IssuesRoute,
 } as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
@@ -308,6 +314,7 @@ const ApiV1IssuesIssueIdRelationsRelationIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/issues': typeof IssuesRouteWithChildren
   '/search': typeof SearchRoute
   '/views': typeof ViewsRoute
   '/cycles/$cycleId': typeof CyclesCycleIdRoute
@@ -407,6 +414,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/issues': typeof IssuesRouteWithChildren
   '/search': typeof SearchRoute
   '/views': typeof ViewsRoute
   '/cycles/$cycleId': typeof CyclesCycleIdRoute
@@ -458,6 +466,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/inbox'
+    | '/issues'
     | '/search'
     | '/views'
     | '/cycles/$cycleId'
@@ -556,6 +565,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/inbox'
+    | '/issues'
     | '/search'
     | '/views'
     | '/cycles/$cycleId'
@@ -606,14 +616,13 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   InboxRoute: typeof InboxRoute
+  IssuesRoute: typeof IssuesRouteWithChildren
   SearchRoute: typeof SearchRoute
   ViewsRoute: typeof ViewsRoute
   CyclesCycleIdRoute: typeof CyclesCycleIdRoute
-  IssuesIssueIdRoute: typeof IssuesIssueIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   SettingsSectionRoute: typeof SettingsSectionRoute
   CyclesIndexRoute: typeof CyclesIndexRoute
-  IssuesIndexRoute: typeof IssuesIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   ApiV1BootstrapRoute: typeof ApiV1BootstrapRoute
@@ -661,6 +670,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InboxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/issues': {
+      id: '/issues'
+      path: '/issues'
+      fullPath: '/issues'
+      preLoaderRoute: typeof IssuesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/search': {
       id: '/search'
       path: '/search'
@@ -691,17 +707,17 @@ declare module '@tanstack/react-router' {
     }
     '/issues/': {
       id: '/issues/'
-      path: '/issues'
+      path: '/'
       fullPath: '/issues/'
       preLoaderRoute: typeof IssuesIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof IssuesRoute
     }
     '/issues/$issueId': {
       id: '/issues/$issueId'
-      path: '/issues/$issueId'
+      path: '/$issueId'
       fullPath: '/issues/$issueId'
       preLoaderRoute: typeof IssuesIssueIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof IssuesRoute
     }
     '/projects/': {
       id: '/projects/'
@@ -979,6 +995,19 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface IssuesRouteChildren {
+  IssuesIssueIdRoute: typeof IssuesIssueIdRoute
+  IssuesIndexRoute: typeof IssuesIndexRoute
+}
+
+const IssuesRouteChildren: IssuesRouteChildren = {
+  IssuesIssueIdRoute: IssuesIssueIdRoute,
+  IssuesIndexRoute: IssuesIndexRoute,
+}
+
+const IssuesRouteWithChildren =
+  IssuesRoute._addFileChildren(IssuesRouteChildren)
+
 interface ApiV1BackgroundRunsRunIdRouteChildren {
   ApiV1BackgroundRunsRunIdContinueRoute: typeof ApiV1BackgroundRunsRunIdContinueRoute
   ApiV1BackgroundRunsRunIdResumeRoute: typeof ApiV1BackgroundRunsRunIdResumeRoute
@@ -1055,14 +1084,13 @@ const ApiV1IssuesIssueIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   InboxRoute: InboxRoute,
+  IssuesRoute: IssuesRouteWithChildren,
   SearchRoute: SearchRoute,
   ViewsRoute: ViewsRoute,
   CyclesCycleIdRoute: CyclesCycleIdRoute,
-  IssuesIssueIdRoute: IssuesIssueIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   SettingsSectionRoute: SettingsSectionRoute,
   CyclesIndexRoute: CyclesIndexRoute,
-  IssuesIndexRoute: IssuesIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   ApiV1BootstrapRoute: ApiV1BootstrapRoute,

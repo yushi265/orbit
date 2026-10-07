@@ -35,6 +35,8 @@
 
 ### AppShell が提供する context（features から使う公開フック）
 
+> 本節と下の箇条書きの `OrbitApp.tsx:行` は spec 作成時点の行番号。Phase 2 完了時点の対応: Composer の state 275-281 / `clockNow` 333-344 / `useBackgroundRun` 625-640 / keydown effect 646-746（抑止条件 646-672、`close` 679-684）/ `refresh` 748。
+
 | フック | 返り値 | 用途 | 現行の対応 |
 |---|---|---|---|
 | `useToast()` | `{ showToast(kind, message, action?) }` | 全 feature の成功・失敗通知 | `OrbitApp.tsx` の `useToast` / `ToastRegion` |
@@ -149,7 +151,10 @@ src/
 | 0 | `scripts/test-baseline.mjs`（新規: `vitest --reporter=json` からテスト名一覧を出力し、ベースライン JSON と突合。`skip` / `only` / `todo` を検出）と `scripts/test-baseline.json`（`package.json` に `test:baseline` を追加）、`src/components/render-app.test-fixtures.ts`（新規: `renderApp({ url, container, seed?, strict? })` が本番 `routeTree`・`createMemoryHistory` で `container` に描画する。jsdom と fetch のスタブは各テストが用意する。`seed(client)` は clear の後・描画の前にキャッシュを仕込む〔キャッシュ有無が前提のテスト 3 例が根拠〕。`strict` は StrictMode で包む〔StrictMode の effect 二重実行を検証する既存テスト用〕。root コンポーネントだけはテスト内で `Outlet` に差し替える〔`__root` の `<html>` を div 内に描画すると React が入れ子の警告を出すため。head は `pwa.test.ts` が検証〕。QueryClient は現行 OrbitApp がモジュールのシングルトンを使うため、Phase 0 では描画前後の `queryClient.clear()` で分離する）、OrbitApp を描画する runtime テスト 22 本の描画部分、`detail-select-size.test.ts` | ベースライン突合が一致。各テストの assert 対応表を PR に記載。`vi.mock("@tanstack/react-router")` は View 単体テストだけに残る |
 | 1 | `src/components/ui/*`（新規。OrbitApp.tsx 内の部品のみ切り出し、既存の独立ファイル〔orbit-select / orbit-date-picker / orbit-icon / linkified-text / dialog-boundary〕の ui/ への移動は Phase 5）、`OrbitApp.tsx` から該当部品を削除して import に置換し、テストが import している export は OrbitApp から再 export | 見た目・DOM 不変。日付 helper の重複（`dateInputValueInTimeZone` ↔ `calendarDateKeyInTimeZone`、`formatDateOnly` ↔ `formatIssueDueDate`）を出力一致テストで確認してから統合 |
 | 2 | `src/lib/queries/*`（新規）、`OrbitApp.tsx` の useQuery / setQueryData / `*MutationKeyRef` | AC-6 と `useMutationKey` のテスト追加。キャッシュ操作が `syncIssueCaches` / `removeIssueFromCaches` / `queryKeys` に集約 |
-| 3 | `src/routes/__root.tsx`、`src/routes/issues.tsx`（新規 layout）、全画面ルート、`src/routeTree.gen.ts`（生成物）、`features/shell/*`（新規）、`docs/architecture.md` | AC-1〜AC-5 のテスト追加。`section` / `getInitialSection` / `orbit.issue-focus` を削除。`docs/architecture.md` のレイヤー表を更新 |
+| 3a | `src/routes/issues.tsx`（新規 layout。この時点では `<Outlet/>` だけを描画し、子ルートは従来どおり OrbitApp を描画）、`issues/index.tsx`・`issues/$issueId.tsx` の `validateSearch` を親へ移動、`src/routeTree.gen.ts`（生成物。`pnpm build` で再生成し手で編集しない）、`src/features/shell/navigation.ts`（新規: ナビ項目 id → 型付きの `to` の対応表 `NAV_PATHS`）、`OrbitApp.tsx` の `as never` 7 か所を型付きの `to` / `params` に置換 | AC-1・AC-5 のテスト追加（AC-1 の見出しの期待値は 3a 着手時に現行アプリで描画した値）。`components/navigation.ts` の `projectDetailPath` / `issueDetailPath` は本番で未使用になるが、テスト名ベースライン（AC-7）のため Phase 5 まで残す |
+| 3b-1 | `features/shell/context.tsx`（新規）、ショートカットの抑止判定と振り分けの一元化（`useShortcut`）、OrbitAppInner を「シェル部分」と Page コンテナに分割（この時点では `section` で Page を選ぶ） | DOM と再マウントの挙動は不変（AC-7 のみ）。着手時の Gate 1 で context 契約の不足（openIssue・dismissToast・BackgroundRun の start/resume・Palette の選択・Issue 系 mutation の置き場所等）と、Issue 詳細表示中のショートカット抑止を確定する |
+| 3b-2 | `src/routes/__root.tsx`（`shellComponent` と AppShell を描画する `component` に分割）、全画面ルートが Page を描画、`section` / `getInitialSection` を削除、`render-app.test-fixtures.ts`、`docs/architecture.md` | AC-2・AC-3・Bootstrap の状態表示のテスト追加。`docs/architecture.md` のレイヤー表を更新。renderApp の QueryClient 別インスタンス化の扱い（既存テスト名を残す）は着手時の Gate 1 で決める |
+| 3c | `issues.tsx` へ IssuesPage を移す、`IssueDetailOverlay`、`orbit.issue-focus` を削除し ref でフォーカス復帰、選択を IssuesPage のローカル state へ | AC-4 のテスト追加 |
 | 4 | `features/<domain>/*`（1 PR 1〜2 domain）、`OrbitApp.tsx` は再 export のみへ縮小 | 各 domain 移動後も既存テスト pass |
 | 5 | `OrbitApp.tsx` 削除、既存の独立 UI ファイル（orbit-select / orbit-date-picker / orbit-icon / linkified-text / dialog-boundary / issue-priority）の `components/ui/` への移動〔Phase 1〜4 の間 `components/ui` がこれらを `../` で参照するのは移行中の暫定として許容〕、テストの import 更新、`docs/ai-dlc/codekb/shared.md` | AC-8 の計測（`wc -l`・import 方向）を Gate 3 で提示 |
 
@@ -209,6 +214,7 @@ AC-1（Phase 3）:
 - [同値分割] 12 URL それぞれ → 対応するページの見出しが表示される（期待値は Phase 3 着手前に現行アプリで描画した `h1` テキストを固定値として書く）
 - [同値分割] 存在しない `/issues/<id>`・`/projects/<id>`・`/cycles/<id>` → それぞれ「Issueが見つかりません」「Projectが見つかりません」「Cycleが見つかりません」、未知の `/settings/<section>` → Settings
 - [代表値] `/issues?status=all&order=updated_desc&completed=false` → `status`・`order` が除去され `completed: false` の一覧
+  - 注記（Phase 3a）: `__root` に `validateSearch` が無く、子ルートの search は `{ ...root の生の search, ...正規化結果 }` になるため、正規化で除いたキーも生の値のまま画面に届く（既存挙動）。3a のテストはこの既存挙動を変えないことの特性テストで、除去そのものは観測していない。生の search の漏れは別タスクで扱う
 - [代表値] 子ルートが親の正規化を継承: `/issues/<id>?status=all&completed=false` → 詳細が開き、背後の一覧は `completed: false`・`status` 除去で描画される
 - [代表値] `/projects?active=true`・`/views?<既存 saved view の search>` → 現行と同じ正規化結果
 - [代表値] `/issues/<存在するID>` を直接開く → 一覧の上に詳細オーバーレイが開く
@@ -237,8 +243,12 @@ AC-4（Phase 3）:
 - [代表値] サイドバーから `/issues` へ遷移すると、search に `completed` の既定値（`completedFallback`）が入る
 - [代表値] 開閉の間に `sessionStorage.setItem` が `orbit.issue-focus` で呼ばれない（スパイで確認）
 
-AC-5（Phase 3）:
+AC-5（Phase 3a）:
 - [代表値] リポジトリ検査: `src/routes`・`src/features`・`src/components`・`src/lib` の非テスト `.ts` / `.tsx` に `as never` が 0 件（コメント行も対象）
+- [代表値] リポジトリ検査: 同範囲の `navigate({ to: … })` と `<Link to=…>` の `to` が文字列リテラルか `NAV_PATHS[…]`（型付きの対応表）だけ。`string` 型の変数を渡すと router の型が `string` を素通しする（`RelativeToPathAutoComplete` が `string extends TTo ? string`）ため、cast が無くても型検査を受けない経路を塞ぐ（Gate 1 で決定）
+- [同値分割] 検査関数の自己検証: リテラル（入れ子オブジェクトの後ろ・`redirect` を含む）→ 合格 / `NAV_PATHS[id]` → 合格 / テンプレートリテラル・変数・連結・`as never`（`<Link>` の属性順・`<Navigate>`・`redirect` を含む）→ 不合格
+- [同値分割] 型付きにした遷移の遷移先: Inbox の project / cycle 通知 → `/projects/<id>` / `/cycles/<id>`、Home と Projects の Project リンクの `href` → `/projects/<id>`、Issues・Search 以外で Ctrl+F → `/search`、詳細の Label 設定 / 子 Issue / Relation の相手 → `/settings` / `/issues/<id>`（`to` の型検査では `params` の値の誤りを検出できないため、遷移先を結合テストで固定する）
+- [代表値] 既存テスト `issue-detail-autosave.test.ts`「Issue切替はDescriptionの自動保存完了後に実行する」の期待値を `{ to: "/issues/parent-autosave" }` から `{ to: "/issues/$issueId", params: { issueId: "parent-autosave" } }` に書き換える（matcher は同じ `toHaveBeenCalledWith`、遷移先は同じ。Gate 1 で承認）
 - [代表値] `pnpm typecheck` が pass（`to` / `params` / `search` の型検査）
 
 AC-6（Phase 2）:

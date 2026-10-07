@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { parseStyleRules } from "./css-rules.test-fixtures";
 import { priorityFromSelection, priorityIconFor } from "./issue-priority";
 
 describe("Issue priority selection", () => {
@@ -31,9 +31,12 @@ describe("Issue priority selection", () => {
   });
 
   it("[代表値] 旧アイコンのCSSが残っていない", () => {
-    const css = readFileSync("src/styles.css", "utf8");
-    expect(css).not.toContain(".priority-bars");
-    expect(css).not.toContain(".priority-urgent-mark");
-    expect(css).not.toContain(".priority-none-mark");
+    const selectors = parseStyleRules().flatMap((rule) => rule.selectors);
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const legacy of [".priority-bars", ".priority-urgent-mark", ".priority-none-mark"])
+      expect(
+        selectors.filter((selector) => selector.includes(legacy)),
+        legacy,
+      ).toEqual([]);
   });
 });

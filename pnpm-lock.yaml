@@ -66,6 +66,9 @@ importers:
       oxlint:
         specifier: ^1.23.0
         version: 1.79.0
+      postcss:
+        specifier: ^8.5.26
+        version: 8.5.26
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

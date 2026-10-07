@@ -1,8 +1,6 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -10,6 +8,7 @@ import type {
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
 import { CyclesView } from "./OrbitApp";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 const cycle = {
   id: "cycle-reorder-ui",
@@ -407,16 +406,21 @@ describe("Cycle reorder UI", () => {
         workflowStates,
       }),
     );
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const rules = parseStyleRules();
 
     expect(markup).toContain('aria-label="Cycle Issue表示形式"');
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('aria-label="TASK-1の並び替え"');
     expect(markup).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"');
     expect(markup).not.toContain('class="reorder-button"');
-    expect(styles).toContain(".cycle-issue-toolbar");
-    expect(styles).toContain(".cycle-board-card");
-    expect(styles).toContain("@media (max-width: 767px)");
+    expect(declarationsFor(rules, ".cycle-issue-toolbar").get("display")).toBe("flex");
+    expect(declarationsFor(rules, ".cycle-board-card").get("cursor")).toBe("grab");
+    expect(
+      declarationsFor(rules, ".cycle-issue-toolbar", "(max-width: 767px)").get("flex-direction"),
+    ).toBe("column");
+    expect(declarationsFor(rules, ".cycle-board-card", "(max-width: 767px)").get("min-width")).toBe(
+      "275px",
+    );
   });
 
   it("[デシジョンテーブル] Cycle詳細は他Cycle・削除済みIssueを表示しない", () => {

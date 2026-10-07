@@ -1,14 +1,13 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api-client";
 import { defaultProjectIssueDisplaySettings } from "../shared/contracts/project-display";
 import type { BootstrapViewModel, IssueViewModel as Issue } from "../shared/view-models";
 import { HomeView, InboxView, ProjectsView } from "./OrbitApp";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...props }: { children?: ReactNode; [key: string]: unknown }) =>
@@ -815,11 +814,21 @@ describe("Home / Project / Inbox workspace UI", () => {
   });
 
   it("[アクセシビリティ/レスポンシブ] 新しいworkspaceの主要CSSと390px向け縮退を持つ", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(styles).toContain(".home-deadline-grid");
-    expect(styles).toContain(".project-detail-page");
-    expect(styles).toContain(".inbox-guide");
-    expect(styles).toContain("@media (max-width: 767px)");
-    expect(styles).toContain(".project-issues-workspace");
+    const rules = parseStyleRules();
+    const mobile = "(max-width: 767px)";
+    expect(declarationsFor(rules, ".home-deadline-grid").get("display")).toBe("grid");
+    expect(declarationsFor(rules, ".project-detail-page").get("max-width")).toBe("1180px");
+    expect(declarationsFor(rules, ".inbox-guide").get("max-width")).toBe("850px");
+    expect(declarationsFor(rules, ".project-issues-workspace").get("padding")).toBe("22px");
+    expect(declarationsFor(rules, ".home-deadline-grid", mobile).get("grid-template-columns")).toBe(
+      "1fr",
+    );
+    expect(declarationsFor(rules, ".inbox-guide", mobile).get("padding")).toBe("18px");
+    expect(declarationsFor(rules, ".inbox-guide-steps", mobile).get("flex-direction")).toBe(
+      "column",
+    );
+    expect(declarationsFor(rules, ".project-issues-workspace", mobile).get("padding")).toBe(
+      "18px 17px",
+    );
   });
 });

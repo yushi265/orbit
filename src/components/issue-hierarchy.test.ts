@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sortIssues } from "./issue-list";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import {
   COLLAPSED_PARENTS_STORAGE_KEY,
   buildIssueHierarchyRows,
@@ -226,58 +227,63 @@ describe("collapsed parents storage", () => {
 });
 
 describe("hierarchy styles", () => {
-  async function loadCss() {
-    const { readFileSync } = await import("node:fs");
-    return readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-  }
-  const rule = (css: string, selector: string) =>
-    css.match(new RegExp(`${selector.replace(/[.[\]()]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
-  const inMedia = (css: string, query: string) =>
-    css.match(new RegExp(`@media \\(${query}\\) \\{([^@]*)\\}\\n`, "g"))?.join("\n") ?? "";
+  const rules = parseStyleRules();
+  const mobile = "(max-width: 767px)";
+  const tablet = "(max-width: 1199px)";
 
-  it("[代表値] title cell is indented by --issue-depth, 12px per level on mobile", async () => {
-    const css = await loadCss();
-    expect(css).toMatch(
-      /\.issue-row \.issue-title-cell \{[^}]*padding-left: calc\(var\(--issue-depth, 0\) \* 20px\)/,
+  it("[代表値] title cell is indented by --issue-depth, 12px per level on mobile", () => {
+    expect(declarationsFor(rules, ".issue-row .issue-title-cell").get("padding-left")).toBe(
+      "calc(var(--issue-depth, 0) * 20px)",
     );
-    expect(inMedia(css, "max-width: 767px")).toMatch(
-      /\.issue-row \.issue-title-cell \{[^}]*padding-left: calc\(var\(--issue-depth, 0\) \* 12px\)/,
+    expect(declarationsFor(rules, ".issue-row .issue-title-cell", mobile).get("padding-left")).toBe(
+      "calc(var(--issue-depth, 0) * 12px)",
     );
   });
 
-  it("[代表値] due row indent applies only to hierarchical rows", async () => {
-    const css = await loadCss();
-    expect(inMedia(css, "max-width: 1199px")).toMatch(
-      /\.issue-row\[data-depth\] \.due-cell \{[^}]*padding-left: calc\(var\(--issue-depth, 0\) \* 20px\)/,
-    );
-    expect(css).toMatch(
-      /\.issue-row\[data-depth\]\.has-toggle-column \.due-cell \{[^}]*\* 20px \+ 28px\)/,
-    );
-    const mobile = inMedia(css, "max-width: 767px");
-    expect(mobile).toMatch(/\.issue-row\[data-depth\] \.due-cell \{[^}]*\* 12px\)/);
-    expect(mobile).toMatch(
-      /\.issue-row\[data-depth\]\.has-toggle-column \.due-cell \{[^}]*\* 12px \+ 36px\)/,
-    );
-    expect(css).not.toMatch(/\.issue-row \.due-cell \{[^}]*--issue-depth/);
+  it("[代表値] due row indent applies only to hierarchical rows", () => {
+    expect(
+      declarationsFor(rules, ".issue-row[data-depth] .due-cell", tablet).get("padding-left"),
+    ).toBe("calc(var(--issue-depth, 0) * 20px)");
+    expect(
+      declarationsFor(rules, ".issue-row[data-depth].has-toggle-column .due-cell", tablet).get(
+        "padding-left",
+      ),
+    ).toBe("calc(var(--issue-depth, 0) * 20px + 28px)");
+    expect(
+      declarationsFor(rules, ".issue-row[data-depth] .due-cell", mobile).get("padding-left"),
+    ).toBe("calc(var(--issue-depth, 0) * 12px)");
+    expect(
+      declarationsFor(rules, ".issue-row[data-depth].has-toggle-column .due-cell", mobile).get(
+        "padding-left",
+      ),
+    ).toBe("calc(var(--issue-depth, 0) * 12px + 36px)");
+    // 階層インデントは data-depth 付きの行だけに当て、全 media の素の due-cell には当てない。
+    const plainDueRules = rules.filter((rule) => rule.selectors.includes(".issue-row .due-cell"));
+    expect(plainDueRules.length).toBeGreaterThan(0);
+    for (const rule of plainDueRules) {
+      for (const value of rule.declarations.values()) expect(value).not.toContain("--issue-depth");
+    }
   });
 
-  it("[代表値] toggle is 24px (32px on mobile) with a 16px body-text glyph", async () => {
-    const css = await loadCss();
-    const toggle = rule(css, ".issue-children-toggle");
-    expect(toggle).toMatch(/font-size: 16px/);
-    expect(toggle).toMatch(/color: var\(--orbit-text/);
-    expect(rule(css, ".issue-children-toggle:focus-visible")).toMatch(/outline:/);
-    expect(inMedia(css, "max-width: 767px")).toMatch(
-      /\.issue-children-toggle, \.issue-children-toggle-spacer \{[^}]*width: 32px/,
+  it("[代表値] toggle is 24px (32px on mobile) with a 16px body-text glyph", () => {
+    const toggle = declarationsFor(rules, ".issue-children-toggle");
+    expect(toggle.get("font-size")).toBe("16px");
+    expect(toggle.get("color")).toMatch(/^var\(--orbit-text/);
+    expect(
+      declarationsFor(rules, ".issue-children-toggle:focus-visible").get("outline"),
+    ).toBeTruthy();
+    expect(declarationsFor(rules, ".issue-children-toggle", mobile).get("width")).toBe("32px");
+    expect(declarationsFor(rules, ".issue-children-toggle-spacer", mobile).get("width")).toBe(
+      "32px",
     );
+    expect(declarationsFor(rules, ".issue-children-toggle").get("width")).toBe("24px");
   });
 
-  it("[代表値] child progress badge and parent hint rules exist", async () => {
-    const css = await loadCss();
-    expect(rule(css, ".issue-child-progress")).toMatch(/border-radius: 99px/);
-    const hint = rule(css, ".issue-parent-hint");
-    expect(hint).toMatch(/font-size: 11px/);
-    expect(hint).toMatch(/text-overflow: ellipsis/);
-    expect(hint).toMatch(/white-space: nowrap/);
+  it("[代表値] child progress badge and parent hint rules exist", () => {
+    expect(declarationsFor(rules, ".issue-child-progress").get("border-radius")).toBe("99px");
+    const hint = declarationsFor(rules, ".issue-parent-hint");
+    expect(hint.get("font-size")).toBe("11px");
+    expect(hint.get("text-overflow")).toBe("ellipsis");
+    expect(hint.get("white-space")).toBe("nowrap");
   });
 });

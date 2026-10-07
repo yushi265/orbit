@@ -74,15 +74,23 @@ describe("PWA manifest", () => {
     expect(serviceWorker).toContain("STATIC_CONTENT_TYPE");
   });
 
-  it("links the raster touch icon and versioned manifest from the root document", () => {
-    const rootRoute = readFileSync(resolve(process.cwd(), "src/routes/__root.tsx"), "utf8");
-    expect(rootRoute).toContain("manifest.webmanifest?v=4");
-    expect(rootRoute).toContain("icon-192.png?v=4");
+  it("links the raster touch icon and versioned manifest from the root document", async () => {
+    const head = await Route.options.head?.({} as never);
+    const manifest = head?.links?.find((link) => link?.rel === "manifest");
+    const touchIcon = head?.links?.find((link) => link?.rel === "apple-touch-icon");
+
+    expect(manifest?.href).toBe("/manifest.webmanifest?v=4");
+    expect(touchIcon?.href).toBe("/icon-192.png?v=4");
+    expect(touchIcon?.type).toBe("image/png");
   });
 
-  it("[代表値] extends the viewport into the safe area with viewport-fit=cover", () => {
-    const rootRoute = readFileSync(resolve(process.cwd(), "src/routes/__root.tsx"), "utf8");
-    expect(rootRoute).toContain("width=device-width, initial-scale=1, viewport-fit=cover");
+  it("[代表値] extends the viewport into the safe area with viewport-fit=cover", async () => {
+    const head = await Route.options.head?.({} as never);
+    const viewport = head?.meta?.find((meta) => meta && "name" in meta && meta.name === "viewport");
+
+    expect(viewport).toMatchObject({
+      content: "width=device-width, initial-scale=1, viewport-fit=cover",
+    });
   });
 
   it("declares cache and content-type headers for PWA assets", () => {

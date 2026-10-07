@@ -1,47 +1,26 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-const pageRule = styles.match(/\.page\s*\{([^}]*)\}/s)?.[1] ?? "";
-const pageMotionRule =
-  styles.match(/\.page\s*>\s*:not\(\.cycle-blocking-overlay\)\s*\{([^}]*)\}/s)?.[1] ?? "";
-const reducedMotionStyles = styles.slice(styles.indexOf("@media (prefers-reduced-motion: reduce)"));
-
-const parseDeclarations = (block: string) =>
-  new Map(
-    block
-      .split(";")
-      .map((declaration) => declaration.split(":"))
-      .filter(([property, value]) => property && value)
-      .map(([property, ...value]) => [property.trim(), value.join(":").trim()]),
-  );
+const rules = parseStyleRules();
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+const PAGE_CHILDREN = ".page > :not(.cycle-blocking-overlay)";
 
 const parseCssPixels = (value: string | undefined) =>
   value?.trim() === "0" ? 0 : Number(value?.match(/^(-?(?:\d*\.)?\d+)px$/)?.[1] ?? "NaN");
 
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const ruleBlocksForSelector = (selector: string) =>
-  [
-    ...styles.matchAll(
-      new RegExp(`(?:^|[{},])\\s*${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`, "g"),
-    ),
-  ].map(([, block]) => parseDeclarations(block ?? ""));
-
-const pageDeclarations = parseDeclarations(pageRule);
-const pageRuleBlocks = ruleBlocksForSelector(".page");
-const reducedMotionPageRule =
-  reducedMotionStyles.match(/\.page\s*>\s*:not\(\.cycle-blocking-overlay\)\s*\{([^}]*)\}/s)?.[1] ??
-  "";
-const reducedMotionDeclarations = parseDeclarations(reducedMotionPageRule);
-const pageMotionDeclarations = parseDeclarations(pageMotionRule);
+const pageRuleBlocks = rules.filter(
+  (rule) => rule.media === null && rule.selectors.includes(".page"),
+);
+const pageDeclarations = declarationsFor(rules, ".page");
+const pageMotionDeclarations = declarationsFor(rules, PAGE_CHILDREN);
+const reducedMotionDeclarations = declarationsFor(rules, PAGE_CHILDREN, REDUCED_MOTION);
 
 describe("page visibility and motion CSS contract", () => {
   it("[代表値] keeps page content visible without replaying an entrance animation", () => {
     expect(pageRuleBlocks.length).toBeGreaterThan(0);
     expect(
       pageRuleBlocks.every(
-        (declarations) =>
+        ({ declarations }) =>
           !declarations.has("animation") &&
           !declarations.has("opacity") &&
           !declarations.has("transform"),
@@ -53,10 +32,16 @@ describe("page visibility and motion CSS contract", () => {
   });
 
   it("[状態遷移] does not hide or offset page content on route changes", () => {
+    expect(pageMotionDeclarations.size).toBeGreaterThan(0);
     expect(pageMotionDeclarations.has("opacity")).toBe(false);
     expect(pageMotionDeclarations.has("top")).toBe(false);
     expect(pageMotionDeclarations.has("transform")).toBe(false);
-    expect(styles).not.toMatch(/@keyframes\s+orbit-page-enter\b/);
+    // 入場アニメーション orbit-page-enter をどの rule も参照しない
+    for (const rule of rules)
+      for (const prop of ["animation", "animation-name"])
+        expect(rule.declarations.get(prop) ?? "", rule.selectors.join(",")).not.toMatch(
+          /\borbit-page-enter\b/,
+        );
   });
 
   it("[デシジョンテーブル] disables the new motion for reduced-motion users", () => {
@@ -76,9 +61,11 @@ describe("page visibility and motion CSS contract", () => {
       ".mobile-nav",
     ]) {
       expect(
-        ruleBlocksForSelector(selector).some(
-          (declarations) => declarations.get("position") === "fixed",
+        rules.some(
+          (rule) =>
+            rule.selectors.includes(selector) && rule.declarations.get("position") === "fixed",
         ),
+        selector,
       ).toBe(true);
     }
   });

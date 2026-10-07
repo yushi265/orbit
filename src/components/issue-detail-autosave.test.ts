@@ -676,7 +676,10 @@ describe("Issue detail autosave", () => {
     expect(navigateMock).not.toHaveBeenCalled();
     resolvePatch(jsonResponse({ issue: updatedIssue }));
     await waitForState(() => expect(navigateMock).toHaveBeenCalledOnce());
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/issues/parent-autosave" });
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/issues/$issueId",
+      params: { issueId: "parent-autosave" },
+    });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
 
     await act(async () => {

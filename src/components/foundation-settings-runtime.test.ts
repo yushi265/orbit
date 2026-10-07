@@ -263,3 +263,183 @@ describe("Phase 1 Settings runtime interactions", () => {
     });
   });
 });
+
+function mountSettingsDom() {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://orbit.example/settings",
+  });
+  vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("document", dom.window.document);
+  vi.stubGlobal("navigator", dom.window.navigator);
+  vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+  vi.stubGlobal("Node", dom.window.Node);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  // jsdom は IE 系の attachEvent を持たないため、React の入力値追跡用に補う。
+  for (const eventName of ["attachEvent", "detachEvent"])
+    Object.defineProperty(dom.window.HTMLElement.prototype, eventName, {
+      value: function (this: HTMLElement, name: string, handler: EventListener) {
+        if (eventName === "attachEvent") this.addEventListener(name.replace(/^on/, ""), handler);
+        else this.removeEventListener(name.replace(/^on/, ""), handler);
+      },
+    });
+  return { dom, root: createRoot(dom.window.document.getElementById("root")!) };
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const window = input.ownerDocument.defaultView!;
+  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(
+    input,
+    value,
+  );
+  input.focus();
+  input.dispatchEvent(
+    Object.assign(new window.Event("propertychange", { bubbles: true }), {
+      propertyName: "value",
+    }),
+  );
+}
+
+function errorResponse(status: number, code: string) {
+  return new Response(JSON.stringify({ error: { code, message: "失敗しました。" } }), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+const settingsProps = {
+  preferences,
+  cycleSettings,
+  workflowStates,
+  labels: [],
+  onRefresh: () => undefined,
+  run: null,
+  runBusy: false,
+  onRun: () => undefined,
+  onResume: () => undefined,
+  onPreferences: async () => undefined,
+  onCycleSettings: async () => undefined,
+  onColorTheme: async () => undefined,
+  canInstallPwa: false,
+  onInstallPwa: () => undefined,
+};
+
+const sentKeys = (fetch: ReturnType<typeof vi.fn>) =>
+  fetch.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).idempotencyKey);
+
+async function clickButton(dom: JSDOM, text: string, scope?: Element | null) {
+  const button = [...(scope ?? dom.window.document).querySelectorAll("button")].find(
+    (item) => item.textContent === text && !item.disabled,
+  )!;
+  await act(async () => {
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+describe("Settings 冪等キーの保持", () => {
+  it("[状態遷移] Preferences保存が失敗した後の再試行は同じ冪等キーで送る", async () => {
+    const { dom, root } = mountSettingsDom();
+    const onPreferences = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(500, "INTERNAL_ERROR", "失敗しました。"))
+      .mockResolvedValueOnce(undefined);
+    await act(async () => {
+      root.render(createElement(SettingsView, { ...settingsProps, onPreferences }));
+    });
+    const timezone = dom.window.document.querySelector(
+      'select[aria-labelledby="setting-timezone-label"]',
+    ) as HTMLSelectElement;
+    await act(async () => {
+      setSelectValue(timezone, "UTC");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await clickButton(dom, "再試行");
+
+    expect(onPreferences).toHaveBeenCalledTimes(2);
+    const [first, second] = onPreferences.mock.calls.map(([, key]) => key);
+    expect(first).toEqual(expect.any(String));
+    expect(second).toBe(first);
+    await act(async () => {
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it("[状態遷移] Label作成が423で失敗した後の再試行は同じ冪等キーで送り、成功後の新規作成は新しいキーにする", async () => {
+    const { dom, root } = mountSettingsDom();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(423, "OPERATION_IN_PROGRESS"))
+      .mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await act(async () => {
+      root.render(createElement(SettingsView, settingsProps));
+    });
+    const fillAndAdd = async () => {
+      const name = dom.window.document.querySelector(
+        'input[aria-label="Label名"]',
+      ) as HTMLInputElement;
+      await act(async () => setInputValue(name, "Bug"));
+      await clickButton(dom, "追加", name.parentElement);
+    };
+    await fillAndAdd();
+    await clickButton(dom, "再試行");
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const keys = sentKeys(fetch);
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
+
+    await fillAndAdd();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(sentKeys(fetch)[2]).not.toBe(keys[0]);
+    await act(async () => {
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+
+  it("[状態遷移] Workflow追加が失敗した後の再試行は同じ冪等キーで送り、成功後の同内容の追加は新しいキーにする", async () => {
+    const { dom, root } = mountSettingsDom();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(500, "INTERNAL_ERROR"))
+      .mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await act(async () => {
+      root.render(createElement(SettingsView, settingsProps));
+    });
+    const fillAndAdd = async () => {
+      const name = dom.window.document.querySelector(
+        'input[aria-label="Workflow名"]',
+      ) as HTMLInputElement;
+      await act(async () => setInputValue(name, "Review"));
+      await clickButton(dom, "追加", name.parentElement);
+    };
+    await fillAndAdd();
+    await clickButton(dom, "再試行");
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const keys = sentKeys(fetch);
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
+
+    await fillAndAdd();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(sentKeys(fetch)[2]).not.toBe(keys[0]);
+    await act(async () => {
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
+});

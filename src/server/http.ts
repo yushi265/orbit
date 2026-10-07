@@ -1,6 +1,6 @@
 import { resolveOwner, runtimeEnv, OwnerContext, type RuntimeEnvironment } from "./auth";
 import { resolveLocalOrigins, resolveRuntimeConfig } from "./runtime-config";
-import { ServiceError } from "./errors";
+import { ServiceError, validationError } from "./errors";
 import { openStoreSession } from "./store-session";
 import type { OrbitStore } from "./store";
 
@@ -49,12 +49,42 @@ export function errorResponse(error: ServiceError, id: string): Response {
   );
 }
 
+const MAX_BODY_BYTES = 1_000_000;
+
+function bodyTooLarge(): ServiceError {
+  return new ServiceError(400, "VALIDATION_ERROR", "リクエストが大きすぎます。");
+}
+
+// content-length は自己申告なので早期拒否にだけ使い、上限は実際に読んだバイト数で判定する。
+async function readBodyText(request: Request): Promise<string> {
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) throw bodyTooLarge();
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw bodyTooLarge();
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 export async function parseBody(request: Request): Promise<Record<string, unknown>> {
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > 1_000_000)
-    throw new ServiceError(400, "VALIDATION_ERROR", "リクエストが大きすぎます。");
+  const text = await readBodyText(request);
   try {
-    const body = await request.json();
+    const body: unknown = JSON.parse(text);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not-object");
     return body as Record<string, unknown>;
   } catch {
@@ -125,9 +155,8 @@ export function parseNumber(value: string | null, fallback: number): number {
   return Number.isFinite(number) ? number : fallback;
 }
 
-export function keyFromRequest(request: Request): string {
-  return (
-    request.headers.get("Idempotency-Key") ??
-    `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
+export function requireIdempotencyKey(request: Request): string {
+  const key = request.headers.get("Idempotency-Key");
+  if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+  return key;
 }

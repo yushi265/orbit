@@ -114,6 +114,15 @@ const issueQueryBaseSchema = z
   })
   .strict();
 
+// GET /api/v1/issues のクエリ文字列。空文字は呼び出し側で未指定（undefined）へ寄せてから渡す。
+export const issueListParamsSchema = z
+  .object({
+    due: issueDueSchema.optional(),
+    order: issueOrderSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+  })
+  .strict();
+
 export type IssueFilter = z.infer<typeof issueFilterSchema>;
 export type IssueQuery = z.infer<typeof issueQueryBaseSchema>;
 export type CreateIssueInput = z.infer<typeof createIssueInputSchema>;

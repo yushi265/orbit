@@ -288,4 +288,50 @@ describe("Cycle settings UI", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   });
+
+  it("[状態遷移] 423で失敗した後の再試行は同じ冪等キーで送り、成功後の保存は新しいキーにする", async () => {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>");
+    vi.stubGlobal("window", dom.window);
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal("navigator", dom.window.navigator);
+    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+    vi.stubGlobal("Node", dom.window.Node);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const onCycleSettings = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(423, "OPERATION_IN_PROGRESS", "ロック中です。"))
+      .mockResolvedValue(undefined);
+    const root = createRoot(dom.window.document.getElementById("root")!);
+
+    await act(async () => {
+      root.render(createElement(SettingsView, { ...baseProps, onCycleSettings }));
+    });
+    const submit = async () => {
+      await act(async () => {
+        (dom.window.document.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+    await submit();
+    await act(async () => {
+      const retry = [...dom.window.document.querySelectorAll("button")].find(
+        (button) => button.textContent === "再試行",
+      ) as HTMLButtonElement;
+      retry.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onCycleSettings).toHaveBeenCalledTimes(2);
+    const [first, second] = onCycleSettings.mock.calls.map(([, key]) => key);
+    expect(first).toEqual(expect.any(String));
+    expect(second).toBe(first);
+
+    await submit();
+    expect(onCycleSettings).toHaveBeenCalledTimes(3);
+    expect(onCycleSettings.mock.calls[2][1]).not.toBe(first);
+    await act(async () => {
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  });
 });

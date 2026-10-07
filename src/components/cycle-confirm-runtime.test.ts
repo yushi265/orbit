@@ -395,7 +395,10 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function openApp(entry: string, options: { failOn?: (call: Call) => boolean } = {}) {
+async function openApp(
+  entry: string,
+  options: { failOn?: (call: Call) => boolean; failStatus?: number } = {},
+) {
   calls = [];
   vi.stubGlobal(
     "fetch",
@@ -411,12 +414,12 @@ async function openApp(entry: string, options: { failOn?: (call: Call) => boolea
         return json(
           {
             error: {
-              code: "INTERNAL",
+              code: options.failStatus === 423 ? "OPERATION_IN_PROGRESS" : "INTERNAL",
               message: "失敗しました",
               requestId: "r",
             },
           },
-          500,
+          options.failStatus ?? 500,
         );
       if (path === "/api/v1/bootstrap") return json(payload);
       if (path.startsWith("/api/v1/background-runs")) return json({ run: null });
@@ -528,6 +531,36 @@ describe("AC-3 bulk Label confirm", () => {
     expect(mutations()).toHaveLength(0);
   });
 
+  it("[状態遷移] 一括更新が423で失敗した後の再適用は同じ冪等キーで送り、成功後の一括更新は新しいキーにする", async () => {
+    let bulkCalls = 0;
+    await openApp("/issues", {
+      failStatus: 423,
+      failOn: (call) => call.path === "/api/v1/issues/bulk" && ++bulkCalls === 1,
+    });
+    const selectAll = async () => {
+      const box = doc().querySelector('input[aria-label="全選択"]') as HTMLInputElement;
+      if (!box.checked) await act(async () => box.click());
+      await act(async () => setSelect(selectByLabel("一括更新属性"), "status"));
+      await act(async () => setSelect(selectByLabel("一括更新値"), "todo"));
+    };
+    await selectAll();
+    await act(async () => apply().click());
+    await settle();
+    await act(async () => apply().click());
+    await settle();
+
+    const bulk = mutations();
+    expect(bulk).toHaveLength(2);
+    expect(bulk[0].body?.idempotencyKey).toEqual(expect.any(String));
+    expect(bulk[1].body?.idempotencyKey).toBe(bulk[0].body?.idempotencyKey);
+
+    await selectAll();
+    await act(async () => apply().click());
+    await settle();
+    expect(mutations()).toHaveLength(3);
+    expect(mutations()[2].body?.idempotencyKey).not.toBe(bulk[0].body?.idempotencyKey);
+  });
+
   it("[デシジョンテーブル] Status など Label 以外は確認なしで bulk API を呼ぶ", async () => {
     await openBulk("status", "todo");
     await act(async () => apply().click());
@@ -565,6 +598,20 @@ describe("AC-2 Cycle confirm in the app (failure toast)", () => {
     );
     await settle();
     expect(mutations().filter((call) => call.path === "/api/v1/cycles/cycle-1")).toHaveLength(1);
+  });
+
+  it("[代表値] 完了の成功後に invalidate するのは bootstrap だけ（REFACTOR-ui-architecture Phase 2）", async () => {
+    await openApp("/cycles");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await act(async () => buttonByText("Cycleを完了")!.click());
+    await act(async () =>
+      [...dialog()!.querySelectorAll("button")]
+        .find((button) => button.textContent === "Cycleを完了")!
+        .click(),
+    );
+    await settle();
+    expect(mutations().filter((call) => call.path === "/api/v1/cycles/cycle-1")).toHaveLength(1);
+    expect(invalidate.mock.calls).toEqual([[{ queryKey: ["bootstrap"] }]]);
   });
 });
 

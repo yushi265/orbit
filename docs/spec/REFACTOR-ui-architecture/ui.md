@@ -60,6 +60,8 @@ export const queryKeys = {
   issues: (scope: IssueListScope) => ["issues", scope] as const,
   issueDetail: (id: string) => ["issue-detail", id] as const,
   recent: ["recent"] as const,
+  // 前方一致で 3 scope の一覧をまとめて invalidate する（bulk・lifecycle 変更・trash の後。現行どおり）
+  issuesAll: ["issues"] as const,
 };
 
 // src/lib/queries/bootstrap.ts
@@ -71,11 +73,19 @@ export function syncIssueCaches(queryClient: QueryClient, updated: Issue): void;
 // bootstrap.issues: active なら置換/追加、archived・trash なら除去
 // ["issues", "active" | "archived" | "trash"]: 所属 scope だけに置換/追加し、他 scope から除去
 // ["issue-detail", updated.id]: 存在すれば issue を置換
-export function removeIssueFromCaches(queryClient: QueryClient, issueId: string): void; // purge・trash 後
+// キャッシュに無い Issue は配列の末尾に追加する（現行の詳細保存の同期と同じ。既存テスト「409/Scope所属」が固定）
+// Issue 作成（createIssue）は「更新の反映」ではないため対象外とし、現行どおり呼び出し側で bootstrap の先頭に追加する（Phase 2 実装中に人間と合意）
+// 楽観更新（onMutate）と失敗時のロールバックは「反映」ではないため対象外（現行どおり呼び出し側に置く）
+export function removeIssueFromCaches(queryClient: QueryClient, issueId: string): void; // trash 後（UI に Issue の purge 操作は無い）
+// trash 後は removeIssueFromCaches の後に queryKeys.issuesAll を invalidate し、ゴミ箱一覧を再取得する（現行どおり）
 ```
 
 - feature 別の mutation 関数は `src/features/<domain>/mutations.ts` に置く（例: `useIssueMutations()` が create / update / reorder / bulk / lifecycle / notes / relations を返す）。既に `useMutation` のもの（Issue create / update / reorder）はそのまま移す。それ以外を `useMutation` へ書き換えることは本 spec の対象外。
 - 冪等キーの保持は、現行 9 か所の `*MutationKeyRef` を `useMutationKey()`（`src/lib/queries/mutation-key.ts`）に集める。
+  - 入力比較型の 4 か所（Cycle schedule / preference / cycleSettings / Workflow）は、現行の比較対象（patch の JSON・signature）をそのまま signature に渡す。
+  - 保持型の 5 か所（bulk / display / label / 現行名 `mutationKeyRef` の 2 か所）は、現行どおり入力に関係なくキーを保持するため、呼び出し箇所ごとの固定文字列を signature に渡す（例: `keyFor("bulk")`。Gate 1 で決定・挙動不変）。
+  - `keyFor` はキーを保持し、どの結果でキーを捨てるか（`reset()`）は現行の分岐のまま呼び出し側に置く。
+- Phase 2 では `src/lib/queries/*` を作り `OrbitApp.tsx` 内の呼び出しを置き換えるまでとし、`features/<domain>/mutations.ts` への移動は Phase 4 で行う。
 
 ```ts
 // 同じ signature（入力の canonical JSON）の再試行では同じキーを返し、signature が変わるか reset() で新しいキーになる
@@ -235,17 +245,19 @@ AC-6（Phase 2）:
 - [デシジョンテーブル] `syncIssueCaches` × (`archivedAt`, `deletedAt`) = (null, null) → active / (値, null) → archived / (null, 値) → trash / (値, 値) → trash。各ケースで bootstrap・3 scope・detail の所属を確認
 - [状態遷移] 更新前の所属（active / archived / trash）× 更新後の所属（active / archived / trash）の 9 遷移 → 旧 scope から消え、新 scope にだけ存在する
 - [同値分割] キャッシュ未作成（bootstrap なし / scope なし / detail なし）→ 未作成のキャッシュは作らない
-- [同値分割] キャッシュに無い Issue（新規作成）→ 所属 scope と bootstrap（active のとき）に追加される
+- [同値分割] キャッシュに無い Issue（scope 間の移動で初めて入る）→ 所属 scope と bootstrap（active のとき）の末尾に追加される
 - [代表値] `removeIssueFromCaches` → bootstrap と 3 scope から消え、detail キャッシュが削除される
 - [代表値] 一覧のインライン更新でアーカイブ → `["issues","archived"]` に入り、`["issues","active"]` と bootstrap から消える
 - [代表値] 詳細保存でゴミ箱へ移した Issue → `["issues","trash"]` に入り、他から消える
-- [代表値] `queryKeys` の各キーが現行リテラルと deepEqual
+- [代表値] `queryKeys` の各キー（`issuesAll` を含む）が現行リテラルと deepEqual
+- [代表値] 詳細からゴミ箱へ移した後、bootstrap と detail キャッシュから消え、`["issues", …]` が invalidate される（ゴミ箱一覧の再取得）
 
 `refresh()`（Phase 2）:
 - [代表値] Cycle close 成功後に `invalidateQueries` が `queryKeys.bootstrap` だけで呼ばれ、`["issues", …]`・`["issue-detail", …]`・`["recent"]` は invalidate されない（`queryClient.invalidateQueries` のスパイで確認。現行も同じ挙動なので Phase 2 着手時に現行で GREEN になることを確認してから置換する）
 
 `useMutationKey`（Phase 2）:
 - [状態遷移] 同じ signature で 2 回 `keyFor` → 同じキー / signature 変更 → 新しいキー / `reset()` 後に同じ signature → 新しいキー
+- [代表値] 再レンダー後も保持したキーが変わらない（`useRef` 相当）
 - [代表値] 既存 9 か所の置換後も、409 / 423 / `IDEMPOTENCY_KEY_REUSED` を扱う既存テスト（ベースラインに含まれる）が pass
 
 AC-8（Phase 5）:

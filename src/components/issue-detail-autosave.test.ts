@@ -507,6 +507,44 @@ describe("Issue detail autosave", () => {
     });
   });
 
+  it("[代表値] ゴミ箱へ移すと bootstrap と detail キャッシュから消え、一覧キャッシュを invalidate する", async () => {
+    const { dom, root, queryClient, onClose } = renderPanel();
+    const other = { ...issue, id: "issue-other" };
+    queryClient.setQueryData(["bootstrap"], { issues: [issue, other] });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    // 詳細パネルは描画されたままなので detail のクエリは再生成される。削除したことは removeQueries で確認する。
+    const remove = vi.spyOn(queryClient, "removeQueries");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(dom.window, "confirm", {
+      configurable: true,
+      value: vi.fn(() => true),
+    });
+    await act(async () => {
+      root.render(
+        createElement(QueryClientProvider, { client: queryClient }, panelElement(onClose)),
+      );
+    });
+    await waitForState(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () =>
+      (
+        [...dom.window.document.querySelectorAll("button")].find(
+          (button) => button.textContent === "ゴミ箱へ",
+        ) as HTMLButtonElement
+      ).click(),
+    );
+    await waitForState(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(
+      queryClient.getQueryData<{ issues: Issue[] }>(["bootstrap"])?.issues.map((item) => item.id),
+    ).toEqual(["issue-other"]);
+    expect(remove).toHaveBeenCalledWith({ queryKey: ["issue-detail", issue.id] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["issues"] });
+    await act(async () => root.unmount());
+  });
+
   it("[状態遷移] Project保存はDescriptionの自動保存完了後に実行する", async () => {
     const { dom, root, queryClient, onClose } = renderPanel();
     const project: Project = {

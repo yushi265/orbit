@@ -832,3 +832,116 @@ describe("Home / Project / Inbox workspace UI", () => {
     );
   });
 });
+
+describe("Project 冪等キーの保持", () => {
+  function mount() {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+      url: "https://orbit.example/projects/project-1",
+    });
+    vi.stubGlobal("window", dom.window);
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal("navigator", dom.window.navigator);
+    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+    vi.stubGlobal("Node", dom.window.Node);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    return { dom, root: createRoot(dom.window.document.getElementById("root")!) };
+  }
+  const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+  const clickText = async (dom: JSDOM, text: string) => {
+    const button = [...dom.window.document.querySelectorAll("button")].find(
+      (item) => item.textContent === text && !item.disabled,
+    )!;
+    await act(async () => {
+      button.click();
+      await settle();
+    });
+  };
+
+  it("[状態遷移] Project表示設定が423で失敗した後の再試行は同じ冪等キーで送り、成功後の変更は新しいキーにする", async () => {
+    const { dom, root } = mount();
+    const onSaveDisplayPreferences = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(423, "OPERATION_IN_PROGRESS", "ロック中です。"))
+      .mockImplementation(async (projectId: string, settings: unknown) => ({
+        id: "preference-1",
+        userId: "owner",
+        projectId,
+        settings,
+        updatedAt: now,
+      }));
+    await act(async () => {
+      root.render(projectViewElement({ onSaveDisplayPreferences }));
+      await settle();
+    });
+    const toggle = async () => {
+      await act(async () => {
+        (
+          dom.window.document.querySelector(
+            '.completed-toggle input[type="checkbox"]',
+          ) as HTMLInputElement
+        ).click();
+        await settle(320);
+      });
+    };
+    await toggle();
+    await clickText(dom, "再試行");
+
+    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(2);
+    const [first, second] = onSaveDisplayPreferences.mock.calls.map(([, , key]) => key);
+    expect(first).toEqual(expect.any(String));
+    expect(second).toBe(first);
+
+    await toggle();
+    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(3);
+    expect(onSaveDisplayPreferences.mock.calls[2][2]).not.toBe(first);
+    await act(async () => {
+      root.unmount();
+      await settle();
+    });
+  });
+
+  it("[状態遷移] Project編集保存が423で失敗した後の再試行は同じ冪等キーで送り、成功後の保存は新しいキーにする", async () => {
+    const { dom, root } = mount();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: "OPERATION_IN_PROGRESS", message: "ロック中です。" } }),
+          { status: 423, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await act(async () => {
+      root.render(projectViewElement());
+      await settle();
+    });
+    await clickText(dom, "Projectを編集");
+    await clickText(dom, "Projectを保存");
+    await clickText(dom, "再試行");
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const keys = fetch.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).idempotencyKey,
+    );
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
+
+    await clickText(dom, "Projectを編集");
+    await clickText(dom, "Projectを保存");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(
+      JSON.parse(String((fetch.mock.calls[2][1] as RequestInit).body)).idempotencyKey,
+    ).not.toBe(keys[0]);
+    await act(async () => {
+      root.unmount();
+      await settle();
+    });
+  });
+});

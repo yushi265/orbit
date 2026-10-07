@@ -93,6 +93,10 @@ import {
   idempotencyKey,
 } from "../lib/api-client";
 import { queryClient } from "../lib/query";
+import { useBootstrap } from "../lib/queries/bootstrap";
+import { removeIssueFromCaches, syncIssueCaches } from "../lib/queries/issue-cache";
+import { queryKeys } from "../lib/queries/keys";
+import { useMutationKey } from "../lib/queries/mutation-key";
 import { EmptyState } from "./ui/EmptyState";
 import { Modal } from "./ui/Modal";
 import { PriorityIcon } from "./ui/PriorityIcon";
@@ -261,6 +265,8 @@ export function OrbitApp(props: Props) {
   );
 }
 
+const selectWholeBootstrap = (data: BootstrapPayload) => data;
+
 function OrbitAppInner(props: Props) {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -317,7 +323,7 @@ function OrbitAppInner(props: Props) {
   const [cycleCloseBusy, setCycleCloseBusy] = useState(false);
   const [cycleStartBusy, setCycleStartBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const bulkMutationKeyRef = useRef<string | null>(null);
+  const bulkMutationKey = useMutationKey();
   const issueTriggerIdRef = useRef<string | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
   const searchSequenceRef = useRef(0);
@@ -391,7 +397,7 @@ function OrbitAppInner(props: Props) {
       idempotencyKey: idempotencyKey(),
       issueId,
     })
-      .then(() => queryClient.invalidateQueries({ queryKey: ["recent"] }))
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.recent }))
       .catch(() => undefined);
     try {
       window.sessionStorage.setItem("orbit.issue-focus", issueId);
@@ -422,17 +428,14 @@ function OrbitAppInner(props: Props) {
     }
   }
 
-  const bootstrap = useQuery({
-    queryKey: ["bootstrap"],
-    queryFn: () => apiGet<BootstrapPayload>("/api/v1/bootstrap"),
-  });
+  const bootstrap = useBootstrap(selectWholeBootstrap);
   const scopedIssuesQuery = useQuery({
-    queryKey: ["issues", issueScope],
+    queryKey: queryKeys.issues(issueScope),
     queryFn: () => apiGet<{ items: Issue[] }>(`/api/v1/issues?scope=${issueScope}`),
     enabled: section === "issues" && issueScope !== "active",
   });
   const recentQuery = useQuery({
-    queryKey: ["recent"],
+    queryKey: queryKeys.recent,
     queryFn: () =>
       apiGet<{
         issueViews: RecentIssueViewModel[];
@@ -441,7 +444,7 @@ function OrbitAppInner(props: Props) {
     enabled: section === "search",
   });
   const trashQuery = useQuery({
-    queryKey: ["issues", "trash"],
+    queryKey: queryKeys.issues("trash"),
     queryFn: () => apiGet<{ items: Issue[] }>("/api/v1/issues?scope=trash"),
     enabled: section === "settings",
   });
@@ -742,7 +745,7 @@ function OrbitAppInner(props: Props) {
     props.issueSearch,
   ]);
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
 
   async function installPwa() {
     if (!installPrompt) return;
@@ -768,7 +771,7 @@ function OrbitAppInner(props: Props) {
         cycleId: newCycleId || null,
       }),
     onSuccess: ({ issue }) => {
-      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+      queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
         current ? { ...current, issues: [issue, ...current.issues] } : current,
       );
       setNewTitle("");
@@ -793,46 +796,34 @@ function OrbitAppInner(props: Props) {
       }),
     onMutate: async ({ issue, patch }) => {
       setPendingIssueId(issue.id);
-      await queryClient.cancelQueries({ queryKey: ["bootstrap"] });
-      const previous = queryClient.getQueryData<BootstrapPayload>(["bootstrap"]);
-      const previousDetail = queryClient.getQueryData<IssueDetailViewModel>([
-        "issue-detail",
-        issue.id,
-      ]);
+      await queryClient.cancelQueries({ queryKey: queryKeys.bootstrap });
+      const previous = queryClient.getQueryData<BootstrapPayload>(queryKeys.bootstrap);
+      const previousDetail = queryClient.getQueryData<IssueDetailViewModel>(
+        queryKeys.issueDetail(issue.id),
+      );
       if (previous)
-        queryClient.setQueryData<BootstrapPayload>(["bootstrap"], {
+        queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, {
           ...previous,
           issues: previous.issues.map((item) =>
             item.id === issue.id ? { ...item, ...patch } : item,
           ),
         });
       if (previousDetail)
-        queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issue.id], {
+        queryClient.setQueryData<IssueDetailViewModel>(queryKeys.issueDetail(issue.id), {
           ...previousDetail,
           issue: { ...previousDetail.issue, ...patch },
         });
       return { previous, previousDetail };
     },
     onSuccess: ({ issue: updatedIssue }, variables) => {
-      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-        current
-          ? {
-              ...current,
-              issues: current.issues.map((item) =>
-                item.id === updatedIssue.id ? updatedIssue : item,
-              ),
-            }
-          : current,
-      );
-      queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", updatedIssue.id], (current) =>
-        current ? { ...current, issue: updatedIssue } : current,
-      );
+      syncIssueCaches(queryClient, updatedIssue);
       for (const issueId of new Set([
         updatedIssue.id,
         variables.issue.parentId,
         updatedIssue.parentId,
       ])) {
-        if (issueId) void queryClient.invalidateQueries({ queryKey: ["issue-detail", issueId] });
+        if (issueId)
+          void queryClient.invalidateQueries({ queryKey: queryKeys.issueDetail(issueId) });
       }
       showToast(
         "success",
@@ -855,22 +846,19 @@ function OrbitAppInner(props: Props) {
     onError: async (error, variables, context) => {
       let retryIssue = variables.issue;
       if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
         const latestIssue = queryClient
-          .getQueryData<BootstrapPayload>(["bootstrap"])
+          .getQueryData<BootstrapPayload>(queryKeys.bootstrap)
           ?.issues.find((item) => item.id === variables.issue.id);
         if (latestIssue) {
           retryIssue = latestIssue;
-          queryClient.setQueryData<IssueDetailViewModel>(
-            ["issue-detail", latestIssue.id],
-            (current) => (current ? { ...current, issue: latestIssue } : current),
-          );
+          syncIssueCaches(queryClient, latestIssue);
         }
       } else if (context?.previous) {
         const previousIssue = context.previous.issues.find(
           (item) => item.id === variables.issue.id,
         );
-        queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+        queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
           current && previousIssue
             ? {
                 ...current,
@@ -885,7 +873,7 @@ function OrbitAppInner(props: Props) {
         !(error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") &&
         context?.previousDetail
       )
-        queryClient.setQueryData(["issue-detail", variables.issue.id], context.previousDetail);
+        queryClient.setQueryData(queryKeys.issueDetail(variables.issue.id), context.previousDetail);
       const retry = {
         issue: retryIssue,
         patch: variables.patch,
@@ -935,9 +923,9 @@ function OrbitAppInner(props: Props) {
     onError: async (error, variables) => {
       let retryVariables = variables;
       if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
         const latestIssue = queryClient
-          .getQueryData<BootstrapPayload>(["bootstrap"])
+          .getQueryData<BootstrapPayload>(queryKeys.bootstrap)
           ?.issues.find((issue) => issue.id === variables.issue.id);
         if (latestIssue)
           retryVariables = {
@@ -964,7 +952,7 @@ function OrbitAppInner(props: Props) {
     const result = await apiPatch<{
       preferences: BootstrapPayload["preferences"];
     }>("/api/v1/preferences", { idempotencyKey: mutationKey, ...patch });
-    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+    queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
       current ? { ...current, preferences: result.preferences } : current,
     );
   }
@@ -980,7 +968,7 @@ function OrbitAppInner(props: Props) {
       idempotencyKey: mutationKey,
       displayPreferences,
     });
-    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) => {
+    queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) => {
       if (!current) return current;
       const next = current.projectDisplayPreferences.filter(
         (preference) => preference.projectId !== projectId,
@@ -1000,7 +988,7 @@ function OrbitAppInner(props: Props) {
     const result = await apiPatch<{
       cycleSettings: BootstrapPayload["cycleSettings"];
     }>("/api/v1/cycle-settings", { idempotencyKey: mutationKey, ...patch });
-    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+    queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
       current ? { ...current, cycleSettings: result.cycleSettings } : current,
     );
     await refresh();
@@ -1014,7 +1002,7 @@ function OrbitAppInner(props: Props) {
       const result = await apiPatch<{
         preferences: BootstrapPayload["preferences"];
       }>("/api/v1/preferences", { idempotencyKey: mutationKey, colorTheme });
-      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
+      queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
         current ? { ...current, preferences: result.preferences } : current,
       );
       showToast("success", "カラーテーマを変更しました");
@@ -1144,7 +1132,7 @@ function OrbitAppInner(props: Props) {
               },
             },
           })
-            .then(() => queryClient.invalidateQueries({ queryKey: ["recent"] }))
+            .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.recent }))
             .catch(() => undefined);
         })
         .catch((error) => {
@@ -1214,8 +1202,7 @@ function OrbitAppInner(props: Props) {
 
   async function bulkUpdateIssues(patch: Record<string, unknown>) {
     setBulkBusy(true);
-    const mutationKey =
-      bulkMutationKeyRef.current ?? (bulkMutationKeyRef.current = idempotencyKey());
+    const mutationKey = bulkMutationKey.keyFor("bulk");
     try {
       await apiPost("/api/v1/issues/bulk", {
         idempotencyKey: mutationKey,
@@ -1223,11 +1210,11 @@ function OrbitAppInner(props: Props) {
         patch,
       });
       await refresh();
-      bulkMutationKeyRef.current = null;
+      bulkMutationKey.reset();
       showToast("success", `${selected.length}件のIssueを一括更新しました`);
     } catch (error) {
       if (error instanceof ApiError && error.code === "IDEMPOTENCY_KEY_REUSED") await refresh();
-      if (!(error instanceof ApiError) || error.status !== 423) bulkMutationKeyRef.current = null;
+      if (!(error instanceof ApiError) || error.status !== 423) bulkMutationKey.reset();
       throw error;
     } finally {
       setBulkBusy(false);
@@ -1239,7 +1226,7 @@ function OrbitAppInner(props: Props) {
       idempotencyKey: idempotencyKey(),
     });
     await refresh();
-    await queryClient.invalidateQueries({ queryKey: ["issues"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.issuesAll });
     showToast(
       "success",
       action === "archive"
@@ -1438,7 +1425,7 @@ function OrbitAppInner(props: Props) {
               onBulk={bulkUpdateIssues}
               bulkBusy={bulkBusy}
               resetBulkMutation={() => {
-                bulkMutationKeyRef.current = null;
+                bulkMutationKey.reset();
               }}
               onCreate={() => setComposerOpen(true)}
               onOpenIssue={(issue) => openIssue(issue.id)}
@@ -1508,7 +1495,7 @@ function OrbitAppInner(props: Props) {
               onBulk={bulkUpdateIssues}
               bulkBusy={bulkBusy}
               resetBulkMutation={() => {
-                bulkMutationKeyRef.current = null;
+                bulkMutationKey.reset();
               }}
               onCreateIssue={openIssueComposer}
               onSaveDisplayPreferences={saveProjectDisplayPreferences}
@@ -3635,10 +3622,7 @@ export function CyclesView({
     null,
   );
   const [scheduleRetry, setScheduleRetry] = useState<(() => void) | null>(null);
-  const scheduleMutationKeyRef = useRef<{
-    key: string;
-    patch: CycleSchedulePatch;
-  } | null>(null);
+  const scheduleMutationKey = useMutationKey();
   const [assignmentTargetId, setAssignmentTargetId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -3707,7 +3691,7 @@ export function CyclesView({
     setScheduleError(null);
     setScheduleFieldErrors(null);
     setScheduleRetry(null);
-    scheduleMutationKeyRef.current = null;
+    scheduleMutationKey.reset();
   }, [
     scheduleEditing,
     selectedCycle?.id,
@@ -3750,7 +3734,7 @@ export function CyclesView({
     setScheduleError(null);
     setScheduleFieldErrors(null);
     setScheduleRetry(null);
-    scheduleMutationKeyRef.current = null;
+    scheduleMutationKey.reset();
   }
 
   function handleMetadataKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -3804,32 +3788,27 @@ export function CyclesView({
     setScheduleSaving(true);
     setScheduleError(null);
     setScheduleFieldErrors(null);
-    const previous = scheduleMutationKeyRef.current;
-    const mutationKey =
-      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
-        ? previous.key
-        : idempotencyKey();
+    const mutationKey = scheduleMutationKey.keyFor(JSON.stringify(patch));
     try {
       await apiPatch(`/api/v1/cycles/${selectedCycle.id}/schedule`, {
         idempotencyKey: mutationKey,
         ...patch,
       });
-      scheduleMutationKeyRef.current = null;
+      scheduleMutationKey.reset();
       setScheduleRetry(null);
       setScheduleEditing(false);
       await onRefresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
-        scheduleMutationKeyRef.current = null;
+        scheduleMutationKey.reset();
         try {
           await onRefresh();
         } catch {
           // Keep the conflict message visible when refresh itself fails.
         }
-      } else if (caught instanceof ApiError && caught.status === 423) {
-        scheduleMutationKeyRef.current = { key: mutationKey, patch };
-      } else {
-        scheduleMutationKeyRef.current = null;
+      } else if (!(caught instanceof ApiError && caught.status === 423)) {
+        // 423 のときだけ同じ patch の再試行で同じキーを使えるよう保持する
+        scheduleMutationKey.reset();
       }
       setScheduleError(
         caught instanceof ApiError ? caught.message : "Cycle日付の保存に失敗しました。",
@@ -4531,7 +4510,7 @@ export function ProjectsView({
   const [targetDraft, setTargetDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mutationKeyRef = useRef<string | null>(null);
+  const projectMutationKey = useMutationKey();
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const projectOrderKey = projects.map((project) => project.id).join(",");
   const [orderFocus, setOrderFocus] = useState<{
@@ -4567,7 +4546,7 @@ export function ProjectsView({
   const [displaySaving, setDisplaySaving] = useState(false);
   const [displayError, setDisplayError] = useState<string | null>(null);
   const displaySaveTimerRef = useRef<number | undefined>(undefined);
-  const displayMutationKeyRef = useRef<string | null>(null);
+  const displayMutationKey = useMutationKey();
   const persistedDisplaySettingsRef = useRef<string | null>(null);
   const projectIssueFilterInputRef = useRef<HTMLInputElement>(null);
   const projectIssueDisplayInputRef = useRef<HTMLSelectElement>(null);
@@ -4628,7 +4607,7 @@ export function ProjectsView({
     const next = savedDisplayPreferences?.settings ?? defaultProjectIssueDisplaySettings();
     setDisplaySettings(next);
     persistedDisplaySettingsRef.current = JSON.stringify(next);
-    displayMutationKeyRef.current = null;
+    displayMutationKey.reset();
     setDisplaySettingsReady(true);
     setDisplayError(null);
   }, [selectedProject?.id, savedDisplayPreferences?.updatedAt]);
@@ -4662,21 +4641,20 @@ export function ProjectsView({
     if (!selectedProject || displaySaving) return;
     setDisplaySaving(true);
     setDisplayError(null);
-    const mutationKey =
-      displayMutationKeyRef.current ?? (displayMutationKeyRef.current = idempotencyKey());
+    const mutationKey = displayMutationKey.keyFor("project-display");
     try {
       await onSaveDisplayPreferences(selectedProject.id, settings, mutationKey);
       if (JSON.stringify(settings) === displaySettingsKey)
         persistedDisplaySettingsRef.current = JSON.stringify(settings);
-      displayMutationKeyRef.current = null;
+      displayMutationKey.reset();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
-        displayMutationKeyRef.current = null;
+        displayMutationKey.reset();
         await onRefresh();
         setDisplayError("別の表示設定が保存されています。最新の表示設定を読み込みました。");
         return;
       }
-      if (caught instanceof ApiError && caught.status !== 423) displayMutationKeyRef.current = null;
+      if (caught instanceof ApiError && caught.status !== 423) displayMutationKey.reset();
       setDisplayError(
         caught instanceof ApiError && caught.fieldErrors
           ? Object.values(caught.fieldErrors).flat().join(" ")
@@ -4730,7 +4708,7 @@ export function ProjectsView({
   }
 
   function cancelEdit() {
-    mutationKeyRef.current = null;
+    projectMutationKey.reset();
     if (selectedProject) {
       setNameDraft(selectedProject.name);
       setDescriptionDraft(selectedProject.description);
@@ -4749,7 +4727,7 @@ export function ProjectsView({
     if (!selectedProject || saving) return;
     setSaving(true);
     setError(null);
-    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    const mutationKey = projectMutationKey.keyFor("project");
     try {
       await apiPatch(`/api/v1/projects/${selectedProject.id}`, {
         idempotencyKey: mutationKey,
@@ -4760,17 +4738,17 @@ export function ProjectsView({
           targetAt: dateInputToUnix(targetDraft),
         },
       });
-      mutationKeyRef.current = null;
+      projectMutationKey.reset();
       setEditing(false);
       await onRefresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "IDEMPOTENCY_KEY_REUSED") {
-        mutationKeyRef.current = null;
+        projectMutationKey.reset();
         setEditing(false);
         await onRefresh();
         setError("別の内容で保存されています。最新のProjectを読み込みました。");
       } else {
-        if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+        if (caught instanceof ApiError && caught.status !== 423) projectMutationKey.reset();
         setError(
           caught instanceof ApiError && caught.fieldErrors
             ? Object.values(caught.fieldErrors).flat().join(" ")
@@ -5866,7 +5844,7 @@ export function ViewsView({
   const [orderDraft, setOrderDraft] = useState("manual");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mutationKeyRef = useRef<string | null>(null);
+  const savedViewMutationKey = useMutationKey();
   const deleteRetryRef = useRef<SavedView | null>(null);
   const [errorAction, setErrorAction] = useState<"save" | "delete" | null>(null);
   const selectedView = views.find((view) => view.id === selectedViewId) ?? null;
@@ -5890,7 +5868,7 @@ export function ViewsView({
   }
 
   function startCreate() {
-    mutationKeyRef.current = null;
+    savedViewMutationKey.reset();
     setEditorOpen(true);
     setEditingView(null);
     setNameDraft("");
@@ -5909,7 +5887,7 @@ export function ViewsView({
   }
 
   function startEdit(view: SavedView) {
-    mutationKeyRef.current = null;
+    savedViewMutationKey.reset();
     setEditorOpen(true);
     onSelectView(view.id);
     setEditingView(view);
@@ -5922,7 +5900,7 @@ export function ViewsView({
   }
 
   function cancelEdit() {
-    mutationKeyRef.current = null;
+    savedViewMutationKey.reset();
     setEditorOpen(false);
     setEditingView(null);
     setNameDraft("");
@@ -5935,7 +5913,7 @@ export function ViewsView({
     setSaving(true);
     setError(null);
     setErrorAction("save");
-    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    const mutationKey = savedViewMutationKey.keyFor("saved-view");
     const query = updateSavedViewQuery(queryDraft, {
       mode: modeDraft,
       order: orderDraft as IssueQuery["order"],
@@ -5957,13 +5935,13 @@ export function ViewsView({
         });
         onSelectView(created.view.id);
       }
-      mutationKeyRef.current = null;
+      savedViewMutationKey.reset();
       setErrorAction(null);
       cancelEdit();
       await onRefresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "IDEMPOTENCY_KEY_REUSED") {
-        mutationKeyRef.current = null;
+        savedViewMutationKey.reset();
         setEditorOpen(false);
         setEditingView(null);
         setNameDraft("");
@@ -5971,10 +5949,10 @@ export function ViewsView({
         await onRefresh();
         setError("別の内容で保存されています。最新のSaved Viewを読み込みました。");
       } else if (caught instanceof ApiError && caught.fieldErrors) {
-        if (caught.status !== 423) mutationKeyRef.current = null;
+        if (caught.status !== 423) savedViewMutationKey.reset();
         setError(Object.values(caught.fieldErrors).flat().join(" "));
       } else {
-        if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+        if (caught instanceof ApiError && caught.status !== 423) savedViewMutationKey.reset();
         setError(caught instanceof ApiError ? caught.message : "Saved Viewの保存に失敗しました。");
       }
     } finally {
@@ -5988,17 +5966,17 @@ export function ViewsView({
     setError(null);
     setErrorAction("delete");
     deleteRetryRef.current = view;
-    const mutationKey = mutationKeyRef.current ?? (mutationKeyRef.current = idempotencyKey());
+    const mutationKey = savedViewMutationKey.keyFor("saved-view");
     try {
       await apiDelete(`/api/v1/views/${view.id}`, mutationKey);
-      mutationKeyRef.current = null;
+      savedViewMutationKey.reset();
       deleteRetryRef.current = null;
       setErrorAction(null);
       if (editingView?.id === view.id) cancelEdit();
       if (selectedViewId === view.id) onSelectView(null);
       await onRefresh();
     } catch (caught) {
-      if (caught instanceof ApiError && caught.status !== 423) mutationKeyRef.current = null;
+      if (caught instanceof ApiError && caught.status !== 423) savedViewMutationKey.reset();
       setError(
         caught instanceof ApiError && caught.fieldErrors
           ? Object.values(caught.fieldErrors).flat().join(" ")
@@ -6245,10 +6223,7 @@ export function SettingsView({
   > | null>(null);
   const [preferenceSaved, setPreferenceSaved] = useState<string | null>(null);
   const [preferenceRetry, setPreferenceRetry] = useState<(() => void) | null>(null);
-  const preferenceMutationKeyRef = useRef<{
-    key: string;
-    patch: PreferencePatch;
-  } | null>(null);
+  const preferenceMutationKey = useMutationKey();
   const [cycleDurationDraft, setCycleDurationDraft] = useState(cycleSettings.durationWeeks);
   const [cycleStartWeekdayDraft, setCycleStartWeekdayDraft] = useState(cycleSettings.startWeekday);
   const [cycleSettingsSaving, setCycleSettingsSaving] = useState(false);
@@ -6259,10 +6234,7 @@ export function SettingsView({
   > | null>(null);
   const [cycleSettingsSaved, setCycleSettingsSaved] = useState<string | null>(null);
   const [cycleSettingsRetry, setCycleSettingsRetry] = useState<(() => void) | null>(null);
-  const cycleSettingsMutationKeyRef = useRef<{
-    key: string;
-    patch: CycleSettingsPatch;
-  } | null>(null);
+  const cycleSettingsMutationKey = useMutationKey();
   const [cycleCooldownDraft, setCycleCooldownDraft] = useState(cycleSettings.cooldownWeeks);
   const [cycleFutureCountDraft, setCycleFutureCountDraft] = useState(cycleSettings.futureCount);
   const [cycleAutoAddDraft, setCycleAutoAddDraft] = useState(cycleSettings.autoAddToCurrentCycle);
@@ -6272,7 +6244,7 @@ export function SettingsView({
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [labelSaving, setLabelSaving] = useState(false);
   const [labelError, setLabelError] = useState<string | null>(null);
-  const labelMutationKeyRef = useRef<string | null>(null);
+  const labelMutationKey = useMutationKey();
   const labelDeleteRetryRef = useRef<BootstrapPayload["labels"][number] | null>(null);
   const [labelErrorAction, setLabelErrorAction] = useState<"save" | "delete" | null>(null);
   const [trashSavingId, setTrashSavingId] = useState<string | null>(null);
@@ -6318,18 +6290,13 @@ export function SettingsView({
     setPreferenceError(null);
     setPreferenceFieldErrors(null);
     setPreferenceSaved(null);
-    const previous = preferenceMutationKeyRef.current;
-    const mutationKey =
-      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
-        ? previous.key
-        : idempotencyKey();
+    const mutationKey = preferenceMutationKey.keyFor(JSON.stringify(patch));
     try {
       await onPreferences(patch, mutationKey);
-      preferenceMutationKeyRef.current = null;
+      preferenceMutationKey.reset();
       setPreferenceRetry(null);
       setPreferenceSaved("設定を保存しました。");
     } catch (error) {
-      preferenceMutationKeyRef.current = { key: mutationKey, patch };
       restore();
       setPreferenceError(error instanceof ApiError ? error.message : "設定の保存に失敗しました。");
       setPreferenceFieldErrors(error instanceof ApiError ? (error.fieldErrors ?? null) : null);
@@ -6356,28 +6323,23 @@ export function SettingsView({
     setCycleSettingsError(null);
     setCycleSettingsFieldErrors(null);
     setCycleSettingsSaved(null);
-    const previous = cycleSettingsMutationKeyRef.current;
-    const mutationKey =
-      previous && JSON.stringify(previous.patch) === JSON.stringify(patch)
-        ? previous.key
-        : idempotencyKey();
+    const mutationKey = cycleSettingsMutationKey.keyFor(JSON.stringify(patch));
     try {
       await onCycleSettings(patch, mutationKey);
-      cycleSettingsMutationKeyRef.current = null;
+      cycleSettingsMutationKey.reset();
       setCycleSettingsRetry(null);
       setCycleSettingsSaved("Cycle設定を保存しました。");
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        cycleSettingsMutationKeyRef.current = null;
+        cycleSettingsMutationKey.reset();
         try {
           await onRefresh();
         } catch {
           // Keep the conflict message visible when the refresh itself fails.
         }
-      } else if (error instanceof ApiError && error.status === 423) {
-        cycleSettingsMutationKeyRef.current = { key: mutationKey, patch };
-      } else {
-        cycleSettingsMutationKeyRef.current = null;
+      } else if (!(error instanceof ApiError && error.status === 423)) {
+        // 423 のときだけ同じ patch の再試行で同じキーを使えるよう保持する
+        cycleSettingsMutationKey.reset();
       }
       setCycleSettingsError(
         error instanceof ApiError ? error.message : "Cycle設定の保存に失敗しました。",
@@ -6390,7 +6352,7 @@ export function SettingsView({
   }
 
   function startLabelEdit(label: BootstrapPayload["labels"][number]) {
-    labelMutationKeyRef.current = null;
+    labelMutationKey.reset();
     setEditingLabelId(label.id);
     setLabelName(label.name);
     setLabelColor(label.color);
@@ -6399,7 +6361,7 @@ export function SettingsView({
   }
 
   function cancelLabelEdit() {
-    labelMutationKeyRef.current = null;
+    labelMutationKey.reset();
     setEditingLabelId(null);
     setLabelName("");
     setLabelColor("#E05252");
@@ -6412,8 +6374,7 @@ export function SettingsView({
     setLabelSaving(true);
     setLabelError(null);
     setLabelErrorAction("save");
-    const mutationKey =
-      labelMutationKeyRef.current ?? (labelMutationKeyRef.current = idempotencyKey());
+    const mutationKey = labelMutationKey.keyFor("label");
     try {
       if (editingLabelId) {
         await apiPatch(`/api/v1/labels/${editingLabelId}`, {
@@ -6432,7 +6393,7 @@ export function SettingsView({
       setLabelErrorAction(null);
       await onRefresh();
     } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 423) labelMutationKeyRef.current = null;
+      if (!(error instanceof ApiError) || error.status !== 423) labelMutationKey.reset();
       setLabelError(
         error instanceof ApiError && error.fieldErrors
           ? Object.values(error.fieldErrors).flat().join(" ")
@@ -6451,17 +6412,16 @@ export function SettingsView({
     setLabelError(null);
     setLabelErrorAction("delete");
     labelDeleteRetryRef.current = label;
-    const mutationKey =
-      labelMutationKeyRef.current ?? (labelMutationKeyRef.current = idempotencyKey());
+    const mutationKey = labelMutationKey.keyFor("label");
     try {
       await apiDelete(`/api/v1/labels/${label.id}`, mutationKey);
-      labelMutationKeyRef.current = null;
+      labelMutationKey.reset();
       labelDeleteRetryRef.current = null;
       setLabelErrorAction(null);
       if (editingLabelId === label.id) cancelLabelEdit();
       await onRefresh();
     } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 423) labelMutationKeyRef.current = null;
+      if (!(error instanceof ApiError) || error.status !== 423) labelMutationKey.reset();
       setLabelError(error instanceof ApiError ? error.message : "Labelの削除に失敗しました。");
     } finally {
       setLabelSaving(false);
@@ -7045,7 +7005,7 @@ function WorkflowSettingsCard({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]> | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [retry, setRetry] = useState<(() => void) | null>(null);
-  const mutationKeyRef = useRef<{ key: string; signature: string } | null>(null);
+  const workflowMutationKey = useMutationKey();
 
   type WorkflowMutation = (mutationKey: string) => Promise<void>;
 
@@ -7078,12 +7038,10 @@ function WorkflowSettingsCard({
     setError(null);
     setFieldErrors(null);
     setSaved(null);
-    const previous = mutationKeyRef.current;
-    const mutationKey =
-      previous && previous.signature === signature ? previous.key : idempotencyKey();
+    const mutationKey = workflowMutationKey.keyFor(signature);
     try {
       await operation(mutationKey);
-      mutationKeyRef.current = null;
+      workflowMutationKey.reset();
       setRetry(null);
       setFieldErrors(null);
       await onRefresh();
@@ -7091,7 +7049,6 @@ function WorkflowSettingsCard({
       setSaved(successMessage);
       return true;
     } catch (cause) {
-      mutationKeyRef.current = { key: mutationKey, signature };
       const message =
         cause instanceof ApiError && cause.fieldErrors
           ? Object.values(cause.fieldErrors).flat().join(" ")
@@ -7555,7 +7512,7 @@ export function IssueDetailPanel({
     },
   });
   const detailQuery = useQuery({
-    queryKey: ["issue-detail", issueId],
+    queryKey: queryKeys.issueDetail(issueId),
     queryFn: () => apiGet<IssueDetailViewModel>(`/api/v1/issues/${issueId}`),
   });
   const detail = detailQuery.data;
@@ -7680,31 +7637,7 @@ export function IssueDetailPanel({
 
   function applyUpdatedIssue(updatedIssue: Issue) {
     issueRef.current = updatedIssue;
-    function syncScope(items: Issue[], scope: IssueListScope): Issue[] {
-      const belongs =
-        scope === "trash"
-          ? updatedIssue.deletedAt !== null
-          : updatedIssue.deletedAt === null &&
-            (scope === "archived"
-              ? updatedIssue.archivedAt !== null
-              : updatedIssue.archivedAt === null);
-      const exists = items.some((item) => item.id === updatedIssue.id);
-      if (!belongs) return exists ? items.filter((item) => item.id !== updatedIssue.id) : items;
-      return exists
-        ? items.map((item) => (item.id === updatedIssue.id ? updatedIssue : item))
-        : [...items, updatedIssue];
-    }
-    queryClient.setQueryData<IssueDetailViewModel>(["issue-detail", issueId], (current) =>
-      current ? { ...current, issue: updatedIssue } : current,
-    );
-    queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-      current ? { ...current, issues: syncScope(current.issues, "active") } : current,
-    );
-    for (const scope of ["active", "archived", "trash"] as const) {
-      queryClient.setQueryData<{ items: Issue[] }>(["issues", scope], (current) =>
-        current ? { ...current, items: syncScope(current.items, scope) } : current,
-      );
-    }
+    syncIssueCaches(queryClient, updatedIssue);
   }
 
   async function saveDescription(
@@ -8091,13 +8024,8 @@ export function IssueDetailPanel({
       await apiPost(`/api/v1/issues/${trashTarget.id}?action=trash`, {
         idempotencyKey: idempotencyKey(),
       });
-      queryClient.setQueryData<BootstrapPayload>(["bootstrap"], (current) =>
-        current
-          ? { ...current, issues: current.issues.filter((item) => item.id !== trashTarget.id) }
-          : current,
-      );
-      await queryClient.invalidateQueries({ queryKey: ["issues"] });
-      queryClient.removeQueries({ queryKey: ["issue-detail", trashTarget.id] });
+      removeIssueFromCaches(queryClient, trashTarget.id);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.issuesAll });
       onClose();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Issueの削除に失敗しました。");

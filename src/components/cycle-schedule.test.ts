@@ -457,6 +457,12 @@ describe("Cycle schedule UI", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 423 の後の再試行は同じ patch なので同じ冪等キーで送る
+    const sentKeys = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).idempotencyKey,
+    );
+    expect(sentKeys[0]).toEqual(expect.any(String));
+    expect(sentKeys[1]).toBe(sentKeys[0]);
     expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
       "一時的な障害です。",
     );

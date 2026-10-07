@@ -1,15 +1,9 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -26,7 +20,7 @@ function json(payload: unknown, status = 200) {
 }
 let dom: JSDOM;
 let detailDocument: Document;
-let root: Root;
+let app: RenderedApp | undefined;
 let serverIssue = reviewIssue();
 let serverNotes: ReturnType<typeof reviewDetail>["notes"];
 let patches: Array<{
@@ -52,9 +46,10 @@ function bootstrap() {
   return data;
 }
 async function render() {
-  await act(async () =>
-    root.render(createElement(OrbitApp, { initialSection: "issues", issueId: "issue-1" })),
-  );
+  app = await renderApp({
+    url: "/issues/issue-1",
+    container: detailDocument.getElementById("root")!,
+  });
   await act(async () => vi.advanceTimersByTimeAsync(0));
 }
 function selectProject(value: string) {
@@ -125,19 +120,19 @@ beforeEach(() => {
       },
     });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(detailDocument.getElementById("root")!);
   serverIssue = reviewIssue();
   noLabels = false;
   serverNotes = [];
   patches = [];
   unexpected = [];
   queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], bootstrap());
   vi.stubGlobal(
     "fetch",
     vi.fn((path: string, init: RequestInit = {}) => {
@@ -162,7 +157,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
+  await app?.unmount();
+  app = undefined;
   queryClient.clear();
   dom.window.close();
   vi.useRealTimers();
@@ -449,7 +445,6 @@ describe("Detail follow-up runtime", () => {
 
   it("[空状態] Labelがない場合は作成場所へ進める", async () => {
     noLabels = true;
-    queryClient.setQueryData(["bootstrap"], bootstrap());
     await render();
     expect(detailDocument.querySelector('.detail-label-editor input[type="checkbox"]')).toBeNull();
     expect(
@@ -491,6 +486,7 @@ describe("Detail follow-up runtime", () => {
     );
     expect(detailDocument.querySelector(".orbit-calendar")).toBeNull();
     expect(detailDocument.querySelector('[aria-label="Issue詳細を閉じる"]')).not.toBeNull();
+    expect(app!.router.state.location.pathname).toBe("/issues/issue-1");
   });
 
   it("[状態遷移] Project選択だけで自動保存し手動保存ボタンを表示しない", async () => {

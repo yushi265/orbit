@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:baseline": "node scripts/test-baseline.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
     "format": "oxfmt package.json tsconfig.json vite.config.ts wrangler.jsonc wrangler.local.jsonc drizzle.config.ts vitest.config.ts scripts src/styles.css src/env.d.ts src/cloudflare.d.ts src/router.tsx src/components src/db src/lib src/routes src/server src/shared public drizzle",

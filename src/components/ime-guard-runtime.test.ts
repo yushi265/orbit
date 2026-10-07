@@ -1,19 +1,14 @@
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp, SettingsView } from "./OrbitApp";
-import { queryClient } from "../lib/query";
-import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-
-const navigate = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate }),
-}));
+import { SettingsView } from "./OrbitApp";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
+import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
+let settingsRoot: Root | undefined;
 let requests: Array<{ path: string; method: string }>;
 let unexpected: string[];
 let boot = reviewBootstrap();
@@ -69,16 +64,14 @@ beforeEach(() => {
     });
   }
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   boot = reviewBootstrap();
-  queryClient.setQueryData(["bootstrap"], boot);
-  navigate.mockClear();
   requests = [];
   unexpected = [];
   vi.stubGlobal(
@@ -92,6 +85,8 @@ beforeEach(() => {
       if (path === "/api/v1/recent-searches" && method === "POST") return Promise.resolve(json({}));
       if (path.startsWith("/api/v1/search?"))
         return Promise.resolve(json({ items: [reviewIssue("hit")] }));
+      if (path === "/api/v1/issues/hit" && method === "GET")
+        return Promise.resolve(json(reviewDetail(reviewIssue("hit"))));
       if (path === "/api/v1/recent-issue-views" && method === "POST")
         return Promise.resolve(json({}));
       if (path === "/api/v1/labels" && method === "POST") return Promise.resolve(json({}));
@@ -102,22 +97,25 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
+  if (settingsRoot) await act(async () => settingsRoot!.unmount());
+  settingsRoot = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   expect(unexpected).toEqual([]);
 });
 
-async function renderApp() {
-  await act(async () => root.render(createElement(OrbitApp, { initialSection: "search" })));
+async function renderOrbit(url = "/search") {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await advance(0);
 }
 async function renderSettings() {
   const state = reviewBootstrap().workflowStates;
+  settingsRoot = createRoot(dom.window.document.getElementById("root")!);
   await act(async () =>
-    root.render(
+    settingsRoot!.render(
       createElement(SettingsView, {
         preferences: reviewBootstrap().preferences,
         cycleSettings: reviewBootstrap().cycleSettings,
@@ -142,7 +140,7 @@ const posts = (path: string) =>
 
 describe("IME composition guard: command palette", () => {
   async function openPalette() {
-    await renderApp();
+    await renderOrbit();
     await press(dom.window.document.body, "k", { ctrlKey: true });
     return q<HTMLInputElement>("#command-palette-options")!.parentElement!.querySelector("input")!;
   }
@@ -171,7 +169,7 @@ describe("IME composition guard: command palette", () => {
 
 describe("IME composition guard: Search input", () => {
   async function searchHit() {
-    await renderApp();
+    await renderOrbit();
     const input = q<HTMLInputElement>("#global-search-input")!;
     await act(async () => setValue(input, "hit"));
     await advance(300);
@@ -179,13 +177,15 @@ describe("IME composition guard: Search input", () => {
   }
   it.each(IME_EVENTS)("[同値分割] 変換中Enter %j は結果を開かない", async (ime) => {
     const input = await searchHit();
+    const historyLength = app!.router.history.length;
     await press(input, "Enter", ime);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(app!.router.state.location.pathname).toBe("/search");
+    expect(app!.router.history.length).toBe(historyLength);
   });
   it("[同値分割] 変換中でないEnterは先頭結果を開く", async () => {
     const input = await searchHit();
     await press(input, "Enter");
-    expect(navigate).toHaveBeenCalled();
+    expect(app!.router.state.location.pathname).toBe("/issues/hit");
   });
 });
 
@@ -244,7 +244,7 @@ describe("IME composition guard: window shortcut Escape", () => {
   it.each(IME_EVENTS)(
     "[同値分割] 変換中Escape %j はwindowショートカットを発火しない",
     async (ime) => {
-      await renderApp();
+      await renderOrbit();
       // window経路のEscape(close)は変換中ならpreventDefaultもしない
       const event = new dom.window.KeyboardEvent("keydown", {
         key: "Escape",
@@ -285,9 +285,7 @@ function buttonByText(text: string) {
 describe("IME composition guard: Cycle / Project editors", () => {
   async function openCycles() {
     boot.cycles.push(cycle("c1", 1, "active"), cycle("c2", 2, "upcoming"));
-    queryClient.setQueryData(["bootstrap"], boot);
-    await act(async () => root.render(createElement(OrbitApp, { initialSection: "cycles" })));
-    await advance(0);
+    await renderOrbit("/cycles");
   }
   it.each(IME_EVENTS)("[同値分割] Cycle名 変換中Escape %j は編集を取り消さない", async (ime) => {
     await openCycles();
@@ -326,10 +324,7 @@ describe("IME composition guard: Cycle / Project editors", () => {
     expect(q(".cycle-schedule-editor")).toBeNull();
   });
   async function openProjectEditor() {
-    await act(async () =>
-      root.render(createElement(OrbitApp, { initialSection: "projects", projectId: "project-1" })),
-    );
-    await advance(0);
+    await renderOrbit("/projects/project-1");
     await act(async () => buttonByText("Projectを編集").click());
     return q<HTMLElement>("#project-target-detail")!;
   }
@@ -350,7 +345,7 @@ describe("IME composition guard: Cycle / Project editors", () => {
 
 describe("IME composition guard: 正の対照", () => {
   it("[同値分割] window経路 変換中でないEscapeはpreventDefaultされる", async () => {
-    await renderApp();
+    await renderOrbit();
     const event = new dom.window.KeyboardEvent("keydown", {
       key: "Escape",
       bubbles: true,

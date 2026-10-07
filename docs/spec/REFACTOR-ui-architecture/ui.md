@@ -136,7 +136,7 @@ src/
 
 | Phase | 主な変更ファイル | 完了条件 |
 |---|---|---|
-| 0 | `scripts/test-baseline.mjs`（新規: `vitest --reporter=json` からテスト名一覧を出力し、ベースライン JSON と突合。`skip` / `only` / `todo` を検出）と `test-baseline.json`、`src/components/render-app.test-fixtures.ts`（新規: `renderApp({ url, bootstrap, fetch })` が本番 `routeTree`・`createMemoryHistory`・テストごとに新しい `QueryClient` で描画）、OrbitApp を描画する runtime テスト 22 本の描画部分、`detail-select-size.test.ts` | ベースライン突合が一致。各テストの assert 対応表を PR に記載。`vi.mock("@tanstack/react-router")` は View 単体テストだけに残る |
+| 0 | `scripts/test-baseline.mjs`（新規: `vitest --reporter=json` からテスト名一覧を出力し、ベースライン JSON と突合。`skip` / `only` / `todo` を検出）と `scripts/test-baseline.json`（`package.json` に `test:baseline` を追加）、`src/components/render-app.test-fixtures.ts`（新規: `renderApp({ url, container, seed?, strict? })` が本番 `routeTree`・`createMemoryHistory` で `container` に描画する。jsdom と fetch のスタブは各テストが用意する。`seed(client)` は clear の後・描画の前にキャッシュを仕込む〔キャッシュ有無が前提のテスト 3 例が根拠〕。`strict` は StrictMode で包む〔StrictMode の effect 二重実行を検証する既存テスト用〕。root コンポーネントだけはテスト内で `Outlet` に差し替える〔`__root` の `<html>` を div 内に描画すると React が入れ子の警告を出すため。head は `pwa.test.ts` が検証〕。QueryClient は現行 OrbitApp がモジュールのシングルトンを使うため、Phase 0 では描画前後の `queryClient.clear()` で分離する）、OrbitApp を描画する runtime テスト 22 本の描画部分、`detail-select-size.test.ts` | ベースライン突合が一致。各テストの assert 対応表を PR に記載。`vi.mock("@tanstack/react-router")` は View 単体テストだけに残る |
 | 1 | `src/components/ui/*`（新規）、`OrbitApp.tsx` から該当部品を削除して import に置換 | 見た目・DOM 不変。日付 helper の重複（`dateInputValueInTimeZone` ↔ `calendarDateKeyInTimeZone`、`formatDateOnly` ↔ `formatIssueDueDate`）を出力一致テストで確認してから統合 |
 | 2 | `src/lib/queries/*`（新規）、`OrbitApp.tsx` の useQuery / setQueryData / `*MutationKeyRef` | AC-6 と `useMutationKey` のテスト追加。キャッシュ操作が `syncIssueCaches` / `removeIssueFromCaches` / `queryKeys` に集約 |
 | 3 | `src/routes/__root.tsx`、`src/routes/issues.tsx`（新規 layout）、全画面ルート、`src/routeTree.gen.ts`（生成物）、`features/shell/*`（新規）、`docs/architecture.md` | AC-1〜AC-5 のテスト追加。`section` / `getInitialSection` / `orbit.issue-focus` を削除。`docs/architecture.md` のレイヤー表を更新 |
@@ -176,11 +176,15 @@ src/
 Phase ごとの PR で追加する。既存テストは全件を回帰テストとして維持する（AC-7）。jsdom の制約として、レイアウト計算・実スクロール・`inert` の完全な挙動は検証範囲外とし、DOM ノードの同一性と `document.activeElement` で観測する。非同期の遷移は `act` + `findBy*` / `waitFor` で待つ。
 
 AC-7（Phase 0 で先に整備し、以後の全 Phase で実行）:
-- [代表値] `scripts/test-baseline.mjs` が Phase 0 開始時の main で `test-baseline.json`（ファイルパス + describe + it 名の一覧、fail 済みテスト名の一覧）を出力する
+- [代表値] `scripts/test-baseline.mjs record` が Phase 0 開始時の main で `scripts/test-baseline.json`（ファイルパス + describe + it 名の一覧、fail 済みテスト名の一覧）を出力する
 - [同値分割] 突合: ベースラインと同名・同数 → 合格 / テストが 1 件消えた → 不合格（消えた名前を表示）/ 新規テストの追加 → 合格 / ベースライン外の fail → 不合格
-- [同値分割] `it.skip` / `it.only` / `it.todo` / `describe.skip` を含むファイル → 不合格
+- [同値分割] 実行結果が skipped / pending / todo のテストがある（`it.skip`・`describe.skip`・`it.todo` と、`it.only` による他テストの除外を含む）→ 不合格
+- [境界値] it.each 等で同名のテストが複数ある ID は件数で突合する: 2 件 → 1 件に減ったら不合格 / 2 件のままなら合格
 - [代表値] `renderApp` が本番 `routeTree` を使う: 描画後の `router.routeTree` が `routeTree.gen` の export と同一参照
-- [代表値] `renderApp` の 2 回の呼び出しで `QueryClient` が別インスタンス（キャッシュがテスト間で漏れない）
+- [代表値] `renderApp` の描画前に `queryClient` のキャッシュが空になり、`unmount` 後も空になる（キャッシュがテスト間で漏れない）。別インスタンス化は AppShell が QueryClient を持つ Phase 3 で行い、そのときこのケースを「2 回の呼び出しで別インスタンス」に置き換える
+- [代表値] `renderApp` で描画した画面で `console.error` が呼ばれない（root を `Outlet` に差し替えた効果の確認）
+- [代表値] `seed` で仕込んだキャッシュ（fetch スタブと異なる Bootstrap）が描画に使われる
+- [代表値] `strict: true` は `followup-shell-runtime.test.ts` の StrictMode 計測テストで検証する（`strict` を無視する改変で同テストが fail することを確認済み）
 - [代表値] 描画方法を移した 22 本は、PR の対応表（変更前 assert → 変更後 assert、matcher 名）で 1 対 1 に対応する。`toBeTruthy` / `toBeDefined` への置き換えは不可（人間がレビューで確認）
 
 Phase 1（AC-7 の一部）:

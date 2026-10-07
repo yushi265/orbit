@@ -1,11 +1,11 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot } from "react-dom/client";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
-import { CycleBreakdownSection, CyclesView, OrbitApp } from "./OrbitApp";
+import { CycleBreakdownSection, CyclesView } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { OrbitStore } from "../server/store";
 import type {
   CycleViewModel as Cycle,
@@ -27,11 +27,6 @@ const projects = [
   { id: "project-a", name: "Project A" },
   { id: "project-empty", name: "空Project" },
 ];
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children?: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn() }),
-}));
 
 function breakdownRows(dom: JSDOM, labelledBy: string) {
   return [
@@ -56,6 +51,8 @@ function setupDom(url = "https://orbit.example/cycles") {
     })),
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
@@ -323,16 +320,14 @@ describe("Cycle breakdown", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const dom = setupDom(`https://orbit.example/cycles/${activeCycle.id}`);
-    const root = createRoot(dom.window.document.getElementById("root")!);
+    let app: RenderedApp | undefined;
 
     try {
+      app = await renderApp({
+        url: `/cycles/${activeCycle.id}`,
+        container: dom.window.document.getElementById("root")!,
+      });
       await act(async () => {
-        root.render(
-          createElement(OrbitApp, {
-            initialSection: "cycles",
-            cycleId: activeCycle.id,
-          }),
-        );
         for (let attempt = 0; attempt < 20; attempt += 1) {
           if (dom.window.document.querySelector('[aria-label="Cycleの内訳"]')) break;
           await new Promise((resolve) => setTimeout(resolve, 20));
@@ -353,10 +348,7 @@ describe("Cycle breakdown", () => {
           ?.textContent,
       ).toContain("Project A");
     } finally {
-      await act(async () => {
-        root.unmount();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
+      await app?.unmount();
     }
   });
 });

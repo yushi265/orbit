@@ -1,16 +1,12 @@
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CyclesView, IssueCycleHistorySection, OrbitApp } from "./OrbitApp";
+import { CyclesView, IssueCycleHistorySection } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap } from "./review-ui.test-fixtures";
-
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 
 const cycles = [
   {
@@ -384,7 +380,7 @@ describe("Cycle history UI", () => {
     const json = (value: unknown) =>
       new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 
-    function renderApp(bootstrap: () => Promise<Response>) {
+    function setupApp(bootstrap: () => Promise<Response>) {
       vi.useFakeTimers();
       const dom = new JSDOM("<!doctype html><div id='root'></div>", {
         url: "https://orbit.example/",
@@ -413,30 +409,34 @@ describe("Cycle history UI", () => {
           throw new Error(`Unexpected API request: ${path}`);
         }),
       );
-      const root = createRoot(dom.window.document.getElementById("root")!);
-      return { dom, root };
+      return { dom };
     }
 
-    async function mount(root: ReturnType<typeof renderApp>["root"]) {
-      await act(async () => root.render(createElement(OrbitApp, { initialSection: "cycles" })));
+    async function mount(dom: JSDOM) {
+      const app = await renderApp({
+        url: "/cycles",
+        container: dom.window.document.getElementById("root")!,
+      });
       await act(async () => vi.advanceTimersByTimeAsync(0));
+      return app;
     }
 
     const payload = () => ({ ...reviewBootstrap(), cycles, cycleHistory });
 
     it("取得中はローディング表示を出し、Cycle画面は出さない", async () => {
-      const { dom, root } = renderApp(() => new Promise<Response>(() => undefined));
-      await mount(root);
+      const { dom } = setupApp(() => new Promise<Response>(() => undefined));
+      const app: RenderedApp = await mount(dom);
       expect(dom.window.document.querySelector(".loading-screen")?.textContent).toContain(
         "Orbitを準備しています…",
       );
       expect(dom.window.document.body.textContent).not.toContain("繰越");
-      await act(async () => root.unmount());
+      expect(dom.window.document.querySelector("aside.sidebar")).toBeNull();
+      await app.unmount();
     });
 
     it("初回取得に失敗したらエラー画面を出し、再試行ボタンで再取得して繰越履歴を表示する", async () => {
       let fails = true;
-      const { dom, root } = renderApp(async () =>
+      const { dom } = setupApp(async () =>
         fails
           ? new Response(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "失敗" } }), {
               status: 500,
@@ -444,11 +444,12 @@ describe("Cycle history UI", () => {
             })
           : json(payload()),
       );
-      await mount(root);
+      const app: RenderedApp = await mount(dom);
       await act(async () => vi.advanceTimersByTimeAsync(2000));
       const doc = dom.window.document as unknown as Document;
       expect(doc.querySelector(".error-screen")?.textContent).toContain("接続できません");
       expect(doc.body.textContent).not.toContain("繰越");
+      expect(doc.querySelector("aside.sidebar")).toBeNull();
 
       fails = false;
       const retry = [...doc.querySelectorAll<HTMLButtonElement>(".error-screen button")].find(
@@ -458,18 +459,18 @@ describe("Cycle history UI", () => {
       await act(async () => retry.click());
       await act(async () => vi.advanceTimersByTimeAsync(0));
       expect(doc.querySelector(".error-screen")).toBeNull();
-      await act(async () => root.unmount());
+      await app.unmount();
     });
 
     it("Bootstrapの cycleHistory がCyclesViewへ配線され、選択中Cycleへの繰越だけを表示する", async () => {
-      const { dom, root } = renderApp(async () => json(payload()));
-      await mount(root);
+      const { dom } = setupApp(async () => json(payload()));
+      const app: RenderedApp = await mount(dom);
       const text = dom.window.document.body.textContent;
       expect(text).toContain("繰越 1件");
       expect(text).toContain("TASK-1");
       expect(text).toContain("繰越Issue");
       expect(text).toContain("元Cycle: Cycle 1");
-      await act(async () => root.unmount());
+      await app.unmount();
     });
   });
 });

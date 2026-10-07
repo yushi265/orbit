@@ -1,18 +1,7 @@
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
-import { normalizeIssueSearch, type IssueSearch } from "../lib/url-state/issues";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 
 type Section =
@@ -25,10 +14,9 @@ type Section =
   | "views"
   | "settings";
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let unexpected: string[];
 let unread = 0;
-let projectId: string | undefined;
 let mediaListeners: Array<(event: { matches: boolean }) => void>;
 const first = reviewIssue("issue-1", { title: "needle" });
 const second = reviewIssue("issue-2", { title: "other", priority: "low", labelIds: [] });
@@ -50,29 +38,6 @@ function payload() {
 }
 function json(value: unknown) {
   return new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-}
-function makeRouter(entry: string, section: Section) {
-  const base = createRootRoute({ component: Outlet });
-  const list = createRoute({
-    getParentRoute: () => base,
-    path: "/issues",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueSearch: list.useSearch(),
-      } as Parameters<typeof OrbitApp>[0] & { issueSearch: IssueSearch }),
-  });
-  const home = createRoute({
-    getParentRoute: () => base,
-    path: "/",
-    component: () => createElement(OrbitApp, { initialSection: section, projectId }),
-  });
-  return createRouter({
-    routeTree: base.addChildren([list, home]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
 }
 beforeEach(() => {
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/issues" });
@@ -106,10 +71,7 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   unread = 0;
-  projectId = undefined;
   unexpected = [];
   vi.stubGlobal(
     "fetch",
@@ -134,8 +96,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.unstubAllGlobals();
   expect(unexpected).toEqual([]);
@@ -145,15 +107,23 @@ async function settled() {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
-async function render(entry = "/issues", section: Section = "home") {
-  const router = makeRouter(entry, section);
+const sectionUrls: Record<Section, string> = {
+  home: "/",
+  inbox: "/inbox",
+  issues: "/issues",
+  cycles: "/cycles",
+  projects: "/projects",
+  search: "/search",
+  views: "/views",
+  settings: "/settings",
+};
+async function render(url = "/issues") {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   await settled();
-  return router;
+  return app.router;
 }
 const doc = () => dom.window.document as unknown as Document;
 const q = <T extends Element = HTMLElement>(selector: string) => doc().querySelector<T>(selector);
@@ -225,12 +195,13 @@ describe("mobile Menu sheet", () => {
     "[同値分割/AC-2] 項目 %s を押すと移動してシートが閉じる",
     async (name) => {
       const router = await render();
-      const navigate = vi.spyOn(router, "navigate").mockResolvedValue(undefined);
+      const navigate = vi.spyOn(router, "navigate");
       await click(menuTab());
       const item = [...sheet()!.querySelectorAll(".nav-item")].find((i) => labelOf(i) === name)!;
       await click(item);
+      await settled();
       expect(navigate).toHaveBeenCalledOnce();
-      const to = (navigate.mock.calls[0][0] as { to: string }).to;
+      const to = router.state.location.pathname;
       expect(to).toBe(name === "Settings" ? "/settings" : `/${name.toLowerCase()}`);
       expect(sheet()).toBeNull();
     },
@@ -287,9 +258,7 @@ describe("aria-current and selected Menu tab", () => {
   it.each([...tabSections, ...menuSections] as Section[])(
     "[デシジョンテーブル/AC-4] 現在の画面 %s",
     async (current) => {
-      // issues はルート経由、その他は home ルートの initialSection で描画する。
-      const router = await render(current === "issues" ? "/issues" : "/", current);
-      void router;
+      await render(sectionUrls[current]);
       const label = current[0].toUpperCase() + current.slice(1);
       const tabs = [...q(".mobile-nav")!.querySelectorAll("[aria-current]")].map(labelOf);
       expect(tabs).toEqual(tabSections.includes(current) ? [label] : []);
@@ -340,8 +309,7 @@ describe("mobile filter sheet", () => {
     expect(dialog.querySelector(".completed-toggle input")).not.toBeNull();
   });
   it("[同値分割/AC-6] Project詳細ではProjectと表示範囲の欄を出さない", async () => {
-    projectId = "project-1";
-    await render("/", "projects");
+    await render("/projects/project-1");
     await click(filterButton());
     expect(closedLabels()).toEqual(["Status", "Priority", "Label", "並び順", "期限"]);
     expect(q("#issues-project-filter")).toBeNull();
@@ -419,6 +387,7 @@ describe("mobile filter sheet", () => {
     await settled();
     expect(navigate).toHaveBeenCalled();
     expect(router.state.location.search).toMatchObject({ status: "todo" });
+    expect(router.history.length).toBe(1);
     expect(filterSheet()).not.toBeNull();
     expect(filterButton().querySelector(".filter-count")?.textContent).toBe("1");
   });

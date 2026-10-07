@@ -1,21 +1,10 @@
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
-import { normalizeIssueSearch, normalizeProjectSearch } from "../lib/url-state/issues";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let unexpected: string[];
 const now = Date.UTC(2026, 9, 2, 3);
 const payload = reviewBootstrap([
@@ -47,43 +36,6 @@ payload.cycles.push({
   completedAt: null,
   scheduleOverridden: false,
 });
-function makeRouter(entry = "/") {
-  const base = createRootRoute({ component: Outlet });
-  const home = createRoute({
-    getParentRoute: () => base,
-    path: "/",
-    component: () => createElement(OrbitApp, { initialSection: "home" }),
-  });
-  const issues = createRoute({
-    getParentRoute: () => base,
-    path: "/issues",
-    validateSearch: normalizeIssueSearch,
-    component: () =>
-      createElement(OrbitApp, { initialSection: "issues", issueSearch: issues.useSearch() }),
-  });
-  const projects = createRoute({
-    getParentRoute: () => base,
-    path: "/projects",
-    validateSearch: normalizeProjectSearch,
-    component: () =>
-      createElement(OrbitApp, {
-        initialSection: "projects",
-        projectSearch: projects.useSearch(),
-      } as Parameters<typeof OrbitApp>[0] & {
-        projectSearch: ReturnType<typeof normalizeProjectSearch>;
-      }),
-  });
-  const cycle = createRoute({
-    getParentRoute: () => base,
-    path: "/cycles/$cycleId",
-    component: () => createElement("div", null, cycle.useParams().cycleId),
-  });
-  return createRouter({
-    routeTree: base.addChildren([home, issues, projects, cycle]),
-    history: createMemoryHistory({ initialEntries: [entry] }),
-    defaultPendingMinMs: 0,
-  });
-}
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
@@ -103,9 +55,6 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], payload);
   unexpected = [];
   vi.stubGlobal(
     "fetch",
@@ -124,21 +73,17 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   expect(unexpected).toEqual([]);
 });
-async function render(entry = "/") {
-  const router = makeRouter(entry);
-  await act(async () => {
-    await router.load();
-    root.render(createElement(RouterProvider, { router }));
-  });
+async function render(url = "/") {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await settle();
-  return router;
+  return app.router;
 }
 async function settle() {
   await act(async () => vi.advanceTimersByTimeAsync(0));

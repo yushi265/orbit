@@ -1,19 +1,11 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewIssue, reviewDetail } from "./review-ui.test-fixtures";
 
-const navigate = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate }),
-}));
-
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let requests: Array<{ path: string; init: RequestInit }>;
 let searchResponses: Record<string, ReturnType<typeof deferred<Response>>>;
 let projectResponses: Array<ReturnType<typeof deferred<Response>>>;
@@ -47,8 +39,8 @@ function setValue(input: HTMLInputElement | HTMLTextAreaElement, value: string) 
 async function advance(ms: number) {
   await act(async () => vi.advanceTimersByTimeAsync(ms));
 }
-async function render(section: "search" | "projects" | "issues" = "search", issueId?: string) {
-  await act(async () => root.render(createElement(OrbitApp, { initialSection: section, issueId })));
+async function render(url = "/search") {
+  app = await renderApp({ url, container: dom.window.document.getElementById("root")! });
   await advance(0);
 }
 beforeEach(() => {
@@ -72,15 +64,13 @@ beforeEach(() => {
     },
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
-  queryClient.setQueryData(["bootstrap"], reviewBootstrap());
-  navigate.mockClear();
   requests = [];
   searchResponses = {};
   projectResponses = [];
@@ -121,8 +111,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -178,7 +168,8 @@ describe("review search request ordering", () => {
   it("[ライフサイクル] unmount後の旧応答は検索履歴も書かない", async () => {
     await render();
     await search("old");
-    await act(async () => root.unmount());
+    await app!.unmount();
+    app = undefined;
     await act(async () =>
       searchResponses.old.resolve(json({ items: [reviewIssue("old-result")] })),
     );
@@ -187,7 +178,7 @@ describe("review search request ordering", () => {
 });
 
 async function openProjectComposer() {
-  await render("projects");
+  await render("/projects");
   const open = [...dom.window.document.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("新しいProject"),
   )!;
@@ -257,8 +248,8 @@ describe("review Project creation admission", () => {
 
 describe("review Detail Escape save boundary", () => {
   it("[Window Escape経路] Windowへ直接届くEscapeもDetailを一度だけ閉じる", async () => {
-    queryClient.setQueryData(["issue-detail", "issue-1"], reviewDetail());
-    await render("issues", "issue-1");
+    await render("/issues/issue-1");
+    const navigate = vi.spyOn(app!.router, "navigate");
     expect(dom.window.document.activeElement).toBe(
       dom.window.document.querySelector('[role="dialog"]'),
     );
@@ -271,14 +262,16 @@ describe("review Detail Escape save boundary", () => {
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({ to: "/issues", search: { completed: true }, resetScroll: false }),
     );
+    expect(app!.router.state.location.pathname).toBe("/issues");
+    expect(app!.router.state.location.search).toEqual({ completed: true });
     expect(dom.window.document.querySelector(".issue-detail-backdrop")).toBeNull();
     expect(dom.window.document.querySelector("[inert]")).toBeNull();
   });
   it.each([200, 500])(
     "[実App/保存待機] Escapeはflushを待ち、HTTP=%i後に成功だけ閉じる",
     async (status) => {
-      queryClient.setQueryData(["issue-detail", "issue-1"], reviewDetail());
-      await render("issues", "issue-1");
+      await render("/issues/issue-1");
+      const navigate = vi.spyOn(app!.router, "navigate");
       const title = dom.window.document.querySelector("#issue-detail-title") as HTMLTextAreaElement;
       expect(dom.window.document.activeElement).toBe(
         dom.window.document.querySelector('[role="dialog"]'),
@@ -302,6 +295,7 @@ describe("review Detail Escape save boundary", () => {
       });
       expect(issueResponses).toHaveLength(1);
       expect(navigate).not.toHaveBeenCalled();
+      expect(app!.router.state.location.pathname).toBe("/issues/issue-1");
       expect(dom.window.document.querySelector(".issue-detail-backdrop")).not.toBeNull();
       await act(async () => {
         serverIssue = { ...serverIssue, title: "Escape保存draft", version: 2 };
@@ -320,9 +314,12 @@ describe("review Detail Escape save boundary", () => {
             resetScroll: false,
           }),
         );
+        expect(app!.router.state.location.pathname).toBe("/issues");
+        expect(app!.router.state.location.search).toEqual({ completed: true });
         expect(dom.window.document.querySelector(".issue-detail-backdrop")).toBeNull();
       } else {
         expect(navigate).not.toHaveBeenCalled();
+        expect(app!.router.state.location.pathname).toBe("/issues/issue-1");
         expect(dom.window.document.querySelector(".issue-detail-backdrop")).not.toBeNull();
         expect(dom.window.document.body.textContent).toContain("保存できませんでした");
         expect(dom.window.document.body.textContent).toContain("説明を再試行");

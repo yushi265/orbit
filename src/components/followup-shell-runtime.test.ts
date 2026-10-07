@@ -1,17 +1,12 @@
-import { act, createElement, StrictMode, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import type { BootstrapViewModel, PublicRunViewModel } from "../shared/view-models";
 import { reviewBootstrap } from "./review-ui.test-fixtures";
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
-}));
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let data: BootstrapViewModel;
 let requests: Array<{ path: string; method: string }>;
 let unexpected: string[];
@@ -55,12 +50,13 @@ beforeEach(() => {
     }),
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(dom.window.document.getElementById("root")!);
   queryClient.clear();
   data = reviewBootstrap();
   requests = [];
@@ -93,7 +89,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
+  await app?.unmount();
+  app = undefined;
   queryClient.clear();
   dom.window.close();
   vi.useRealTimers();
@@ -105,14 +102,12 @@ async function render(
   strict = false,
   seed = true,
 ) {
-  if (seed) queryClient.setQueryData(["bootstrap"], data);
-  await act(async () =>
-    root.render(
-      strict
-        ? createElement(StrictMode, null, createElement(OrbitApp, { initialSection: section }))
-        : createElement(OrbitApp, { initialSection: section }),
-    ),
-  );
+  app = await renderApp({
+    url: { home: "/", settings: "/settings", issues: "/issues" }[section],
+    container: dom.window.document.getElementById("root")!,
+    strict,
+    seed: seed ? (client) => client.setQueryData(["bootstrap"], data) : undefined,
+  });
   await act(async () => vi.advanceTimersByTimeAsync(0));
 }
 describe("followup shell state", () => {
@@ -122,11 +117,8 @@ describe("followup shell state", () => {
     expect(dom.window.document.querySelector(".run-status-box")?.textContent).toContain("完了");
     expect(dom.window.document.querySelector(".run-progress-ring")?.textContent).toBe("100%");
     expect(dom.window.document.querySelector(".run-overlay")).toBeNull();
-    await act(async () => {
-      root.unmount();
-      queryClient.clear();
-      root = createRoot(dom.window.document.getElementById("root")!);
-    });
+    await app!.unmount();
+    app = undefined;
     await render("settings", false, false);
     expect(dom.window.document.querySelector(".run-status-box")?.textContent).toContain("完了");
     expect(dom.window.document.querySelector(".run-progress-ring")?.textContent).toBe("100%");

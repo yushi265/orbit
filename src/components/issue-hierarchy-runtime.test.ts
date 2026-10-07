@@ -1,18 +1,11 @@
-import { act, createElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { OrbitApp } from "./OrbitApp";
-import { queryClient } from "../lib/query";
 import type { IssueSearch } from "../lib/url-state/issues";
-import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-const navigate = vi.hoisted(() => vi.fn());
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
-  useRouter: () => ({ navigate }),
-}));
+import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
+import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 let dom: JSDOM;
-let root: Root;
+let app: RenderedApp | undefined;
 let data: ReturnType<typeof reviewBootstrap>;
 let posts: Array<Record<string, unknown>>;
 let unexpected: string[];
@@ -46,8 +39,6 @@ function buildData() {
 }
 beforeEach(() => {
   vi.useFakeTimers();
-  navigate.mockReset();
-  navigate.mockResolvedValue(undefined);
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/issues" });
   Object.defineProperty(dom.window, "matchMedia", {
     value: () => ({
@@ -57,6 +48,8 @@ beforeEach(() => {
     }),
   });
   vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
@@ -72,10 +65,7 @@ beforeEach(() => {
       this.removeEventListener(name.replace(/^on/, ""), listener);
     },
   });
-  root = createRoot(dom.window.document.getElementById("root")!);
-  queryClient.clear();
   data = buildData();
-  queryClient.setQueryData(["bootstrap"], data);
   posts = [];
   unexpected = [];
   vi.stubGlobal(
@@ -85,6 +75,11 @@ beforeEach(() => {
       if (path === "/api/v1/bootstrap" && method === "GET") return Promise.resolve(response(data));
       if (path === "/api/v1/background-runs/current" && method === "GET")
         return Promise.resolve(response({ run: null }));
+      const detail = /^\/api\/v1\/issues\/([^/?]+)$/.exec(path);
+      if (detail && method === "GET")
+        return Promise.resolve(
+          response(reviewDetail(data.issues.find((issue) => issue.id === detail[1]))),
+        );
       if (path === "/api/v1/recent-issue-views" && method === "POST")
         return Promise.resolve(response({}));
       if (path === "/api/v1/issues/reorder" && method === "POST") {
@@ -97,8 +92,8 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  queryClient.clear();
+  await app?.unmount();
+  app = undefined;
   dom.window.close();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -108,14 +103,10 @@ async function settle() {
   await act(async () => vi.advanceTimersByTimeAsync(0));
 }
 async function render(search: IssueSearch = { order: "manual", completed: true }) {
-  await act(async () =>
-    root.render(
-      createElement(OrbitApp, {
-        initialSection: "issues",
-        issueSearch: search,
-      } as Parameters<typeof OrbitApp>[0] & { issueSearch: IssueSearch }),
-    ),
-  );
+  app = await renderApp({
+    url: `/issues?${new URLSearchParams(Object.entries(search).map(([key, value]) => [key, String(value)]))}`,
+    container: dom.window.document.getElementById("root")!,
+  });
   await settle();
 }
 const doc = () => dom.window.document;
@@ -148,7 +139,6 @@ async function altDown(id: string) {
 }
 function setIssues(list: ReturnType<typeof reviewIssue>[]) {
   data = { ...data, issues: list };
-  queryClient.setQueryData(["bootstrap"], data);
 }
 function interleavedIssues() {
   return [
@@ -301,7 +291,6 @@ describe("Issues list hierarchy", () => {
       reviewIssue("one", { identifier: "TASK-1", position: 0 }),
       reviewIssue("two", { identifier: "TASK-2", position: 1 }),
     ]);
-    queryClient.setQueryData(["bootstrap"], data);
     await render();
     expect(visibleIds()).toEqual(["one", "two"]);
     expect(doc().querySelector(".issue-children-toggle-spacer, .has-toggle-column")).toBeNull();
@@ -358,7 +347,13 @@ describe("Issues list hierarchy", () => {
       await act(async () => (doc().querySelector('[data-issue-id="A"]') as HTMLElement).focus());
       await act(async () => toggle("P").click());
       expect(visibleIds()).toEqual(["P", "X", "Y"]);
-      await render({ order: "manual", completed: true, mode: "board" });
+      await act(async () => {
+        await app!.router.navigate({
+          to: "/issues",
+          search: { order: "manual", completed: true, mode: "board" },
+        });
+      });
+      await settle();
       await act(async () => {
         doc().body.dispatchEvent(
           new dom.window.KeyboardEvent("keydown", { key: "x", bubbles: true, cancelable: true }),
@@ -432,14 +427,11 @@ describe("Issues list hierarchy", () => {
   it("[AC-8] opens the issue from parent and child rows", async () => {
     await render();
     for (const id of ["P", "A"]) {
-      navigate.mockClear();
       await act(async () =>
         (doc().querySelector(`[data-issue-id="${id}"]`) as HTMLElement).click(),
       );
       await settle();
-      expect(navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ to: "/issues/$issueId", params: { issueId: id } }),
-      );
+      expect(app!.router.state.location.pathname).toBe(`/issues/${id}`);
     }
   });
 });

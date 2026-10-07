@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IssueDetailPanel, ViewsView } from "./OrbitApp";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fixtures";
 import type { SavedViewViewModel } from "../shared/view-models";
 
@@ -15,48 +14,19 @@ vi.mock("@tanstack/react-router", async () => ({
   useRouter: () => ({ navigate: vi.fn() }),
 }));
 
-// --- minimal CSS model: base rules and @media blocks, enough to resolve declarations ---------
+// --- CSS model: media × selector × property は css-rules.test-fixtures の helper で読む ---------
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-type CssRule = { selector: string; decl: Map<string, string>; media: string; order: number };
-
-function parseCss(source: string): CssRule[] {
-  const css = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const out: CssRule[] = [];
-  let order = 0;
-  function block(text: string, media: string) {
-    let i = 0;
-    while (i < text.length) {
-      const open = text.indexOf("{", i);
-      if (open === -1) break;
-      const head = text.slice(i, open).trim();
-      let depth = 1;
-      let j = open + 1;
-      while (j < text.length && depth > 0) {
-        if (text[j] === "{") depth += 1;
-        if (text[j] === "}") depth -= 1;
-        j += 1;
-      }
-      const body = text.slice(open + 1, j - 1);
-      if (head.startsWith("@media")) {
-        block(body, head.slice(6).replace(/\s+/g, " ").trim());
-      } else if (!head.startsWith("@")) {
-        const decl = new Map<string, string>();
-        for (const part of body.split(";")) {
-          const k = part.indexOf(":");
-          if (k > 0) decl.set(part.slice(0, k).trim(), part.slice(k + 1).trim());
-        }
-        for (const selector of head.split(",")) {
-          out.push({ selector: selector.replace(/\s+/g, " ").trim(), decl, media, order: order++ });
-        }
-      }
-      i = j;
-    }
-  }
-  block(css, "");
-  return out;
-}
-const rules = parseCss(styles);
+const rules = parseStyleRules();
+const MOBILE = "(max-width: 767px)";
+// 1 selector = 1 エントリに展開（ソース順 = order）。要素への適用判定（AC-5）で使う。
+const flatRules = rules.flatMap((rule, order) =>
+  rule.selectors.map((selector) => ({
+    selector,
+    decl: rule.declarations,
+    media: rule.media,
+    order,
+  })),
+);
 
 function specificity(selector: string): number {
   const ids = (selector.match(/#[\w-]+/g) ?? []).length;
@@ -67,20 +37,9 @@ function specificity(selector: string): number {
   return ids * 10000 + classes * 100 + types;
 }
 
-/** Declarations that apply (selector order, then specificity) in the given media condition. */
-function baseRulesFor(property: string, filter: (rule: CssRule) => boolean) {
-  return rules.filter((rule) => rule.media === "" && rule.decl.has(property) && filter(rule));
-}
-function mediaRules(media: string, selector: string, property: string) {
-  return rules.filter(
-    (rule) => rule.media === media && rule.selector === selector && rule.decl.has(property),
-  );
-}
-const lastValue = (list: CssRule[], property: string) =>
-  list
-    .sort((a, b) => a.order - b.order)
-    .at(-1)
-    ?.decl.get(property);
+/** media 内（省略 = トップレベル）の selector × property の値（ソース順で後勝ち）。 */
+const valueOf = (selector: string, property: string, media: string | null = null) =>
+  declarationsFor(rules, selector, media).get(property);
 
 // --- jsdom harness ---------------------------------------------------------------------------
 
@@ -239,44 +198,35 @@ describe("AC-2 Issue詳細のカラム構成", () => {
   });
 
   it("[境界値] 変更履歴は左ボーダー・左パディングを持たず、768px以上で右カラムにaside・左に本文を置く", () => {
-    for (const rule of rules.filter((item) => item.selector === ".detail-activity")) {
-      expect(rule.decl.get("border-left") ?? "0").toMatch(/^(0|none)/);
-      expect(rule.decl.get("padding-left") ?? "0").toMatch(/^0/);
+    const activityRules = rules.filter((item) => item.selectors.includes(".detail-activity"));
+    expect(activityRules.length).toBeGreaterThan(0);
+    for (const rule of activityRules) {
+      expect(rule.declarations.get("border-left") ?? "0").toMatch(/^(0|none)/);
+      expect(rule.declarations.get("padding-left") ?? "0").toMatch(/^0/);
     }
     // PC は DOM 順どおり（main=1列目 / side=2列目）。視覚順を入れ替える指定を持たない。
-    for (const rule of rules.filter((item) => /\.detail-(side|main|grid)\b/.test(item.selector))) {
-      if (rule.media.includes("min-width")) {
+    for (const rule of rules.filter((item) =>
+      item.selectors.some((selector) => /\.detail-(side|main|grid)\b/.test(selector)),
+    )) {
+      if (rule.media?.includes("min-width")) {
         for (const property of ["grid-column", "grid-row", "order"])
-          expect(rule.decl.has(property), `${rule.selector} ${property}`).toBe(false);
+          expect(rule.declarations.has(property), `${rule.selectors} ${property}`).toBe(false);
       }
     }
-    for (const rule of rules.filter((item) => item.selector.includes(".detail-main")))
-      expect(rule.decl.has("order")).toBe(false);
+    for (const rule of rules.filter((item) =>
+      item.selectors.some((selector) => selector.includes(".detail-main")),
+    ))
+      expect(rule.declarations.has("order")).toBe(false);
   });
 
   it("[境界値] 右カラムの入力は幅いっぱいに縦積みされ、スマホは1カラムのまま", () => {
-    expect(
-      lastValue(
-        baseRulesFor("flex-direction", (r) => r.selector === ".detail-side .detail-properties"),
-        "flex-direction",
-      ),
-    ).toBe("column");
-    expect(
-      lastValue(
-        baseRulesFor("min-width", (r) => r.selector === ".detail-side"),
-        "min-width",
-      ),
-    ).toBe("0");
+    expect(valueOf(".detail-side .detail-properties", "flex-direction")).toBe("column");
+    expect(valueOf(".detail-side", "min-width")).toBe("0");
     // スマホは縦1カラムのまま、sideを視覚上先頭（プロパティ → 本文）に出す。
-    const mobile = "(max-width: 767px)";
-    expect(lastValue(mediaRules(mobile, ".detail-grid", "display"), "display")).toBe("flex");
-    expect(lastValue(mediaRules(mobile, ".detail-grid", "flex-direction"), "flex-direction")).toBe(
-      "column",
-    );
-    expect(lastValue(mediaRules(mobile, ".detail-grid", "gap"), "gap")).toBe("0");
-    expect(lastValue(mediaRules(mobile, ".detail-grid > .detail-side", "order"), "order")).toBe(
-      "-1",
-    );
+    expect(valueOf(".detail-grid", "display", MOBILE)).toBe("flex");
+    expect(valueOf(".detail-grid", "flex-direction", MOBILE)).toBe("column");
+    expect(valueOf(".detail-grid", "gap", MOBILE)).toBe("0");
+    expect(valueOf(".detail-grid > .detail-side", "order", MOBILE)).toBe("-1");
   });
 });
 
@@ -341,11 +291,7 @@ describe("AC-3 アクションの固定フッター", () => {
   });
 
   it("[境界値] footer.detail-footのstickyは全幅で効き、パネル幅いっぱい・不透明背景。エラー帯は固定オフセットを持たない", () => {
-    const base = (property: string) =>
-      lastValue(
-        baseRulesFor(property, (r) => r.selector === ".detail-foot"),
-        property,
-      );
+    const base = (property: string) => valueOf(".detail-foot", property);
     expect(base("position")).toBe("sticky");
     expect(base("bottom")).toBe("0");
     expect(base("margin")).toMatch(/-24px/);
@@ -354,57 +300,30 @@ describe("AC-3 アクションの固定フッター", () => {
     // popups (calendar 80 / select listbox 110) stay above the footer
     expect(Number(base("z-index"))).toBeGreaterThan(0);
     expect(Number(base("z-index"))).toBeLessThan(80);
-    expect(
-      lastValue(
-        baseRulesFor("display", (r) => r.selector === ".detail-foot:empty"),
-        "display",
-      ),
-    ).toBe("none");
-    expect(
-      lastValue(
-        baseRulesFor("position", (r) => r.selector === ".detail-foot > .detail-live-error"),
-        "position",
-      ),
-    ).toBe("static");
-    expect(rules.filter((r) => r.selector === ".detail-panel > .detail-live-error")).toEqual([]);
-    expect(styles).not.toMatch(/bottom: (calc\()?72px/);
-    expect(
-      lastValue(
-        baseRulesFor("position", (r) => r.selector === ".detail-actions"),
-        "position",
-      ),
-    ).toBeUndefined();
+    expect(valueOf(".detail-foot:empty", "display")).toBe("none");
+    expect(valueOf(".detail-foot > .detail-live-error", "position")).toBe("static");
+    expect(rules.filter((r) => r.selectors.includes(".detail-panel > .detail-live-error"))).toEqual(
+      [],
+    );
+    // 72px 固定オフセットの bottom 指定が（どの media にも）残っていない
+    for (const rule of rules)
+      for (const [property, value] of rule.declarations)
+        if (property.endsWith("bottom"))
+          expect(value, `${rule.selectors} ${property}`).not.toMatch(/^(calc\()?72px/);
+    expect(valueOf(".detail-actions", "position")).toBeUndefined();
   });
 
   it("[境界値] スマホのフッターはゴミ箱へ/ステータス/アーカイブが1行に収まる（ステータスは縮む）", () => {
-    const mobile = "(max-width: 767px)";
-    expect(lastValue(mediaRules(mobile, ".detail-save-status", "flex"), "flex")).toBe("1 1 0");
-    expect(lastValue(mediaRules(mobile, ".detail-save-status", "min-width"), "min-width")).toBe(
-      "0",
-    );
-    expect(lastValue(mediaRules(mobile, ".detail-actions .button.danger", "order"), "order")).toBe(
-      "-1",
-    );
+    expect(valueOf(".detail-save-status", "flex", MOBILE)).toBe("1 1 0");
+    expect(valueOf(".detail-save-status", "min-width", MOBILE)).toBe("0");
+    expect(valueOf(".detail-actions .button.danger", "order", MOBILE)).toBe("-1");
   });
 
   it("[境界値] パネルの下パディングはフッター側へ移り、スマホはsafe-areaをフッターに含める", () => {
-    expect(
-      lastValue(
-        baseRulesFor("padding", (r) => r.selector === ".detail-panel"),
-        "padding",
-      ),
-    ).toBe("0 24px 0");
-    const mobile = "(max-width: 767px)";
-    expect(lastValue(mediaRules(mobile, ".detail-panel", "padding"), "padding")).toBe("0 15px 0");
-    expect(
-      lastValue(
-        mediaRules(mobile, ".issue-detail-backdrop .detail-panel", "padding-bottom"),
-        "padding-bottom",
-      ),
-    ).toBe("0");
-    expect(lastValue(mediaRules(mobile, ".detail-actions", "padding"), "padding")).toContain(
-      "env(safe-area-inset-bottom)",
-    );
+    expect(valueOf(".detail-panel", "padding")).toBe("0 24px 0");
+    expect(valueOf(".detail-panel", "padding", MOBILE)).toBe("0 15px 0");
+    expect(valueOf(".issue-detail-backdrop .detail-panel", "padding-bottom", MOBILE)).toBe("0");
+    expect(valueOf(".detail-actions", "padding", MOBILE)).toContain("env(safe-area-inset-bottom)");
   });
 });
 
@@ -459,30 +378,18 @@ describe("AC-4 Views画面", () => {
   });
 
   it("[境界値] 3つのカードは同じ850px幅で、結果カードはinspectorと同じ18px 20pxのパディング・スマホは18px", () => {
-    const base = (selector: string, property: string) =>
-      lastValue(
-        baseRulesFor(property, (r) => r.selector === selector),
-        property,
-      );
     for (const selector of [".view-list", ".view-inspector", ".view-results"])
-      expect(base(selector, "max-width"), selector).toBe("850px");
-    expect(base(".view-results", "padding")).toBe("18px 20px");
-    expect(base(".view-inspector", "padding")).toBe("18px 20px");
-    expect(lastValue(mediaRules("(max-width: 767px)", ".view-results", "padding"), "padding")).toBe(
-      "18px",
-    );
+      expect(valueOf(selector, "max-width"), selector).toBe("850px");
+    expect(valueOf(".view-results", "padding")).toBe("18px 20px");
+    expect(valueOf(".view-inspector", "padding")).toBe("18px 20px");
+    expect(valueOf(".view-results", "padding", MOBILE)).toBe("18px");
   });
 
   it("[境界値] 結果の見出しは16px・sans、行タイトルは13〜14px", () => {
-    const base = (selector: string, property: string) =>
-      lastValue(
-        baseRulesFor(property, (r) => r.selector === selector),
-        property,
-      );
-    expect(base(".view-results h2", "font-size")).toBe("16px");
-    expect(base(".view-results h2", "font-family")).toContain("ui-sans-serif");
-    expect(["13px", "14px"]).toContain(base(".saved-view-issue-main strong", "font-size"));
-    expect(base(".view-result-group h3", "margin")).toBeDefined();
+    expect(valueOf(".view-results h2", "font-size")).toBe("16px");
+    expect(valueOf(".view-results h2", "font-family")).toContain("ui-sans-serif");
+    expect(["13px", "14px"]).toContain(valueOf(".saved-view-issue-main strong", "font-size"));
+    expect(valueOf(".view-result-group h3", "margin")).toBeDefined();
   });
 
   it("[代表値] 空状態の文言は結果カード内に収まる", async () => {
@@ -511,8 +418,8 @@ describe("AC-5 設定のカラーテーマswatch", () => {
       '<div class="setting-row"><div></div><span class="color-theme-control"><span class="color-theme-swatch"></span><select></select></span></div>',
     );
     const control = host.window.document.querySelector(".color-theme-control")!;
-    const applicable = rules
-      .filter((rule) => rule.media === "" && rule.decl.has("display"))
+    const applicable = flatRules
+      .filter((rule) => rule.media === null && rule.decl.has("display"))
       .filter((rule) => {
         try {
           return control.matches(rule.selector);
@@ -523,13 +430,18 @@ describe("AC-5 設定のカラーテーマswatch", () => {
       .sort((a, b) => specificity(a.selector) - specificity(b.selector) || a.order - b.order);
     const winner = applicable.at(-1)!;
     expect(winner.decl.get("display")).toMatch(/flex/);
-    const flexRules = rules.filter(
-      (rule) => rule.media === "" && rule.selector.includes(".color-theme-control"),
+    const controlRules = rules.filter(
+      (rule) =>
+        rule.media === null &&
+        rule.selectors.some((selector) => selector.includes(".color-theme-control")),
     );
-    expect(flexRules.map((rule) => rule.decl.get("align-items"))).toContain("center");
-    expect(flexRules.map((rule) => rule.decl.get("gap"))).toEqual(
+    expect(controlRules.map((rule) => rule.declarations.get("align-items"))).toContain("center");
+    expect(controlRules.map((rule) => rule.declarations.get("gap"))).toEqual(
       expect.arrayContaining([expect.stringMatching(/^[78]px$/)]),
     );
-    expect(styles).not.toMatch(/\.color-theme-control[^}]*!important/);
+    for (const rule of rules)
+      if (rule.selectors.some((selector) => selector.includes(".color-theme-control")))
+        for (const [property, value] of rule.declarations)
+          expect(value, `${rule.selectors} ${property}`).not.toMatch(/!important/);
   });
 });

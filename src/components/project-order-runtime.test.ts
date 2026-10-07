@@ -1,12 +1,11 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { OrbitApp } from "./OrbitApp";
 import { queryClient } from "../lib/query";
 import { reviewBootstrap } from "./review-ui.test-fixtures";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@tanstack/react-router", () => ({
@@ -296,13 +295,13 @@ describe("Projects一覧の並べ替えボタン", () => {
 });
 
 describe("Project並べ替えのCSS", () => {
-  const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+  const rules = parseStyleRules();
   it("[代表値] 規則があり、〜767pxでボタンが44px以上", () => {
-    expect(css).toContain(".project-card-item {");
-    expect(css).toContain(".project-order-actions {");
-    expect(css).toContain(".project-order-button {");
-    const media = css.match(/@media \(max-width: 767px\) \{[^\n]*\.project-order-button \{[^}]*\}/);
-    expect(media?.[0]).toMatch(/\.project-order-button \{[^}]*width: 44px/);
-    expect(media?.[0]).toMatch(/\.project-order-button \{[^}]*height: 44px/);
+    expect(declarationsFor(rules, ".project-card-item").size).toBeGreaterThan(0);
+    expect(declarationsFor(rules, ".project-order-actions").size).toBeGreaterThan(0);
+    expect(declarationsFor(rules, ".project-order-button").size).toBeGreaterThan(0);
+    const mobile = declarationsFor(rules, ".project-order-button", "(max-width: 767px)");
+    expect(mobile.get("width")).toBe("44px");
+    expect(mobile.get("height")).toBe("44px");
   });
 });

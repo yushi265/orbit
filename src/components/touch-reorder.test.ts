@@ -1,8 +1,6 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -11,6 +9,7 @@ import type {
 } from "../shared/view-models";
 import { CyclesView, OrbitApp } from "./OrbitApp";
 import { queryClient } from "../lib/query";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -18,51 +17,53 @@ vi.mock("@tanstack/react-router", () => ({
   useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
 }));
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 const MOBILE_HINT = "↑ / ↓ ボタンで並び替えます。";
 const DESKTOP_HINT = "ハンドルをドラッグ、またはAlt+↑ / Alt+↓で並び替えます。";
 
-function mobileBlocks() {
-  return [...styles.matchAll(/@media \(max-width: 767px\) \{(.*)\}\s*$/gm)].map(([, body]) => body);
-}
-function mobileCss() {
-  return mobileBlocks().join("\n");
-}
-function outsideMobileCss() {
-  return styles.replace(/@media \(max-width: 767px\) \{.*\}\s*$/gm, "");
-}
+const rules = parseStyleRules();
+const MOBILE = "(max-width: 767px)";
 
 describe("touch reorder CSS contract", () => {
   it("[状態遷移] ↑/↓ボタンは全幅で表示し、デスクトップでも24x24px以上 (AC-12)", () => {
-    const rule = outsideMobileCss().match(/\.touch-move-button \{([^}]*)\}/)?.[1] ?? "";
-    expect(rule).not.toMatch(/display: none/);
-    expect(rule).toMatch(/min-width: 24px/);
-    expect(rule).toMatch(/min-height: 24px/);
+    const decl = declarationsFor(rules, ".touch-move-button");
+    expect(decl.get("display")).not.toBe("none");
+    expect(decl.get("min-width")).toBe("24px");
+    expect(decl.get("min-height")).toBe("24px");
   });
 
   it("[境界値] mobile(767px以下)でボタンを表示し44x44px以上にする", () => {
-    const css = mobileCss();
-    const rule = css.match(/\.touch-move-button \{([^}]*)\}/)?.[1] ?? "";
-    expect(rule).toMatch(/display: inline-grid/);
-    expect(rule).toMatch(/min-width: 44px/);
-    expect(rule).toMatch(/min-height: 44px/);
+    const decl = declarationsFor(rules, ".touch-move-button", MOBILE);
+    expect(decl.get("display")).toBe("inline-grid");
+    expect(decl.get("min-width")).toBe("44px");
+    expect(decl.get("min-height")).toBe("44px");
   });
 
   it("[状態遷移] mobileではdrag handleを隠す", () => {
-    expect(mobileCss()).toMatch(
-      /\.reorder-cell \.drag-handle, \.cycle-reorder-controls \.drag-handle \{ display: none; \}/,
+    expect(declarationsFor(rules, ".reorder-cell .drag-handle", MOBILE).get("display")).toBe(
+      "none",
     );
+    expect(
+      declarationsFor(rules, ".cycle-reorder-controls .drag-handle", MOBILE).get("display"),
+    ).toBe("none");
   });
 
   it("[状態遷移] ヒントはmobileでは専用文言、desktopでは従来文言を表示する", () => {
-    expect(outsideMobileCss()).toMatch(/\.hint-mobile \{[^}]*display: none;/);
-    const css = mobileCss();
-    expect(css).toMatch(/\.hint-desktop \{ display: none; \}/);
-    expect(css).toMatch(/\.hint-mobile \{ display: inline; \}/);
+    expect(declarationsFor(rules, ".hint-mobile").get("display")).toBe("none");
+    expect(declarationsFor(rules, ".hint-desktop", MOBILE).get("display")).toBe("none");
+    expect(declarationsFor(rules, ".hint-mobile", MOBILE).get("display")).toBe("inline");
   });
 
   it("[境界値] manual orderのmobile gridは2ボタン分(88px)のMOVE列を持つ", () => {
-    expect(styles).toContain("grid-template-columns: 88px 44px minmax(0, 1fr) 80px 44px;");
+    expect(
+      declarationsFor(rules, ".issue-table.manual-order .issue-row", MOBILE).get(
+        "grid-template-columns",
+      ),
+    ).toBe("88px 44px minmax(0, 1fr) 80px 44px");
+    expect(
+      declarationsFor(rules, ".issue-table.manual-order .table-header", MOBILE).get(
+        "grid-template-columns",
+      ),
+    ).toBe("88px 44px minmax(0, 1fr) 80px 44px");
   });
 });
 

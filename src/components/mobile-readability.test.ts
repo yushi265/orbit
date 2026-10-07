@@ -1,100 +1,36 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { act, createElement, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { JSDOM } from "jsdom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OrbitApp } from "./OrbitApp";
+import { queryClient } from "../lib/query";
+import { declarationsFor, parseStyleRules, type StyleRule } from "./css-rules.test-fixtures";
+import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
+  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
+}));
 
-// --- minimal CSS parser (no dependency): top-level rules + one level of @media ---------------
+// --- CSS: media × selector × property（parseStyleRules / declarationsFor）-------------------
 
-type MediaKind = "base" | "mobile" | "desktop-only" | "ignored";
-type Declaration = { value: string; important: boolean };
-type Rule = {
-  selector: string; // 1 selector (selector lists are split)
-  declarations: Map<string, Declaration>;
-  media: MediaKind;
-  order: number; // source order (cascade tie-break)
-};
+const MOBILE = "(max-width: 767px)";
+// ソース順を後勝ち判定（cascade）に使うため、rule に順序を付ける。
+type OrderedRule = StyleRule & { order: number };
+const allRules: OrderedRule[] = parseStyleRules().map((rule, order) => ({ ...rule, order }));
 
-function classifyMedia(condition: string): MediaKind {
-  const normalized = condition.replace(/\s+/g, " ").trim();
-  if (/^\(max-width: ?767px\)$/.test(normalized)) return "mobile";
-  if (normalized.includes("prefers-reduced-motion")) return "ignored";
-  // min-width: 768px 以上を含む条件は 767px 以下の画面には適用されない。
-  if (/min-width/.test(normalized)) return "desktop-only";
-  // max-width: 480/1023/1199/1280px は mobile にも適用されるため base と同じ扱い。
-  return "base";
-}
+const mobileRules = allRules.filter((rule) => rule.media === MOBILE);
+// トップレベル + 767px 以下にも適用される max-width 系 media。
+// min-width を含む条件（767px 以下には適用されない）と reduced-motion は除く。
+const baseRules = allRules.filter((rule) => {
+  const media = rule.media;
+  if (media === null) return true;
+  if (media === MOBILE) return false;
+  return !/min-width/.test(media) && !media.includes("prefers-reduced-motion");
+});
 
-function parseDeclarations(body: string): Map<string, Declaration> {
-  const declarations = new Map<string, Declaration>();
-  for (const part of body.split(";")) {
-    const index = part.indexOf(":");
-    if (index === -1) continue;
-    const property = part.slice(0, index).trim().toLowerCase();
-    let value = part.slice(index + 1).trim();
-    const important = /!\s*important$/i.test(value);
-    value = value.replace(/!\s*important$/i, "").trim();
-    if (property) declarations.set(property, { value, important });
-  }
-  return declarations;
-}
-
-function parseCss(source: string): Rule[] {
-  const css = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules: Rule[] = [];
-  let order = 0;
-
-  function skipBlock(from: number): number {
-    let depth = 1;
-    let cursor = from;
-    while (cursor < css.length && depth > 0) {
-      if (css[cursor] === "{") depth += 1;
-      if (css[cursor] === "}") depth -= 1;
-      cursor += 1;
-    }
-    return cursor;
-  }
-
-  function parseBlock(from: number, media: MediaKind, nested: boolean): number {
-    let cursor = from;
-    let prelude = "";
-    while (cursor < css.length) {
-      const char = css[cursor];
-      if (char === "}") return cursor + 1;
-      if (char !== "{") {
-        prelude += char;
-        cursor += 1;
-        continue;
-      }
-      const head = prelude.trim();
-      prelude = "";
-      if (head.startsWith("@media") && !nested) {
-        cursor = parseBlock(cursor + 1, classifyMedia(head.slice("@media".length)), true);
-      } else if (head.startsWith("@")) {
-        cursor = skipBlock(cursor + 1); // @keyframes など
-      } else {
-        const end = css.indexOf("}", cursor);
-        const declarations = parseDeclarations(css.slice(cursor + 1, end));
-        for (const selector of head.split(",")) {
-          rules.push({
-            selector: selector.replace(/\s+/g, " ").trim(),
-            declarations,
-            media,
-            order: order++,
-          });
-        }
-        cursor = end + 1;
-      }
-    }
-    return cursor;
-  }
-
-  parseBlock(0, "base", false);
-  return rules;
-}
-
-const rules = parseCss(styles);
-const mobileRules = rules.filter((rule) => rule.media === "mobile");
+const stripImportant = (value: string | undefined) => value?.replace(/\s*!important$/i, "").trim();
+const isImportant = (value: string | undefined) => /!important$/i.test(value ?? "");
 
 function px(value: string | undefined): number | null {
   if (value === undefined) return null;
@@ -105,10 +41,7 @@ function px(value: string | undefined): number | null {
 
 /** mobile ブロック内で selector（完全一致）に最後に宣言された property の値。 */
 function mobileValue(selector: string, property: string): string | undefined {
-  const matched = mobileRules
-    .filter((rule) => rule.selector === selector && rule.declarations.has(property))
-    .sort((a, b) => a.order - b.order);
-  return matched.at(-1)?.declarations.get(property)?.value;
+  return stripImportant(declarationsFor(allRules, selector, MOBILE).get(property));
 }
 
 function mobilePx(selector: string, property: string): number {
@@ -153,26 +86,62 @@ function isHiddenOnMobile(selector: string): boolean {
   return mobileValue(selector, "display") === "none";
 }
 
+// --- DOM: Issue 一覧を OrbitApp 経由で描画する -------------------------------------------------
+
+let dom: JSDOM;
+let root: Root;
+
+beforeEach(() => {
+  dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/" });
+  Object.defineProperty(dom.window, "matchMedia", {
+    value: () => ({
+      matches: false,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }),
+  });
+  vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("self", dom.window);
+  vi.stubGlobal("scrollTo", vi.fn());
+  vi.stubGlobal("document", dom.window.document);
+  vi.stubGlobal("navigator", dom.window.navigator);
+  vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+  vi.stubGlobal("Node", dom.window.Node);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  root = createRoot(dom.window.document.getElementById("root")!);
+  queryClient.clear();
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      if (path === "/api/v1/bootstrap") return json(reviewBootstrap([reviewIssue("issue-1")]));
+      if (path === "/api/v1/background-runs/current") return json({ run: null });
+      throw new Error(`Unexpected API request: ${path}`);
+    }),
+  );
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  queryClient.clear();
+  dom.window.close();
+  vi.unstubAllGlobals();
+});
+
 describe("mobile readability baseline (<=767px)", () => {
   it("[境界値] mobileの入力欄は16px以上でiOSズームを防ぐ", () => {
     const floor = mobileRules.find(
-      (rule) =>
-        rule.selector === "input" &&
-        mobileRules.some(
-          (other) => other.declarations === rule.declarations && other.selector === "select",
-        ),
+      (rule) => rule.selectors.includes("input") && rule.selectors.includes("select"),
     );
     expect(floor).toBeDefined();
-    const selectors = mobileRules
-      .filter((rule) => rule.declarations === floor?.declarations)
-      .map((rule) => rule.selector);
-    expect(selectors).toEqual(
+    expect(floor?.selectors).toEqual(
       expect.arrayContaining(["input", "select", "textarea", ".orbit-select-trigger"]),
     );
     const fontSize = floor?.declarations.get("font-size");
-    expect(px(fontSize?.value)).toBeGreaterThanOrEqual(16);
+    expect(px(stripImportant(fontSize))).toBeGreaterThanOrEqual(16);
     // クラスセレクタの小さい font-size（例: .inline-search input 12px）に勝つための最終フロア。
-    expect(fontSize?.important).toBe(true);
+    expect(isImportant(fontSize)).toBe(true);
   });
 
   it("[境界値] 16px入力でも期限入力が切れないよう幅を広げる", () => {
@@ -207,20 +176,34 @@ describe("mobile readability baseline (<=767px)", () => {
     expect(mobilePx(".issue-table .issue-row", "padding-left")).toBe(0);
   });
 
-  it("[代表値] 行チェックボックスはlabelでタップ領域を広げる", () => {
-    const app = readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
-    expect(app.match(/<label className="check-cell" role="(?:cell|columnheader)">/g)).toHaveLength(
-      2,
-    );
-    expect(app).not.toContain('<span className="check-cell">');
+  it("[代表値] 行チェックボックスはlabelでタップ領域を広げる", async () => {
+    await act(async () => root.render(createElement(OrbitApp, { initialSection: "issues" })));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const checkCells = [...dom.window.document.querySelectorAll(".check-cell")];
+    // ヘッダ（全選択）と Issue 行（選択）の 2 つが label で、チェックボックスを内包する。
+    expect(checkCells.map((cell) => [cell.tagName, cell.getAttribute("role")])).toEqual([
+      ["LABEL", "columnheader"],
+      ["LABEL", "cell"],
+    ]);
+    expect(
+      checkCells.map((cell) =>
+        cell.querySelector('input[type="checkbox"]')?.getAttribute("aria-label"),
+      ),
+    ).toEqual(["全選択", "TASK-issue-1を選択"]);
   });
 
   it("[同値分割] mobileで12px未満のfont-sizeを宣言しない（例外は非表示化のみ）", () => {
     const offenders = mobileRules.flatMap((rule) => {
-      const size = px(rule.declarations.get("font-size")?.value);
+      const size = px(stripImportant(rule.declarations.get("font-size")));
       if (size === null || size >= 12) return [];
-      if ((COLLAPSED_HEADER_LABEL as readonly string[]).includes(rule.selector)) return [];
-      return [`${rule.selector}: ${size}px`];
+      return rule.selectors
+        .filter((selector) => !(COLLAPSED_HEADER_LABEL as readonly string[]).includes(selector))
+        .map((selector) => `${selector}: ${size}px`);
     });
     expect(offenders).toEqual([]);
   });
@@ -233,30 +216,33 @@ describe("mobile readability baseline (<=767px)", () => {
   });
 
   it("[同値分割] desktopで12px未満の全セレクタが、mobileで12px以上へ上書きされるか例外に該当する", () => {
-    const baseRules = rules.filter((rule) => rule.media === "base");
     const smallBaseRules = baseRules.filter(
-      (rule) => (px(rule.declarations.get("font-size")?.value) ?? 12) < 12,
+      (rule) => (px(stripImportant(rule.declarations.get("font-size"))) ?? 12) < 12,
     );
     // パース失敗で列挙が空になり、無条件に pass するのを防ぐ
     expect(smallBaseRules.length).toBeGreaterThan(50);
     const uncovered: string[] = [];
     for (const rule of baseRules) {
       const declaration = rule.declarations.get("font-size");
-      const size = px(declaration?.value);
+      const size = px(stripImportant(declaration));
       if (size === null || size >= 12) continue;
-      const selector = rule.selector;
-      if ((SIDEBAR_ONLY as readonly string[]).includes(selector)) continue;
-      if (isHiddenOnMobile(selector)) continue;
-      if (isFormControlSelector(selector)) continue;
-      const overrides = mobileRules.filter(
-        (other) =>
-          other.selector === selector &&
-          other.order > rule.order && // 後勝ちのcascadeで負けないよう base より後ろに置く
-          px(other.declarations.get("font-size")?.value) !== null &&
-          (px(other.declarations.get("font-size")?.value) ?? 0) >= 12 &&
-          (!declaration?.important || other.declarations.get("font-size")?.important),
-      );
-      if (overrides.length === 0) uncovered.push(`${selector} (${size}px)`);
+      for (const selector of rule.selectors) {
+        if ((SIDEBAR_ONLY as readonly string[]).includes(selector)) continue;
+        if (isHiddenOnMobile(selector)) continue;
+        if (isFormControlSelector(selector)) continue;
+        const overrides = mobileRules.filter((other) => {
+          const otherDeclaration = other.declarations.get("font-size");
+          const otherSize = px(stripImportant(otherDeclaration));
+          return (
+            other.selectors.includes(selector) &&
+            other.order > rule.order && // 後勝ちのcascadeで負けないよう base より後ろに置く
+            otherSize !== null &&
+            otherSize >= 12 &&
+            (!isImportant(declaration) || isImportant(otherDeclaration))
+          );
+        });
+        if (overrides.length === 0) uncovered.push(`${selector} (${size}px)`);
+      }
     }
     expect([...new Set(uncovered)]).toEqual([]);
   });

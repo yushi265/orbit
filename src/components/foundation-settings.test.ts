@@ -1,9 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RunOverlay, SettingsView } from "./OrbitApp";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 const preferences = {
   userId: "owner",
@@ -130,14 +129,20 @@ describe("Phase 1 Settings UI contract", () => {
   });
 
   it("[アクセシビリティ/レスポンシブ] keeps mobile wrapping CSS and initial markup clean", () => {
-    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const rules = parseStyleRules();
+    const mobile = "(max-width: 767px)";
     const markup = renderToStaticMarkup(
       createElement(SettingsView, { ...settingsProps, workflowStates }),
     );
 
-    expect(css).toContain(".workflow-settings-row");
-    expect(css).toContain(".cycle-settings-actions");
-    expect(css).toContain("@media (max-width: 767px)");
+    expect(declarationsFor(rules, ".workflow-settings-row").get("flex-wrap")).toBe("wrap");
+    expect(declarationsFor(rules, ".cycle-settings-actions").get("display")).toBe("flex");
+    expect(declarationsFor(rules, ".workflow-settings-row .text-input", mobile).get("width")).toBe(
+      "100%",
+    );
+    expect(declarationsFor(rules, ".cycle-settings-actions", mobile).get("flex-direction")).toBe(
+      "column",
+    );
     expect(markup).not.toContain('role="alert"');
   });
 });

@@ -1,10 +1,16 @@
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CyclesView, IssueCycleHistorySection } from "./OrbitApp";
+import { CyclesView, IssueCycleHistorySection, OrbitApp } from "./OrbitApp";
+import { queryClient } from "../lib/query";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
+import { reviewBootstrap } from "./review-ui.test-fixtures";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children }: { children: ReactNode }) => createElement("a", null, children),
+  useRouter: () => ({ navigate: vi.fn().mockResolvedValue(undefined) }),
+}));
 
 const cycles = [
   {
@@ -45,8 +51,8 @@ const cycleHistory = [
   },
 ];
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-const appSource = readFileSync(resolve(process.cwd(), "src/components/OrbitApp.tsx"), "utf8");
+const rules = parseStyleRules();
+const MOBILE = "(max-width: 767px)";
 
 function renderCycles() {
   const dom = new JSDOM("<!doctype html><div id='root'></div>");
@@ -60,7 +66,11 @@ function renderCycles() {
   return { dom, root };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  queryClient.clear();
+  vi.unstubAllGlobals();
+});
 
 describe("Cycle history UI", () => {
   it("[代表値] Cycle履歴に繰越件数と繰越Issueの元Cycleを表示する", async () => {
@@ -322,19 +332,20 @@ describe("Cycle history UI", () => {
   });
 
   it("[境界値] Cycle履歴表示は390pxで縦積み・wrapできるCSS契約を持つ", () => {
-    expect(appSource).toContain('aria-label="IssueのCycle履歴"');
-    expect(appSource).toContain('aria-label="このCycleへ繰り越されたIssue"');
-    expect(styles).toContain(".cycle-history-route strong");
-    expect(styles).toContain("white-space: normal;");
-    expect(styles).toContain(
-      "@media (max-width: 767px) { .cycle-carryover-row { align-items: flex-start; flex-direction: column;",
+    // aria-label の DOM は上の「Cycle履歴0件」「Issue詳細の繰越履歴0件」テストで描画検証している。
+    expect(declarationsFor(rules, ".cycle-history-route strong").get("white-space")).toBe("normal");
+    const carryoverRow = declarationsFor(rules, ".cycle-carryover-row", MOBILE);
+    expect(carryoverRow.get("align-items")).toBe("flex-start");
+    expect(carryoverRow.get("flex-direction")).toBe("column");
+    const historyRow = declarationsFor(rules, ".cycle-history-row");
+    expect(historyRow.get("display")).toBe("flex");
+    expect(historyRow.get("align-items")).toBe("flex-start");
+    const dark = ':root[data-theme="dark"]';
+    expect(declarationsFor(rules, `${dark} .cycle-history-route strong`).get("color")).toBe(
+      "var(--orbit-text)",
     );
-    expect(styles).toContain(".cycle-history-row { display: flex; align-items: flex-start;");
-    expect(styles).toContain(
-      ':root[data-theme="dark"] .cycle-history-route strong { color: var(--orbit-text); }',
-    );
-    expect(styles).toContain(
-      ':root[data-theme="dark"] .cycle-history-row { border-color: var(--orbit-border); }',
+    expect(declarationsFor(rules, `${dark} .cycle-history-row`).get("border-color")).toBe(
+      "var(--orbit-border)",
     );
   });
 
@@ -361,8 +372,7 @@ describe("Cycle history UI", () => {
     expect(rootElement.style.width).toBe("390px");
     expect(row.style.width).toBe("");
     expect(row.querySelector(".cycle-history-route strong")?.textContent).toContain("元Cycle");
-    expect(styles).toContain(".cycle-history-route strong");
-    expect(styles).toContain("white-space: normal;");
+    expect(declarationsFor(rules, ".cycle-history-route strong").get("white-space")).toBe("normal");
 
     await act(async () => {
       root.unmount();
@@ -370,11 +380,96 @@ describe("Cycle history UI", () => {
     });
   });
 
-  it("[異常系] Bootstrapのloading/error/retry導線と履歴prop配線を維持する", () => {
-    expect(appSource).toContain("if (bootstrap.isLoading)");
-    // Cached refetch failures and initial failures are behavior-tested in
-    // followup-shell-runtime.test.ts, rather than tied to a source guard string.
-    expect(appSource).toContain("onClick={() => bootstrap.refetch()}");
-    expect(appSource).toContain("cycleHistory={data.cycleHistory}");
+  describe("[異常系] Bootstrapのloading/error/retry導線と履歴prop配線", () => {
+    const json = (value: unknown) =>
+      new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+
+    function renderApp(bootstrap: () => Promise<Response>) {
+      vi.useFakeTimers();
+      const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+        url: "https://orbit.example/",
+      });
+      Object.defineProperty(dom.window, "matchMedia", {
+        value: () => ({
+          matches: false,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }),
+      });
+      vi.stubGlobal("window", dom.window);
+      vi.stubGlobal("self", dom.window);
+      vi.stubGlobal("scrollTo", vi.fn());
+      vi.stubGlobal("document", dom.window.document);
+      vi.stubGlobal("navigator", dom.window.navigator);
+      vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
+      vi.stubGlobal("Node", dom.window.Node);
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      queryClient.clear();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (path: string) => {
+          if (path === "/api/v1/bootstrap") return bootstrap();
+          if (path === "/api/v1/background-runs/current") return json({ run: null });
+          throw new Error(`Unexpected API request: ${path}`);
+        }),
+      );
+      const root = createRoot(dom.window.document.getElementById("root")!);
+      return { dom, root };
+    }
+
+    async function mount(root: ReturnType<typeof renderApp>["root"]) {
+      await act(async () => root.render(createElement(OrbitApp, { initialSection: "cycles" })));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+    }
+
+    const payload = () => ({ ...reviewBootstrap(), cycles, cycleHistory });
+
+    it("取得中はローディング表示を出し、Cycle画面は出さない", async () => {
+      const { dom, root } = renderApp(() => new Promise<Response>(() => undefined));
+      await mount(root);
+      expect(dom.window.document.querySelector(".loading-screen")?.textContent).toContain(
+        "Orbitを準備しています…",
+      );
+      expect(dom.window.document.body.textContent).not.toContain("繰越");
+      await act(async () => root.unmount());
+    });
+
+    it("初回取得に失敗したらエラー画面を出し、再試行ボタンで再取得して繰越履歴を表示する", async () => {
+      let fails = true;
+      const { dom, root } = renderApp(async () =>
+        fails
+          ? new Response(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "失敗" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            })
+          : json(payload()),
+      );
+      await mount(root);
+      await act(async () => vi.advanceTimersByTimeAsync(2000));
+      const doc = dom.window.document as unknown as Document;
+      expect(doc.querySelector(".error-screen")?.textContent).toContain("接続できません");
+      expect(doc.body.textContent).not.toContain("繰越");
+
+      fails = false;
+      const retry = [...doc.querySelectorAll<HTMLButtonElement>(".error-screen button")].find(
+        (button) => button.textContent === "再試行",
+      )!;
+      expect(retry).toBeDefined();
+      await act(async () => retry.click());
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(doc.querySelector(".error-screen")).toBeNull();
+      await act(async () => root.unmount());
+    });
+
+    it("Bootstrapの cycleHistory がCyclesViewへ配線され、選択中Cycleへの繰越だけを表示する", async () => {
+      const { dom, root } = renderApp(async () => json(payload()));
+      await mount(root);
+      const text = dom.window.document.body.textContent;
+      expect(text).toContain("繰越 1件");
+      expect(text).toContain("TASK-1");
+      expect(text).toContain("繰越Issue");
+      expect(text).toContain("元Cycle: Cycle 1");
+      await act(async () => root.unmount());
+    });
   });
 });

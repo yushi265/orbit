@@ -1,53 +1,12 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
-const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
-);
+const rules = parseStyleRules();
+const MOBILE = "(max-width: 767px)";
 
-type Rule = { selectors: string[]; decls: Map<string, string>; start: number };
-
-// at-rule (@media 等) の中身は読み飛ばし、トップレベルのルールだけを順序つきで取り出す。
-function topLevelRules(source: string): Rule[] {
-  const rules: Rule[] = [];
-  let i = 0;
-  while (i < source.length) {
-    const open = source.indexOf("{", i);
-    if (open < 0) break;
-    const start = i;
-    const prelude = source.slice(i, open).trim();
-    let depth = 1;
-    let j = open + 1;
-    while (j < source.length && depth > 0) {
-      if (source[j] === "{") depth++;
-      else if (source[j] === "}") depth--;
-      j++;
-    }
-    const body = source.slice(open + 1, j - 1);
-    i = j;
-    if (prelude.startsWith("@")) continue;
-    const decls = new Map<string, string>();
-    for (const part of body.split(";")) {
-      const colon = part.indexOf(":");
-      if (colon < 0) continue;
-      decls.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
-    }
-    rules.push({ selectors: prelude.split(",").map((s) => s.trim()), decls, start });
-  }
-  return rules;
-}
-
-const rules = topLevelRules(css);
-
-function lastDecl(selector: string, prop: string, theme = ""): string | undefined {
-  let found: string | undefined;
-  for (const rule of rules) {
-    if (rule.selectors.includes(selector) && rule.decls.has(prop)) found = rule.decls.get(prop);
-  }
-  void theme;
-  return found;
+// トップレベル（media 外）で selector に当たる宣言のうち、ソース順で最後の値。
+function lastDecl(selector: string, prop: string): string | undefined {
+  return declarationsFor(rules, selector).get(prop);
 }
 
 function cssVar(name: string, scope = ":root"): string {
@@ -146,10 +105,11 @@ describe("AC-9 アクセント色", () => {
   it("[代表値] .button.primary・.brand-mark・.mobile-create の背景が --orbit-accent-solid を参照する", () => {
     const rule = rules.find(
       (r) =>
+        r.media === null &&
         r.selectors.includes(".brand-mark") &&
         r.selectors.includes(".button.primary") &&
         r.selectors.includes(".mobile-create") &&
-        r.decls.get("background")?.includes("--orbit-accent-solid"),
+        r.declarations.get("background")?.includes("--orbit-accent-solid"),
     );
     expect(rule).toBeDefined();
   });
@@ -200,10 +160,11 @@ describe("AC-10 フォーカス表示", () => {
 
 describe("AC-12 並び替えボタン", () => {
   it("[代表値] デスクトップ幅の .touch-move-button は display: none ではなく 24x24px 以上", () => {
-    const rule = rules.find((r) => r.selectors.includes(".touch-move-button"))!;
-    expect(rule.decls.get("display")).not.toBe("none");
-    expect(parseInt(rule.decls.get("min-width") ?? "0", 10)).toBeGreaterThanOrEqual(24);
-    expect(parseInt(rule.decls.get("min-height") ?? "0", 10)).toBeGreaterThanOrEqual(24);
+    const decls = declarationsFor(rules, ".touch-move-button");
+    expect(decls.size).toBeGreaterThan(0);
+    expect(decls.get("display")).not.toBe("none");
+    expect(parseInt(decls.get("min-width") ?? "0", 10)).toBeGreaterThanOrEqual(24);
+    expect(parseInt(decls.get("min-height") ?? "0", 10)).toBeGreaterThanOrEqual(24);
   });
 });
 
@@ -250,30 +211,37 @@ describe("FIX-a11y-aa-remaining AC-7 カレンダーの選択日", () => {
 
 describe("FIX-a11y-aa-remaining AC-8 scroll-padding-bottom", () => {
   it("[代表値] 767px 以下のメディアクエリで下部ナビ分の scroll-padding-bottom がある", () => {
-    const m =
-      /@media \(max-width: 767px\)\s*\{\s*html\s*\{[^}]*scroll-padding-bottom:\s*([^;}]+)/.exec(
-        css,
-      );
-    expect(m, "scroll-padding-bottom in 767px block").not.toBeNull();
-    expect(m![1]).toContain("env(safe-area-inset-bottom)");
-    expect(parseInt(/(\d+)px/.exec(m![1])![1], 10)).toBeGreaterThanOrEqual(70);
+    const value = declarationsFor(rules, "html", MOBILE).get("scroll-padding-bottom");
+    expect(value, "scroll-padding-bottom in 767px block").toBeDefined();
+    expect(value).toContain("env(safe-area-inset-bottom)");
+    expect(parseInt(/(\d+)px/.exec(value!)![1], 10)).toBeGreaterThanOrEqual(70);
   });
 });
 
 describe("FIX-a11y-aa-remaining AC-13 text-button / skip-link", () => {
   it("[境界値] デスクトップ（768px 以上）の .text-button の min-height が 24px 以上", () => {
-    const desktop = css.match(
-      /@media \(min-width: 768px\) \{\s*\.text-button \{[^}]*min-height: (\d+)px/,
+    const minHeight = declarationsFor(rules, ".text-button", "(min-width: 768px)").get(
+      "min-height",
     );
-    expect(desktop, "768px 以上の .text-button min-height").not.toBeNull();
-    expect(Number(desktop![1])).toBeGreaterThanOrEqual(24);
+    expect(minHeight, "768px 以上の .text-button min-height").toBeDefined();
+    expect(parseInt(minHeight!, 10)).toBeGreaterThanOrEqual(24);
   });
 
   it("[代表値] モバイルの .text-button の 44px が後続のメディアクエリ外のルールで上書きされない", () => {
-    const mobile = css.indexOf(".text-button { min-width: 44px; min-height: 44px; }");
+    const mobile = rules.findIndex(
+      (r) =>
+        r.media === MOBILE &&
+        r.selectors.includes(".text-button") &&
+        r.declarations.get("min-width") === "44px" &&
+        r.declarations.get("min-height") === "44px",
+    );
     expect(mobile).toBeGreaterThan(-1);
     const later = rules.filter(
-      (r) => r.selectors.includes(".text-button") && r.decls.has("min-height") && r.start > mobile,
+      (r, i) =>
+        i > mobile &&
+        r.media === null &&
+        r.selectors.includes(".text-button") &&
+        r.declarations.has("min-height"),
     );
     expect(later).toEqual([]);
   });

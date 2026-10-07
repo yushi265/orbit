@@ -1,8 +1,6 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
@@ -15,6 +13,7 @@ import type {
   ProjectViewModel as Project,
   WorkflowStateViewModel as WorkflowState,
 } from "../shared/view-models";
+import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 const states = [
   { id: "backlog", name: "Backlog", category: "backlog" },
@@ -273,16 +272,22 @@ describe("Cycle breakdown", () => {
       [...(metrics?.querySelectorAll("strong") ?? [])].map((entry) => entry.textContent),
     ).toEqual(["1", "0", "0%"]);
 
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(styles).toContain(
-      ".cycle-breakdown-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));",
-    );
-    expect(styles).toContain(
-      "@media (min-width: 768px) and (max-width: 1023px) { .cycle-breakdown-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }",
-    );
-    expect(styles).toContain(
-      "@media (max-width: 767px) { .cycle-breakdown-grid { grid-template-columns: 1fr;",
-    );
+    const rules = parseStyleRules();
+    const base = declarationsFor(rules, ".cycle-breakdown-grid");
+    expect(base.get("display")).toBe("grid");
+    expect(base.get("grid-template-columns")).toBe("repeat(3, minmax(0, 1fr))");
+    expect(
+      declarationsFor(
+        rules,
+        ".cycle-breakdown-grid",
+        "(min-width: 768px) and (max-width: 1023px)",
+      ).get("grid-template-columns"),
+    ).toBe("repeat(2, minmax(0, 1fr))");
+    expect(
+      declarationsFor(rules, ".cycle-breakdown-grid", "(max-width: 767px)").get(
+        "grid-template-columns",
+      ),
+    ).toBe("1fr");
   });
 
   it("[統合] BootstrapのProjectをOrbitAppからCycle内訳へ渡す", async () => {

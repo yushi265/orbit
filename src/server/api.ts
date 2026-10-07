@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, keyFromRequest, parseBody, parseNumber, withOwner } from "./http";
+import { json, parseBody, parseNumber, requireIdempotencyKey, withOwner } from "./http";
 import { validationError } from "./errors";
 import {
   CreateIssueInput,
@@ -55,6 +55,7 @@ import {
   recentIssueViewMutationSchema,
   recentSearchMutationSchema,
   type ProjectDisplayPreferencesMutation,
+  issueListParamsSchema,
 } from "../shared/contracts";
 
 const projectMetadataPatchEnvelopeSchema = z.strictObject({
@@ -105,22 +106,31 @@ function parsePriorityList(value: string | null): IssueQuery["filter"]["prioriti
     );
 }
 
+function parseFilter(url: URL): IssueQuery["filter"] {
+  return {
+    text: url.searchParams.get("q") ?? undefined,
+    priorities: parsePriorityList(url.searchParams.get("priority")),
+    statusIds: url.searchParams.get("status")?.split(",").filter(Boolean),
+    projectIds: url.searchParams.get("project")?.split(",").filter(Boolean),
+    cycleIds: url.searchParams.get("cycle")?.split(",").filter(Boolean),
+    labelIds: url.searchParams.get("label")?.split(",").filter(Boolean),
+    due: parseContract(issueListParamsSchema.pick({ due: true }), {
+      due: url.searchParams.get("due") || undefined,
+    }).due,
+  };
+}
+
 function parseQuery(request: Request): Partial<IssueQuery> {
   const url = new URL(request.url);
-  const mode = url.searchParams.get("mode") === "board" ? "board" : "list";
+  const params = parseContract(issueListParamsSchema.pick({ order: true, limit: true }), {
+    order: url.searchParams.get("order") || undefined,
+    limit: url.searchParams.get("limit") || undefined,
+  });
   return {
-    mode,
-    filter: {
-      text: url.searchParams.get("q") ?? undefined,
-      priorities: parsePriorityList(url.searchParams.get("priority")),
-      statusIds: url.searchParams.get("status")?.split(",").filter(Boolean),
-      projectIds: url.searchParams.get("project")?.split(",").filter(Boolean),
-      cycleIds: url.searchParams.get("cycle")?.split(",").filter(Boolean),
-      labelIds: url.searchParams.get("label")?.split(",").filter(Boolean),
-      due: (url.searchParams.get("due") as IssueQuery["filter"]["due"]) || undefined,
-    },
-    order: (url.searchParams.get("order") as IssueQuery["order"]) || "manual",
-    limit: parseNumber(url.searchParams.get("limit"), 100),
+    mode: url.searchParams.get("mode") === "board" ? "board" : "list",
+    filter: parseFilter(url),
+    order: params.order ?? "manual",
+    limit: params.limit ?? 100,
   };
 }
 
@@ -200,8 +210,7 @@ export async function deleteIssueNote(
   noteId: string,
 ): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const key = request.headers.get("Idempotency-Key");
-    if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    const key = requireIdempotencyKey(request);
     owner.store.deleteIssueNote(owner.userId, issueId, noteId, key);
     return json({ ok: true }, 200, requestId);
   });
@@ -227,8 +236,7 @@ export async function deleteIssueRelation(
   relationId: string,
 ): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const key = request.headers.get("Idempotency-Key");
-    if (!key) throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    const key = requireIdempotencyKey(request);
     owner.store.deleteIssueRelation(owner.userId, issueId, relationId, key);
     return json({ ok: true }, 200, requestId);
   });
@@ -280,7 +288,7 @@ export async function archiveIssue(request: Request, issueId: string): Promise<R
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: owner.store.archiveIssue(owner.userId, issueId, keyFromRequest(request)),
+        issue: owner.store.archiveIssue(owner.userId, issueId, requireIdempotencyKey(request)),
       },
       200,
       requestId,
@@ -292,7 +300,7 @@ export async function restoreIssue(request: Request, issueId: string): Promise<R
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: owner.store.restoreIssue(owner.userId, issueId, keyFromRequest(request)),
+        issue: owner.store.restoreIssue(owner.userId, issueId, requireIdempotencyKey(request)),
       },
       200,
       requestId,
@@ -304,12 +312,25 @@ export async function trashIssue(request: Request, issueId: string): Promise<Res
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        issue: owner.store.trashIssue(owner.userId, issueId, keyFromRequest(request)),
+        issue: owner.store.trashIssue(owner.userId, issueId, requireIdempotencyKey(request)),
       },
       200,
       requestId,
     ),
   );
+}
+
+const issueActions = { archive: archiveIssue, restore: restoreIssue, trash: trashIssue };
+
+export async function postIssueAction(request: Request, issueId: string): Promise<Response> {
+  const action = new URL(request.url).searchParams.get("action");
+  if (action && Object.hasOwn(issueActions, action))
+    return issueActions[action as keyof typeof issueActions](request, issueId);
+  return withOwner(request, async () => {
+    throw validationError({
+      action: ["actionはarchive・restore・trashのいずれかを指定してください。"],
+    });
+  });
 }
 
 export async function listProjects(request: Request): Promise<Response> {
@@ -340,9 +361,7 @@ export async function updateLabel(request: Request, labelId: string): Promise<Re
 
 export async function deleteLabel(request: Request, labelId: string): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) => {
-    const mutationKey = request.headers.get("Idempotency-Key");
-    if (!mutationKey)
-      throw validationError({ idempotencyKey: ["Idempotency-Keyを指定してください。"] });
+    const mutationKey = requireIdempotencyKey(request);
     owner.store.deleteLabel(owner.userId, labelId, mutationKey);
     return json({ ok: true }, 200, requestId);
   });
@@ -416,7 +435,11 @@ export async function archiveProject(request: Request, projectId: string): Promi
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        project: owner.store.archiveProject(owner.userId, projectId, keyFromRequest(request)),
+        project: owner.store.archiveProject(
+          owner.userId,
+          projectId,
+          requireIdempotencyKey(request),
+        ),
       },
       200,
       requestId,
@@ -462,7 +485,7 @@ export async function closeCycle(request: Request, cycleId: string): Promise<Res
   return withOwner(request, async ({ owner, requestId }) =>
     json(
       {
-        cycle: owner.store.closeCycle(owner.userId, cycleId, keyFromRequest(request)),
+        cycle: owner.store.closeCycle(owner.userId, cycleId, requireIdempotencyKey(request)),
       },
       200,
       requestId,
@@ -537,7 +560,7 @@ export async function searchIssues(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const query = parseContract(issueSearchQuerySchema, {
       text: url.searchParams.get("q") ?? "",
-      filter: parseQuery(request).filter ?? {},
+      filter: parseFilter(url),
     });
     return json(
       {

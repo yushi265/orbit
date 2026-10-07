@@ -324,6 +324,8 @@ it("[結合/アクセス境界] LAN待受用の数値lookupを許可し0.0.0.0�
   }
 });
 
+// backup/restoreは呼び出しごとに版情報取得でpnpm・gitを子プロセス起動する（本テストは4回）。
+// 全体実行でCPUが混むと起動待ちだけで既定の5秒を超えるため、待ち時間を明示する。
 it("[状態遷移] backupは全状態と版情報を保存し空の別保存先へ復元、非空先と重複backupを拒否する", async () => {
   const { runLocal } = await import("./local.mjs");
   const { mkdtemp, rm, realpath, mkdir, writeFile, readFile } = await import("node:fs/promises");
@@ -348,7 +350,7 @@ it("[状態遷移] backupは全状態と版情報を保存し空の別保存先�
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
-});
+}, 20_000);
 
 it("[代表値] Wranglerユーザー設定は保存先専用XDGディレクトリに隔離する", () => {
   expect(
@@ -454,6 +456,7 @@ it("[境界値/禁止] コピー先がコピー元のlock配下なら作成前�
   }
 });
 
+// 版情報取得の子プロセス起動を3回伴うため、上のbackup/restoreテストと同じ理由で待ち時間を明示する。
 it("[故障注入] コピー途中で失敗したbackup/restoreは部分成果を残さず元データを維持する", async () => {
   const { runLocal } = await import("./local.mjs");
   const { mkdtemp, rm, realpath, mkdir, writeFile, readFile, readdir, access } =
@@ -482,7 +485,7 @@ it("[故障注入] コピー途中で失敗したbackup/restoreは部分成果�
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
-});
+}, 20_000);
 
 it("[故障注入] port使用中では起動を再試行せず失敗し、保存状態と排他解放を維持する", async () => {
   const { runLocal } = await import("./local.mjs");

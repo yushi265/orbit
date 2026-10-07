@@ -137,11 +137,11 @@ src/
 | Phase | 主な変更ファイル | 完了条件 |
 |---|---|---|
 | 0 | `scripts/test-baseline.mjs`（新規: `vitest --reporter=json` からテスト名一覧を出力し、ベースライン JSON と突合。`skip` / `only` / `todo` を検出）と `scripts/test-baseline.json`（`package.json` に `test:baseline` を追加）、`src/components/render-app.test-fixtures.ts`（新規: `renderApp({ url, container, seed?, strict? })` が本番 `routeTree`・`createMemoryHistory` で `container` に描画する。jsdom と fetch のスタブは各テストが用意する。`seed(client)` は clear の後・描画の前にキャッシュを仕込む〔キャッシュ有無が前提のテスト 3 例が根拠〕。`strict` は StrictMode で包む〔StrictMode の effect 二重実行を検証する既存テスト用〕。root コンポーネントだけはテスト内で `Outlet` に差し替える〔`__root` の `<html>` を div 内に描画すると React が入れ子の警告を出すため。head は `pwa.test.ts` が検証〕。QueryClient は現行 OrbitApp がモジュールのシングルトンを使うため、Phase 0 では描画前後の `queryClient.clear()` で分離する）、OrbitApp を描画する runtime テスト 22 本の描画部分、`detail-select-size.test.ts` | ベースライン突合が一致。各テストの assert 対応表を PR に記載。`vi.mock("@tanstack/react-router")` は View 単体テストだけに残る |
-| 1 | `src/components/ui/*`（新規）、`OrbitApp.tsx` から該当部品を削除して import に置換 | 見た目・DOM 不変。日付 helper の重複（`dateInputValueInTimeZone` ↔ `calendarDateKeyInTimeZone`、`formatDateOnly` ↔ `formatIssueDueDate`）を出力一致テストで確認してから統合 |
+| 1 | `src/components/ui/*`（新規。OrbitApp.tsx 内の部品のみ切り出し、既存の独立ファイル〔orbit-select / orbit-date-picker / orbit-icon / linkified-text / dialog-boundary〕の ui/ への移動は Phase 5）、`OrbitApp.tsx` から該当部品を削除して import に置換し、テストが import している export は OrbitApp から再 export | 見た目・DOM 不変。日付 helper の重複（`dateInputValueInTimeZone` ↔ `calendarDateKeyInTimeZone`、`formatDateOnly` ↔ `formatIssueDueDate`）を出力一致テストで確認してから統合 |
 | 2 | `src/lib/queries/*`（新規）、`OrbitApp.tsx` の useQuery / setQueryData / `*MutationKeyRef` | AC-6 と `useMutationKey` のテスト追加。キャッシュ操作が `syncIssueCaches` / `removeIssueFromCaches` / `queryKeys` に集約 |
 | 3 | `src/routes/__root.tsx`、`src/routes/issues.tsx`（新規 layout）、全画面ルート、`src/routeTree.gen.ts`（生成物）、`features/shell/*`（新規）、`docs/architecture.md` | AC-1〜AC-5 のテスト追加。`section` / `getInitialSection` / `orbit.issue-focus` を削除。`docs/architecture.md` のレイヤー表を更新 |
 | 4 | `features/<domain>/*`（1 PR 1〜2 domain）、`OrbitApp.tsx` は再 export のみへ縮小 | 各 domain 移動後も既存テスト pass |
-| 5 | `OrbitApp.tsx` 削除、テストの import 更新、`docs/ai-dlc/codekb/shared.md` | AC-8 の計測（`wc -l`・import 方向）を Gate 3 で提示 |
+| 5 | `OrbitApp.tsx` 削除、既存の独立 UI ファイル（orbit-select / orbit-date-picker / orbit-icon / linkified-text / dialog-boundary / issue-priority）の `components/ui/` への移動〔Phase 1〜4 の間 `components/ui` がこれらを `../` で参照するのは移行中の暫定として許容〕、テストの import 更新、`docs/ai-dlc/codekb/shared.md` | AC-8 の計測（`wc -l`・import 方向）を Gate 3 で提示 |
 
 ## UI/UX 方針
 

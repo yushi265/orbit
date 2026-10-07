@@ -60,7 +60,7 @@ import {
   sortIssues,
 } from "./issue-list";
 import { buildHomeSummary, homeDateLabel, homeRelativeDay } from "./home";
-import { formatIssueDueDate, issueDueDateKey } from "../shared/issue-dates";
+import { formatIssueDueDate } from "../shared/issue-dates";
 import {
   buildIssueHierarchyRows,
   readCollapsedParents,
@@ -70,7 +70,7 @@ import {
 import { beforeProjectIdForMove } from "./project-workspace";
 import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
 import { inverseIssuePatch } from "./issue-undo";
-import { priorityFromSelection, priorityIconFor } from "./issue-priority";
+import { priorityFromSelection } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { isImeComposing } from "./ime";
 import { projectDetailPath } from "./navigation";
@@ -93,6 +93,32 @@ import {
   idempotencyKey,
 } from "../lib/api-client";
 import { queryClient } from "../lib/query";
+import { EmptyState } from "./ui/EmptyState";
+import { Modal } from "./ui/Modal";
+import { PriorityIcon } from "./ui/PriorityIcon";
+import { ToastRegion, useToast } from "./ui/Toast";
+import { browserStorage } from "./ui/browser-storage";
+import {
+  dateInputToUnix,
+  dateInputValue,
+  dateInputValueInTimeZone,
+  dismissOpenCalendar,
+  formatDate,
+  formatDateOnly,
+  formatDateTime,
+  formatRange,
+} from "./ui/date-format";
+import {
+  CycleSelectOptions,
+  PriorityOptions,
+  priorityLabel,
+  priorityOptionList,
+  priorityTone,
+} from "./ui/options";
+import { useKeyboardReorderFocus } from "./ui/useKeyboardReorderFocus";
+
+// テストが OrbitApp から import している部品は、移行期間中ここから再 export する（Phase 5 で解消）。
+export { PriorityIcon, ToastRegion, useToast };
 import { useBackgroundRun } from "./background-run";
 import { DIALOG_ITSELF, useDialogBoundary, useInitialTextCaretEnd } from "./dialog-boundary";
 import { LinkifiedText } from "./LinkifiedText";
@@ -106,17 +132,6 @@ import {
   type IssueSearch,
   type ProjectSearch,
 } from "../lib/url-state/issues";
-
-function dismissOpenCalendar(container: HTMLElement | null): boolean {
-  const trigger = container
-    ?.querySelector(".orbit-calendar")
-    ?.closest(".orbit-date-picker")
-    ?.querySelector<HTMLButtonElement>(".orbit-calendar-trigger");
-  if (!trigger) return false;
-  trigger.click();
-  trigger.focus();
-  return true;
-}
 
 type Section =
   | "home"
@@ -136,7 +151,6 @@ type Props = {
   projectSearch?: ProjectSearch;
   viewSearch?: ViewSearch;
 };
-type ToastAction = { label: string; onClick: () => void };
 type PreferencePatch = Partial<
   Pick<BootstrapPayload["preferences"], "timezone" | "locale" | "theme" | "colorTheme">
 >;
@@ -176,21 +190,7 @@ type SearchFilters = {
   due: "all" | "none" | "overdue" | "today" | "upcoming" | "next7";
 };
 
-const priorityLabel: Record<Issue["priority"], string> = {
-  no_priority: "No priority",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  urgent: "Urgent",
-};
 const cycleTabValues = ["current", "upcoming", "past"] as const;
-const priorityTone: Record<Issue["priority"], string> = {
-  no_priority: "neutral",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  urgent: "urgent",
-};
 const sectionLabels: Record<Section, string> = {
   home: "Home",
   issues: "Issues",
@@ -233,65 +233,6 @@ function settingsRunToDisplay(
   // An earlier Bootstrap snapshot of this same Run must not regress completion.
   if (controller.run_id === server.run_id && eligible(server)) return controller;
   return controller.requested_at > server.requested_at ? controller : server;
-}
-
-function formatDate(value: number | null): string {
-  if (!value) return "未設定";
-  return new Intl.DateTimeFormat("ja-JP", { month: "short", day: "numeric" }).format(
-    new Date(value),
-  );
-}
-
-function formatDateOnly(value: number | null): string {
-  if (value === null) return "未設定";
-  return new Intl.DateTimeFormat("ja-JP", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(value));
-}
-
-function dateInputValue(value: number | null): string {
-  return value === null ? "" : issueDueDateKey(value);
-}
-
-function formatRange(start: number, end: number): string {
-  return `${formatDate(start)} — ${formatDate(end)}`;
-}
-
-function formatDateTime(value: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(new Date(value));
-}
-
-function dateInputValueInTimeZone(value: number, timeZone?: string): string {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      calendar: "gregory",
-      numberingSystem: "latn",
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .formatToParts(new Date(value))
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function dateInputToUnix(value: string): number | null {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  if (![year, month, day].every(Number.isFinite)) return null;
-  return Date.UTC(year, month - 1, day);
 }
 
 function shortId(value: string): string {
@@ -1802,76 +1743,6 @@ function OrbitAppInner(props: Props) {
   );
 }
 
-type ToastState = {
-  kind: "success" | "error";
-  text: string;
-  action?: ToastAction;
-};
-
-const TOAST_AUTO_DISMISS_MS = 3500;
-
-/** 自動で消えるのは、アクションなしの成功トーストだけ。 */
-export function useToast() {
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const timerRef = useRef<number | undefined>(undefined);
-  const clearTimer = () => {
-    if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
-    timerRef.current = undefined;
-  };
-  useEffect(() => clearTimer, []);
-  const dismissToast = () => {
-    clearTimer();
-    setToast(null);
-  };
-  const showToast = (kind: ToastState["kind"], text: string, action?: ToastAction) => {
-    clearTimer();
-    setToast({ kind, text, action });
-    if (kind === "success" && !action)
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = undefined;
-        setToast(null);
-      }, TOAST_AUTO_DISMISS_MS);
-  };
-  return { toast, showToast, dismissToast };
-}
-
-/** ライブリージョンは常に DOM に置く（後から挿入された領域は読み上げられないため）。 */
-export function ToastRegion({
-  toast,
-  onDismiss,
-}: {
-  toast: ToastState | null;
-  onDismiss: () => void;
-}) {
-  const body = toast && (
-    <div className={`toast ${toast.kind}`}>
-      <span aria-hidden="true">{toast.kind === "success" ? "✓" : "!"}</span>
-      {toast.text}
-      {toast.action && (
-        <button className="text-button" onClick={toast.action.onClick}>
-          {toast.action.label}
-        </button>
-      )}
-      {(toast.kind === "error" || toast.action) && (
-        <button
-          className="icon-button toast-close"
-          type="button"
-          aria-label="通知を閉じる"
-          onClick={onDismiss}
-        >
-          ×
-        </button>
-      )}
-    </div>
-  );
-  return (
-    <>
-      <div role="status">{toast?.kind === "success" ? body : null}</div>
-      <div role="alert">{toast?.kind === "error" ? body : null}</div>
-    </>
-  );
-}
-
 function Sidebar({
   section,
   unread,
@@ -2757,11 +2628,7 @@ export function IssuesView({
                 }
               >
                 <option value="all">すべてのPriority</option>
-                {Object.entries(priorityLabel).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                <PriorityOptions />
               </select>
             </label>
             {showProjectFilter && (
@@ -2936,12 +2803,7 @@ export function IssuesView({
                   {state.name}
                 </option>
               ))}
-            {bulkField === "priority" &&
-              Object.entries(priorityLabel).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
+            {bulkField === "priority" && <PriorityOptions />}
             {bulkField === "cycle" && (
               <>
                 <option value="__none__">Cycleなし</option>
@@ -3179,99 +3041,6 @@ export function IssuesView({
       )}
     </div>
   );
-}
-
-export function PriorityIcon({ priority }: { priority: Issue["priority"] }) {
-  const icon = priorityIconFor(priority);
-  return (
-    <span
-      className={`priority-icon ${icon.name}`}
-      role="img"
-      aria-label={icon.label}
-      title={icon.label}
-    >
-      <svg
-        aria-hidden="true"
-        className="priority-glyph"
-        viewBox="0 0 16 16"
-        width="18"
-        height="18"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {icon.paths.map((path) => (
-          <path key={path.d} d={path.d} strokeDasharray={path.dash} />
-        ))}
-      </svg>
-    </span>
-  );
-}
-
-function browserStorage(): Storage | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-}
-
-function useKeyboardReorderFocus(busy: boolean) {
-  const handleRef = useRef<HTMLButtonElement>(null);
-  const keyboardIntentRef = useRef(false);
-  const pendingSeenRef = useRef(false);
-  const stopMonitoringRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => stopMonitoringRef.current?.(), []);
-  useEffect(() => {
-    if (busy) {
-      if (keyboardIntentRef.current) pendingSeenRef.current = true;
-      return;
-    }
-    if (!pendingSeenRef.current) return;
-    pendingSeenRef.current = false;
-    stopMonitoringRef.current?.();
-    stopMonitoringRef.current = null;
-    const restore = keyboardIntentRef.current;
-    keyboardIntentRef.current = false;
-    const handle = handleRef.current;
-    if (!restore || !handle?.isConnected || handle.disabled || handle.closest("[inert]")) return;
-    const active = handle.ownerDocument.activeElement;
-    if (active === handle.ownerDocument.body || active === handle)
-      handle.focus({ preventScroll: true });
-  }, [busy]);
-  return {
-    handleRef,
-    rememberKeyboardFocus: () => {
-      stopMonitoringRef.current?.();
-      stopMonitoringRef.current = null;
-      const handle = handleRef.current;
-      keyboardIntentRef.current = !!handle && handle.ownerDocument.activeElement === handle;
-      pendingSeenRef.current = false;
-      if (!keyboardIntentRef.current || !handle) return;
-      const doc = handle.ownerDocument;
-      const onFocusIn = (event: FocusEvent) => {
-        if (event.target === handle || event.target === doc.body) return;
-        keyboardIntentRef.current = false;
-        stopMonitoringRef.current?.();
-        stopMonitoringRef.current = null;
-      };
-      const onDragStart = () => {
-        keyboardIntentRef.current = false;
-        pendingSeenRef.current = false;
-        stopMonitoringRef.current?.();
-        stopMonitoringRef.current = null;
-      };
-      doc.addEventListener("focusin", onFocusIn);
-      doc.addEventListener("dragstart", onDragStart, true);
-      stopMonitoringRef.current = () => {
-        doc.removeEventListener("focusin", onFocusIn);
-        doc.removeEventListener("dragstart", onDragStart, true);
-      };
-    },
-  };
 }
 
 function IssueRow({
@@ -3520,11 +3289,7 @@ function IssueRow({
                 onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
               }
             >
-              {Object.entries(priorityLabel).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
+              <PriorityOptions />
             </select>
           </span>
         ) : (
@@ -5439,10 +5204,7 @@ export function SearchView({
           label="検索Priority"
           value={filters.priority}
           onChange={(value) => updateFilter("priority", value as SearchFilters["priority"])}
-          options={[
-            { value: "all", label: "すべてのPriority" },
-            ...Object.entries(priorityLabel).map(([value, label]) => ({ value, label })),
-          ]}
+          options={[{ value: "all", label: "すべてのPriority" }, ...priorityOptionList]}
         />
         <OrbitSelect
           label="検索Project"
@@ -8764,11 +8526,7 @@ export function IssueDetailPanel({
                     })
                   }
                 >
-                  {Object.entries(priorityLabel).map(([value, label]) => (
-                    <option value={value} key={value}>
-                      {label}
-                    </option>
-                  ))}
+                  <PriorityOptions />
                 </select>
                 <span className="status-pill active">Version {issue.version}</span>
                 <select
@@ -9005,34 +8763,6 @@ export function IssueDetailPanel({
   );
 }
 
-function cycleSelectOptions(cycles: Cycle[], currentId: string) {
-  const suffix = {
-    active: "Current",
-    upcoming: "Upcoming",
-    completed: "Completed",
-  } as const;
-  return cycles
-    .filter((cycle) => cycle.status !== "completed" || cycle.id === currentId)
-    .sort((left, right) => left.number - right.number)
-    .map((cycle) => ({
-      id: cycle.id,
-      label: `${cycle.nameOverride ?? cycle.name}（${suffix[cycle.status]}）`,
-    }));
-}
-
-function CycleSelectOptions({ cycles, currentId }: { cycles: Cycle[]; currentId: string }) {
-  return (
-    <>
-      <option value="">なし</option>
-      {cycleSelectOptions([...cycles], currentId).map((option) => (
-        <option value={option.id} key={option.id}>
-          {option.label}
-        </option>
-      ))}
-    </>
-  );
-}
-
 export function IssueComposer({
   title,
   setTitle,
@@ -9181,11 +8911,7 @@ export function IssueComposer({
               value={priority}
               onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
             >
-              {Object.entries(priorityLabel).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
+              <PriorityOptions />
             </select>
             <label className="field-label" htmlFor="new-issue-due-date">
               Due date
@@ -9375,65 +9101,6 @@ export function CommandPalette({
         </div>
         <span className="visually-hidden">修飾キー: {modifierLabel}</span>
       </div>
-    </div>
-  );
-}
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useDialogBoundary(panelRef, { initialFocus: "[data-modal-autofocus]", onEscape: onClose });
-
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={panelRef}
-        className="modal-panel generic-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="generic-modal-title"
-        tabIndex={-1}
-      >
-        <div className="modal-title">
-          <h2 id="generic-modal-title">{title}</h2>
-          <button className="icon-button" aria-label="閉じる" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-function EmptyState({
-  title,
-  action,
-  onAction,
-}: {
-  title: string;
-  action: string;
-  onAction: () => void;
-}) {
-  return (
-    <div className="empty-state">
-      <span className="empty-icon">◌</span>
-      <strong>{title}</strong>
-      <p>まだ表示するデータがありません。</p>
-      <button className="text-button" onClick={onAction}>
-        {action} →
-      </button>
     </div>
   );
 }

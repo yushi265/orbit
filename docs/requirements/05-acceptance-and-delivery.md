@@ -217,7 +217,7 @@ And user_id不一致・Run不存在は404、paused / failed Runへのcontinueは
 | 0. Technical spike | TanStack Start + Workers + D1 + Authの縦切りPoC | Access認証・拒否・失効復帰、Issue 1件CRUD、Preview deployが動く |
 | 1. Foundation | 本人限定認証、Owner bootstrap、個人設定、Workflow、共通UI、Background runのlock・状態表示 | 未認証・未許可ユーザー・Owner誤設定・実行中Mutationの拒否テストが通る |
 | 2. Issue core | Issue CRUD、List、Detail、属性、Bulk、Search、Command menu、Shortcut | PC主要Journeyが通る |
-| 3. Cycle | 設定、手動Runによる生成・繰越、Current/Past、Graph | AC-02、AC-09〜13、状態遷移、CYC-08の日付再計算・重複拒否のテストが通る |
+| 3. Cycle | 設定、手動RunまたはCron Triggerによる生成・繰越、Current/Past、Graph | AC-02、AC-09〜13、状態遷移、CYC-08の日付再計算・重複拒否のテストが通る |
 | 4. Project / View | Project、Board、Filter、Saved View | 横断利用が可能になる |
 | 5. Mobile / PWA | 下部Navigation、Touch最適化、PWA | 主要Mobile E2EとAA検査が通る |
 | 6. Release hardening | Inbox、監査、性能、Backup、Chunk Runnerの運用手順、復旧手順 | SLO、Security、Restore drillを満たす |
@@ -249,7 +249,7 @@ And user_id不一致・Run不存在は404、paused / failed Runへのcontinueは
 以下をすべて満たしたとき、MVP完成とする。
 
 - 本人一人でIssue、Cycle、Project、Viewの日常運用ができる
-- MVPでは手動Runにより、Cycleが設定に従って生成・開始・終了・繰越される
+- MVPでは手動RunまたはCron Triggerにより、Cycleが設定に従って生成・開始・終了・繰越される
 - MVPでは手動RunでPurgeとOutbox再送も完了でき、ChunkのHTTP再送に耐える
 - PC、スマートフォン、タブレットで主要Journeyが完了する
 - PCではIssue作成、選択、属性変更、検索をKeyboardだけで実行できる

@@ -3,7 +3,7 @@
   "name": "orbit-local",
   "compatibility_date": "2026-08-24",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   "workers_dev": false,
   "send_metrics": false,
   "observability": { "enabled": false },

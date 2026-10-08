@@ -24,7 +24,7 @@
 | 0 | テスト基盤: ベースライン記録・実ルーター描画 helper へ移行 | AC-7 | — | 完了（PR #26） |
 | 1 | ui-shared 抽出（Modal / EmptyState / PriorityIcon / Toast / 日付・選択肢 helper） | AC-7 | 0 | 完了（PR #28） |
 | 2 | データ層: queryKey ファクトリ・feature 別 hook・Issue キャッシュ同期の一本化 | AC-6, AC-7 | 0 | 完了（PR #29） |
-| 3 | AppShell + 実ルーティング（`section` 廃止・Issues レイアウトルート）。3a → 3b-1 → 3b-2 → 3c の 4 PR に分ける（ui.md の実装配置） | AC-1〜AC-5, AC-7 | 1, 2 | 3a 着手 |
+| 3 | AppShell + 実ルーティング（`section` 廃止・Issues レイアウトルート）。3a → 3b-1a → 3b-1b → 3b-2 → 3c の 5 PR に分ける（ui.md の実装配置） | AC-1〜AC-5, AC-7 | 1, 2 | 3a 完了（PR #30）・3b-1a 着手 |
 | 4 | feature 分割（home → inbox → search → views → settings → cycles → issues → projects） | AC-7, AC-8 | 3 | 未着手 |
 | 5 | 後片付け（OrbitApp barrel 削除・docs/architecture.md と codekb 更新） | AC-8 | 4 | 未着手 |
 

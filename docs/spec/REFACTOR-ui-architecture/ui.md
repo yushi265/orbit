@@ -39,15 +39,22 @@
 
 | フック | 返り値 | 用途 | 現行の対応 |
 |---|---|---|---|
-| `useToast()` | `{ showToast(kind, message, action?) }` | 全 feature の成功・失敗通知 | `OrbitApp.tsx` の `useToast` / `ToastRegion` |
+| `useToast()` | `{ showToast(kind, message, action?), dismissToast() }` | 全 feature の成功・失敗通知（undo / 再試行の Toast を閉じる `dismissToast` を含む） | `OrbitApp.tsx` の `useToast` / `ToastRegion` |
 | `useIssueComposer()` | `{ open(options?: { projectId?: string; parentId?: string; cycleId?: string }) }` | Home / Issues / Projects / Cycles / CommandPalette からの新規作成 | `openIssueComposer` と Composer の state（`:328-334`） |
 | `useCommandPalette()` | `{ open() }` | ショートカット・ヘッダー | `commandOpen` |
 | `useClockNow()` | `number`（1 分ごと更新） | 期限・相対日付の表示 | `clockNow`（`:386-397`） |
-| `useBackgroundRun()` | 既存フックをそのまま AppShell で 1 回だけ起動し、`run` / `busy` を context で配る。引数は AppShell が読む `bootstrap.background.run`、`onSucceeded` は `queryKeys.bootstrap` の invalidate（現行 `:686-696` と同じ） | Settings の Manual Run・RunOverlay | `:681-696` |
+| `useBackgroundRun()` | 既存フックを AppShell で 1 回だけ起動し、`run` / `busy` / `start` / `resume` を context で配る。引数は AppShell が読む `bootstrap.background.run`。`onSucceeded` は「メンテナンスを完了しました」の Toast と `queryKeys.bootstrap` の invalidate、`onError` はエラー Toast（現行と同じ） | Settings の Manual Run・RunOverlay | `useBackgroundRun` の呼び出し |
 | `useShortcut(action, handler)` | 登録解除関数 | ページ固有のショートカット（Issues の `toggle-board` 等・`close` 時の選択解除） | `:702-802` の keydown effect |
+| `useShortcutBlocker(active)` | なし | ページ側のモーダル・オーバーレイの表示中にショートカットを止める（Project 作成モーダル・Issue 詳細） | `projectComposerOpen` と、Issue 詳細表示中も `composerOpen` が true である現行の抑止 |
+| `useOpenIssue()` | `(issueId) => void` | どの画面からでも Issue 詳細を開く（recent-issue-views の記録と、Issues 以外からは `completed` の既定値付きで遷移） | `openIssue` / `rememberIssueFocus` |
+| `useCompletedFallback()` | `{ completedFallback, ready }` | Issues の `completed` の既定値（localStorage `SHOW_COMPLETED_STORAGE_KEY`）。書き込みは Issues の表示切替だけ | `completedFallback` と読み書きの effect |
+| `usePaletteSelection(issue, handlers)` | なし | ページが CommandPalette に「選択中の Issue」と開く / アーカイブ / 選択解除の操作を登録する | `selectedIssue` と Palette の props |
+| `usePwaInstall()` | `{ canInstall, install() }` | Settings のインストールボタン | `installPrompt` / `installPwa` |
+| `useIssueActions()` | `{ updateIssue, reorderIssue, changeIssueLifecycle, pendingIssueId }` | Issues・Cycles・Projects・Settings・CommandPalette からの Issue 更新。features 間の依存方向（cycles / settings → issues は ✗）を守るため shell に置く（Phase 3b-1 の Gate 1 で決定） | `updateIssue` / `reorderIssueMutation` / `changeIssueLifecycle` / `pendingIssueId` |
 
+- 表は features から見た context の契約（引数なし）。Phase 3b-1a で `src/features/shell/` に切り出した hook は引数を取る（`useCompletedFallback(completedFromSearch)`・`usePwaInstall(onResult)`・`useIssueActions({ showToast, dismissToast, refresh })`）。3b-1b の Provider がこれらを内部で呼び、`useToast` と `refresh` を渡して表の形で配る
 - キーボードショートカット（`issue-core-ui.ts` の `shortcutActionFor`）の配置:
-  - 共通の抑止条件（IME 変換中、入力欄・select・combobox 上の判定は `shortcutActionFor` に従う、Background Run が pending / running、Composer / CommandPalette / Project 作成モーダル / ショートカット一覧の表示中）は現行（`OrbitApp.tsx:702-728`）と同じ条件を AppShell の 1 か所で判定し、ページ側のハンドラは AppShell から `useShortcut(action, handler)` で登録する（抑止判定を重複させない）。
+  - 共通の抑止条件（IME 変換中、入力欄・select・combobox 上の判定は `shortcutActionFor` に従う、Background Run が pending / running、Composer / CommandPalette / Project 作成モーダル / ショートカット一覧 / Issue 詳細の表示中。Issue 詳細は現行では `composerOpen` を共用していることで抑止されているため、明示的な条件として残す（Phase 3b-1 の Gate 1 で決定））は現行（`OrbitApp.tsx:702-728`）と同じ条件を AppShell の 1 か所で判定し、ページ側のハンドラは AppShell から `useShortcut(action, handler)` で登録する（抑止判定を重複させない）。
   - AppShell: `command`（⌘/Ctrl+K）・`create`（c）・`help`（?）・`focus-search`（⌘/Ctrl+F）・`close`（Esc）。CommandPalette・ショートカット一覧・Composer は表示中にショートカット自体が抑止されるため、Esc で閉じる処理は現行どおり各ダイアログの dialog-boundary が担う。`close` は登録されたページ側ハンドラ（Issue 一覧の選択解除。bulk 実行中は解除しない）だけを呼ぶ（現行 `OrbitApp.tsx:735-739` の `setCommandOpen(false)` / `setShortcutsOpen(false)` は抑止条件により到達しないため移植しない）。`focus-search` は現行どおり、`/issues` では一覧のテキストフィルタ、`/search` では `#global-search-input` にフォーカスし、それ以外では `/search` へ遷移してから検索入力にフォーカスする（現在地は `useMatchRoute` で判定）。
   - Issue 一覧部品（IssuesPage・Projects 詳細の一覧）: `toggle-board`（⌘/Ctrl+B）・`focus-display`（Shift+V）・`focus-filter`（f）は現行どおり `/issues` でだけ効く。`toggle-selection`（x）はフォーカス中の Issue がある一覧で効く。
   - 単一キー ON/OFF の localStorage 設定（`orbit.singleKeyShortcuts`）は現行どおり。
@@ -136,6 +143,7 @@ src/
 | features/shell | ✓ | ✓ | ✓ | `features/issues/mutations.ts` のみ（IssueComposer の create） | ✗ | ✓ |
 | routes | — | — | — | Page のみ | Page のみ | `AppShell` のみ |
 
+- 移行期間の例外（Phase 3b-1a〜Phase 5）: `features/shell` は `components/` 直下の未移動ファイル（`issue-core-ui`・`ime`・`theme`・`issue-preferences`・`issue-undo`）を import してよい。Phase 4 / 5 で各ファイルを `features/*` か `components/ui` へ移し、AC-8 の検査で例外がなくなることを確認する
 - `context フックのみ`: `features/shell/context.tsx` の `useToast` / `useIssueComposer` / `useCommandPalette` / `useClockNow` / `useBackgroundRun` / `useShortcut`。shell の画面部品を feature から import しない。
 - 許可リストは上表がすべて。検査は静的 import と re-export を対象にし、動的 `import()` は使わない。`routes` → `features/*` は各 Page と `features/shell/AppShell.tsx` だけを許可する。
 
@@ -152,7 +160,8 @@ src/
 | 1 | `src/components/ui/*`（新規。OrbitApp.tsx 内の部品のみ切り出し、既存の独立ファイル〔orbit-select / orbit-date-picker / orbit-icon / linkified-text / dialog-boundary〕の ui/ への移動は Phase 5）、`OrbitApp.tsx` から該当部品を削除して import に置換し、テストが import している export は OrbitApp から再 export | 見た目・DOM 不変。日付 helper の重複（`dateInputValueInTimeZone` ↔ `calendarDateKeyInTimeZone`、`formatDateOnly` ↔ `formatIssueDueDate`）を出力一致テストで確認してから統合 |
 | 2 | `src/lib/queries/*`（新規）、`OrbitApp.tsx` の useQuery / setQueryData / `*MutationKeyRef` | AC-6 と `useMutationKey` のテスト追加。キャッシュ操作が `syncIssueCaches` / `removeIssueFromCaches` / `queryKeys` に集約 |
 | 3a | `src/routes/issues.tsx`（新規 layout。この時点では `<Outlet/>` だけを描画し、子ルートは従来どおり OrbitApp を描画）、`issues/index.tsx`・`issues/$issueId.tsx` の `validateSearch` を親へ移動、`src/routeTree.gen.ts`（生成物。`pnpm build` で再生成し手で編集しない）、`src/features/shell/navigation.ts`（新規: ナビ項目 id → 型付きの `to` の対応表 `NAV_PATHS`）、`OrbitApp.tsx` の `as never` 7 か所を型付きの `to` / `params` に置換 | AC-1・AC-5 のテスト追加（AC-1 の見出しの期待値は 3a 着手時に現行アプリで描画した値）。`components/navigation.ts` の `projectDetailPath` / `issueDetailPath` は本番で未使用になるが、テスト名ベースライン（AC-7）のため Phase 5 まで残す |
-| 3b-1 | `features/shell/context.tsx`（新規）、ショートカットの抑止判定と振り分けの一元化（`useShortcut`）、OrbitAppInner を「シェル部分」と Page コンテナに分割（この時点では `section` で Page を選ぶ） | DOM と再マウントの挙動は不変（AC-7 のみ）。着手時の Gate 1 で context 契約の不足（openIssue・dismissToast・BackgroundRun の start/resume・Palette の選択・Issue 系 mutation の置き場所等）と、Issue 詳細表示中のショートカット抑止を確定する |
+| 3b-1a | `src/features/shell/` に、OrbitAppInner がシェルとして持つロジックを hook として切り出す: `clock.ts`（`useClockNow`）、`pwa-install.ts`（`usePwaInstall`）、`document-effects.ts`（テーマ・`html lang`・ServiceWorker 登録）、`completed-fallback.ts`（`useCompletedFallback`）、`issue-actions.ts`（`useIssueActions`）、`shortcuts.ts`（keydown の判定と振り分け `useShortcutDispatcher`）。OrbitAppInner はこれらを呼ぶだけにする。`useCompletedFallback` が書き戻す値（`search.completed ?? 既定値`）は OrbitAppInner の `resolveIssueSearch` の `showCompleted` と同じ式を二重に持つため、3b-1b で Issues 側の state に一本化する。context（Provider）はまだ作らない（消費する Page が無いため。3b-1b で Page と同時に作る） | DOM と再マウントの挙動は不変（AC-7）。切り出した hook ごとに単体テストを置き、抑止条件はデシジョンテーブルで固定する |
+| 3b-1b | `features/shell/context.tsx`（新規。上表の context 契約を Provider で配る）、OrbitAppInner を「シェル部分」と Page コンテナに分割（この時点では `section` で Page を選ぶ）、`useShortcut` / `useShortcutBlocker` / `useOpenIssue` / `usePaletteSelection` の登録式 API | DOM と再マウントの挙動は不変（AC-7）。Palette の「検索」をほかの画面から使うと検索語が消える現行挙動（推測・テストなし）は 3b-1 では変えない（Gate 1 で決定） |
 | 3b-2 | `src/routes/__root.tsx`（`shellComponent` と AppShell を描画する `component` に分割）、全画面ルートが Page を描画、`section` / `getInitialSection` を削除、`render-app.test-fixtures.ts`、`docs/architecture.md` | AC-2・AC-3・Bootstrap の状態表示のテスト追加。`docs/architecture.md` のレイヤー表を更新。renderApp の QueryClient 別インスタンス化の扱い（既存テスト名を残す）は着手時の Gate 1 で決める |
 | 3c | `issues.tsx` へ IssuesPage を移す、`IssueDetailOverlay`、`orbit.issue-focus` を削除し ref でフォーカス復帰、選択を IssuesPage のローカル state へ | AC-4 のテスト追加 |
 | 4 | `features/<domain>/*`（1 PR 1〜2 domain）、`OrbitApp.tsx` は再 export のみへ縮小 | 各 domain 移動後も既存テスト pass |
@@ -242,6 +251,14 @@ AC-4（Phase 3）:
 - [状態遷移] 一覧で選択 → `/projects` → `/issues` → 選択が空
 - [代表値] サイドバーから `/issues` へ遷移すると、search に `completed` の既定値（`completedFallback`）が入る
 - [代表値] 開閉の間に `sessionStorage.setItem` が `orbit.issue-focus` で呼ばれない（スパイで確認）
+
+Phase 3b-1a（AC-7 の一部。切り出した hook の単体テストと、アプリ描画での結線）:
+- [デシジョンテーブル] `useShortcutDispatcher`: 抑止なし × 各ショートカット → ハンドラを呼び既定動作を止める / 抑止あり → 何もしない / ショートカット以外のキー → 何もしない / ハンドラ未登録のショートカット → 既定動作だけ止める（現行と同じ）
+- [同値分割] IME 変換中・入力欄での単一キー → 何もしない
+- [デシジョンテーブル] アプリ描画で、ショートカット（c / ?）× 抑止条件（IME / Background Run pending / running / Composer / CommandPalette / Project 作成モーダル / ショートカット一覧 / Issue 詳細 / なし）→ なしだけ開き、他は無視（AC-2 の同名ケースを先行。条件を 1 つずつ外す改変がそれぞれ fail すること）。抑止は 1 つの boolean にまとめて判定するため、条件ごとに観測しやすいショートカットを 1 つ（条件と別の画面を開く c か ?）使い、直積はとらない。Project 作成モーダルは同じ /projects でモーダルなしなら c が効く対照を置く。Issue 詳細は 3b-1a では `composerOpen` の共用と明示条件の両方で止まるため、明示条件だけを外す改変は 3b-1b で詳細の state を分けてから検出する
+- [状態遷移] `useClockNow`（60 秒・focus・online で更新）、`useCompletedFallback`（localStorage の読み込みと ready 後の書き戻し）、`useDocumentEffects`（テーマ・lang・system 追従・ServiceWorker）、`usePwaInstall`（beforeinstallprompt / accepted / dismissed / 失敗 / appinstalled）
+- [代表値] `useIssueActions`: updateIssue の pending と成功時のキャッシュ反映・undo Toast、reorderIssue の再取得と Toast、changeIssueLifecycle の 3 操作
+- [代表値] アプリ描画で、PWA インストール完了の Toast と、URL の `completed=false` が localStorage の既定値として保存されること（結線の固定）
 
 AC-5（Phase 3a）:
 - [代表値] リポジトリ検査: `src/routes`・`src/features`・`src/components`・`src/lib` の非テスト `.ts` / `.tsx` に `as never` が 0 件（コメント行も対象）

@@ -68,18 +68,15 @@ import {
   type IssueHierarchyRow,
 } from "./issue-hierarchy";
 import { beforeProjectIdForMove } from "./project-workspace";
-import { SHOW_COMPLETED_STORAGE_KEY, parseShowCompletedPreference } from "./issue-preferences";
-import { inverseIssuePatch } from "./issue-undo";
 import { priorityFromSelection } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { isImeComposing } from "./ime";
 import { NAV_PATHS, type NavId } from "../features/shell/navigation";
-import { colorThemeOptions, resolveTheme } from "./theme";
+import { colorThemeOptions } from "./theme";
 import { timezoneOptionsFor } from "./preferences";
 import {
   nextCommandIndex,
   readSingleKeyShortcuts,
-  shortcutActionFor,
   shortcutModifierLabel,
   writeSingleKeyShortcuts,
 } from "./issue-core-ui";
@@ -97,6 +94,12 @@ import { useBootstrap } from "../lib/queries/bootstrap";
 import { removeIssueFromCaches, syncIssueCaches } from "../lib/queries/issue-cache";
 import { queryKeys } from "../lib/queries/keys";
 import { useMutationKey } from "../lib/queries/mutation-key";
+import { useClockNow } from "../features/shell/clock";
+import { useIssueActions } from "../features/shell/issue-actions";
+import { useCompletedFallback } from "../features/shell/completed-fallback";
+import { useDocumentEffects } from "../features/shell/document-effects";
+import { usePwaInstall } from "../features/shell/pwa-install";
+import { useShortcutDispatcher } from "../features/shell/shortcuts";
 import { EmptyState } from "./ui/EmptyState";
 import { Modal } from "./ui/Modal";
 import { PriorityIcon } from "./ui/PriorityIcon";
@@ -155,28 +158,11 @@ type CycleSettingsPatch = Pick<
   "durationWeeks" | "startWeekday" | "cooldownWeeks" | "futureCount" | "autoAddToCurrentCycle"
 >;
 type CycleSchedulePatch = { startDate: string; endDate: string };
-type IssueMutationVariables = {
-  issue: Issue;
-  patch: Partial<Issue>;
-  undo?: boolean;
-};
-type IssueMutationRetry = IssueMutationVariables;
 type IssueDescriptionDraft = { description: string; title: string };
-type IssueReorderVariables = {
-  issue: Issue;
-  beforeIssueId: string | null;
-  idempotencyKey: string;
-  cycleId?: string;
-  statusId?: string;
-  projectId?: string;
-};
 
 export function activityTitle(event: { action: string; actorType: string }): string {
   return event.actorType === "system:automation" ? "Automation" : event.action;
 }
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<{ outcome: "accepted" | "dismissed" }>;
-};
 type SearchFilters = {
   statusId: string;
   priority: Issue["priority"] | "all";
@@ -271,10 +257,10 @@ function OrbitAppInner(props: Props) {
   const [newPriority, setNewPriority] = useState<Issue["priority"]>("no_priority");
   const [newDueAt, setNewDueAt] = useState<number | null>(null);
   const [newParentId, setNewParentId] = useState("");
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [completedFallback, setCompletedFallback] = useState(true);
-  const [showCompletedReady, setShowCompletedReady] = useState(false);
+  const { completedFallback, ready: showCompletedReady } = useCompletedFallback(
+    props.issueSearch?.completed,
+  );
   const {
     filterText,
     viewMode,
@@ -291,7 +277,6 @@ function OrbitAppInner(props: Props) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { toast, showToast, dismissToast } = useToast();
-  const [pendingIssueId, setPendingIssueId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<Issue[]>([]);
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({
@@ -322,18 +307,7 @@ function OrbitAppInner(props: Props) {
   const searchAbortRef = useRef<AbortController | null>(null);
   const issueFilterInputRef = useRef<HTMLInputElement>(null);
   const issueDisplayInputRef = useRef<HTMLSelectElement>(null);
-  const [clockNow, setClockNow] = useState(() => Date.now());
-  useEffect(() => {
-    const updateCalendarNow = () => setClockNow(Date.now());
-    const timer = window.setInterval(updateCalendarNow, 60_000);
-    window.addEventListener("focus", updateCalendarNow);
-    window.addEventListener("online", updateCalendarNow);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", updateCalendarNow);
-      window.removeEventListener("online", updateCalendarNow);
-    };
-  }, []);
+  const clockNow = useClockNow();
 
   function currentIssueSearch(): IssueSearch {
     return normalizeIssueSearch({
@@ -544,75 +518,12 @@ function OrbitAppInner(props: Props) {
     props.issueSearch,
   ]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = parseShowCompletedPreference(
-          window.localStorage.getItem(SHOW_COMPLETED_STORAGE_KEY),
-        );
-        if (stored !== undefined) setCompletedFallback(stored);
-      } catch {
-        // Ignore storage access failures and keep the default visibility.
-      }
-    }
-    setShowCompletedReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!showCompletedReady || typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(SHOW_COMPLETED_STORAGE_KEY, String(showCompleted));
-    } catch {
-      // Ignore storage access failures after the preference is applied in memory.
-    }
-  }, [showCompleted, showCompletedReady]);
-
-  useEffect(() => {
-    if (!data || typeof window === "undefined") return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const applyTheme = () => {
-      const resolved = resolveTheme(data.preferences.theme, media.matches);
-      const colorTheme =
-        colorThemeOptions.find((option) => option.value === data.preferences.colorTheme) ??
-        colorThemeOptions[0];
-      document.documentElement.dataset.theme = resolved;
-      document.documentElement.dataset.colorTheme = colorTheme.value;
-      document
-        .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", resolved === "dark" ? "#11151d" : colorTheme.accent);
-    };
-    applyTheme();
-    if (data.preferences.theme !== "system") return;
-    media.addEventListener("change", applyTheme);
-    return () => media.removeEventListener("change", applyTheme);
-  }, [data?.preferences.theme, data?.preferences.colorTheme]);
-
-  useEffect(() => {
-    if (!data || typeof document === "undefined") return;
-    // 翻訳が入るまでは日本語UIなので、保存済みlocaleに関わらずjaに固定する。
-    document.documentElement.lang = "ja";
-  }, [data?.preferences.locale]);
-
-  useEffect(() => {
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-    const onAppInstalled = () => setInstallPrompt(null);
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onAppInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onAppInstalled);
-    };
-  }, []);
-
-  useEffect(() => {
-    if ("serviceWorker" in navigator)
-      void navigator.serviceWorker
-        .register("/sw.js?v=4", { updateViaCache: "none" })
-        .catch(() => undefined);
-  }, []);
+  useDocumentEffects(data?.preferences);
+  const pwa = usePwaInstall((result) =>
+    result === "installed"
+      ? showToast("success", "Orbitをインストールしました")
+      : showToast("error", "PWAのインストールを開始できませんでした"),
+  );
 
   const {
     run,
@@ -635,77 +546,43 @@ function OrbitAppInner(props: Props) {
     if (!composerOpen && !props.issueId) restoreIssueFocus();
   }, [composerOpen, props.issueId, visibleIssues]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (isImeComposing(event)) return;
-      const target = event.target as HTMLElement;
-      const editing =
-        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-      const onSelectControl =
-        target.tagName === "SELECT" ||
-        target.closest?.('[role="combobox"], [role="listbox"]') != null;
-      const action = shortcutActionFor({
-        key: event.key,
-        metaKey: event.metaKey,
-        ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey,
-        editable: editing,
-        singleKeyEnabled: readSingleKeyShortcuts(),
-        onSelectControl,
-      });
-      if (
-        !action ||
-        run?.status === "pending" ||
-        run?.status === "running" ||
-        composerOpen ||
-        commandOpen ||
-        projectComposerOpen ||
-        shortcutsOpen
-      )
-        return;
-      event.preventDefault();
-      if (action === "command") {
-        setCommandOpen(true);
-        return;
-      }
-      if (action === "close") {
+  useShortcutDispatcher(
+    run?.status === "pending" ||
+      run?.status === "running" ||
+      composerOpen ||
+      commandOpen ||
+      projectComposerOpen ||
+      shortcutsOpen ||
+      // Issue 詳細の表示中（現行は composerOpen の共用でも止まるが、3b-1b で分離するため明示する）
+      Boolean(props.issueId),
+    {
+      command: () => setCommandOpen(true),
+      close: () => {
         setCommandOpen(false);
         setShortcutsOpen(false);
         if (!bulkBusy) setSelected([]);
-        return;
-      }
-      if (action === "create") {
-        setComposerOpen(true);
-        return;
-      }
-      if (action === "help") {
-        setShortcutsOpen(true);
-        return;
-      }
-      if (action === "toggle-board") {
-        if (section !== "issues") return;
-        setViewMode((mode) => (mode === "list" ? "board" : "list"));
-        return;
-      }
-      if (action === "toggle-selection") {
+      },
+      create: () => setComposerOpen(true),
+      help: () => setShortcutsOpen(true),
+      "toggle-board": () => {
+        if (section === "issues") setViewMode((mode) => (mode === "list" ? "board" : "list"));
+      },
+      "toggle-selection": () => {
         if (!focusedIssueId) return;
         setSelected((current) =>
           current.includes(focusedIssueId)
             ? current.filter((issueId) => issueId !== focusedIssueId)
             : [...current, focusedIssueId],
         );
-        return;
-      }
-      if (action === "focus-display") {
+      },
+      "focus-display": () => {
         if (section === "issues") issueDisplayInputRef.current?.focus();
-        return;
-      }
-      if (action === "focus-filter") {
+      },
+      "focus-filter": () => {
         if (section === "issues")
           document.querySelector<HTMLElement>("#issues-priority-filter")?.focus();
-        return;
-      }
-      if (action === "focus-search") {
+      },
+      "focus-search": () => {
         if (section === "issues") issueFilterInputRef.current?.focus();
         else if (section === "search")
           document.querySelector<HTMLInputElement>("#global-search-input")?.focus();
@@ -717,39 +594,11 @@ function OrbitAppInner(props: Props) {
             }, 0);
           });
         }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    bulkBusy,
-    composerOpen,
-    commandOpen,
-    projectComposerOpen,
-    shortcutsOpen,
-    focusedIssueId,
-    props.issueId,
-    router,
-    run?.status,
-    section,
-    viewMode,
-    showCompleted,
-    props.issueSearch,
-  ]);
+      },
+    },
+  );
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
-
-  async function installPwa() {
-    if (!installPrompt) return;
-    try {
-      const result = await installPrompt.prompt();
-      if (result.outcome === "accepted") showToast("success", "Orbitをインストールしました");
-    } catch {
-      showToast("error", "PWAのインストールを開始できませんでした");
-    } finally {
-      setInstallPrompt(null);
-    }
-  }
 
   const createIssue = useMutation({
     mutationFn: () =>
@@ -779,163 +628,12 @@ function OrbitAppInner(props: Props) {
       showToast("error", error instanceof ApiError ? error.message : "Issueの作成に失敗しました。"),
   });
 
-  const updateIssue = useMutation({
-    mutationFn: ({ issue, patch }: IssueMutationVariables) =>
-      apiPatch<{ issue: Issue }>(`/api/v1/issues/${issue.id}`, {
-        idempotencyKey: idempotencyKey(),
-        version: issue.version,
-        patch,
-      }),
-    onMutate: async ({ issue, patch }) => {
-      setPendingIssueId(issue.id);
-      await queryClient.cancelQueries({ queryKey: queryKeys.bootstrap });
-      const previous = queryClient.getQueryData<BootstrapPayload>(queryKeys.bootstrap);
-      const previousDetail = queryClient.getQueryData<IssueDetailViewModel>(
-        queryKeys.issueDetail(issue.id),
-      );
-      if (previous)
-        queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, {
-          ...previous,
-          issues: previous.issues.map((item) =>
-            item.id === issue.id ? { ...item, ...patch } : item,
-          ),
-        });
-      if (previousDetail)
-        queryClient.setQueryData<IssueDetailViewModel>(queryKeys.issueDetail(issue.id), {
-          ...previousDetail,
-          issue: { ...previousDetail.issue, ...patch },
-        });
-      return { previous, previousDetail };
-    },
-    onSuccess: ({ issue: updatedIssue }, variables) => {
-      syncIssueCaches(queryClient, updatedIssue);
-      for (const issueId of new Set([
-        updatedIssue.id,
-        variables.issue.parentId,
-        updatedIssue.parentId,
-      ])) {
-        if (issueId)
-          void queryClient.invalidateQueries({ queryKey: queryKeys.issueDetail(issueId) });
-      }
-      showToast(
-        "success",
-        variables.undo ? "元に戻しました" : "変更を保存しました",
-        variables.undo
-          ? undefined
-          : {
-              label: "元に戻す",
-              onClick: () => {
-                dismissToast();
-                updateIssue.mutate({
-                  issue: updatedIssue,
-                  patch: inverseIssuePatch(variables.issue, variables.patch),
-                  undo: true,
-                });
-              },
-            },
-      );
-    },
-    onError: async (error, variables, context) => {
-      let retryIssue = variables.issue;
-      if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
-        const latestIssue = queryClient
-          .getQueryData<BootstrapPayload>(queryKeys.bootstrap)
-          ?.issues.find((item) => item.id === variables.issue.id);
-        if (latestIssue) {
-          retryIssue = latestIssue;
-          syncIssueCaches(queryClient, latestIssue);
-        }
-      } else if (context?.previous) {
-        const previousIssue = context.previous.issues.find(
-          (item) => item.id === variables.issue.id,
-        );
-        queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
-          current && previousIssue
-            ? {
-                ...current,
-                issues: current.issues.map((item) =>
-                  item.id === previousIssue.id ? previousIssue : item,
-                ),
-              }
-            : current,
-        );
-      }
-      if (
-        !(error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") &&
-        context?.previousDetail
-      )
-        queryClient.setQueryData(queryKeys.issueDetail(variables.issue.id), context.previousDetail);
-      const retry = {
-        issue: retryIssue,
-        patch: variables.patch,
-        undo: variables.undo,
-      } satisfies IssueMutationRetry;
-      showToast(
-        "error",
-        error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT"
-          ? "他の場所で更新されています。最新の内容を確認してください。"
-          : error instanceof ApiError
-            ? error.message
-            : "保存に失敗しました。",
-        {
-          label: "再試行",
-          onClick: () => {
-            dismissToast();
-            updateIssue.mutate(retry);
-          },
-        },
-      );
-    },
-    onSettled: () => setPendingIssueId(null),
-  });
-
-  const reorderIssueMutation = useMutation({
-    mutationFn: ({
-      issue,
-      beforeIssueId,
-      idempotencyKey: mutationKey,
-      cycleId,
-      statusId,
-      projectId,
-    }: IssueReorderVariables) =>
-      apiPost<{ issue: Issue }>("/api/v1/issues/reorder", {
-        idempotencyKey: mutationKey,
-        issueId: issue.id,
-        version: issue.version,
-        beforeIssueId,
-        ...(cycleId === undefined ? {} : { cycleId }),
-        ...(statusId === undefined ? {} : { statusId }),
-        ...(projectId === undefined ? {} : { projectId }),
-      }),
-    onSuccess: async ({ issue }) => {
-      await refresh();
-      showToast("success", `${issue.identifier} の順序を保存しました`);
-    },
-    onError: async (error, variables) => {
-      let retryVariables = variables;
-      if (error instanceof ApiError && error.code === "ISSUE_VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap });
-        const latestIssue = queryClient
-          .getQueryData<BootstrapPayload>(queryKeys.bootstrap)
-          ?.issues.find((issue) => issue.id === variables.issue.id);
-        if (latestIssue)
-          retryVariables = {
-            ...variables,
-            issue: latestIssue,
-            idempotencyKey: idempotencyKey(),
-          };
-      }
-      showToast(
-        "error",
-        error instanceof ApiError ? error.message : "Issueの並び替えに失敗しました。",
-        {
-          label: "再試行",
-          onClick: () => reorderIssueMutation.mutate(retryVariables),
-        },
-      );
-    },
-  });
+  const {
+    updateIssue,
+    reorderIssue: reorderIssueMutation,
+    changeIssueLifecycle,
+    pendingIssueId,
+  } = useIssueActions({ showToast, dismissToast, refresh });
 
   async function savePreferences(
     patch: PreferencePatch,
@@ -1216,22 +914,6 @@ function OrbitAppInner(props: Props) {
     } finally {
       setBulkBusy(false);
     }
-  }
-
-  async function changeIssueLifecycle(issue: Issue, action: "archive" | "restore" | "trash") {
-    await apiPost(`/api/v1/issues/${issue.id}?action=${action}`, {
-      idempotencyKey: idempotencyKey(),
-    });
-    await refresh();
-    await queryClient.invalidateQueries({ queryKey: queryKeys.issuesAll });
-    showToast(
-      "success",
-      action === "archive"
-        ? `${issue.identifier}をアーカイブしました`
-        : action === "restore"
-          ? `${issue.identifier}を復元しました`
-          : `${issue.identifier}をゴミ箱へ移動しました`,
-    );
   }
 
   async function closeCycle(cycle: Cycle) {
@@ -1559,8 +1241,8 @@ function OrbitAppInner(props: Props) {
               onPreferences={savePreferences}
               onCycleSettings={saveCycleSettings}
               onColorTheme={saveColorTheme}
-              canInstallPwa={installPrompt !== null}
-              onInstallPwa={() => void installPwa()}
+              canInstallPwa={pwa.canInstall}
+              onInstallPwa={() => void pwa.install()}
               trashIssues={trashQuery.data?.items ?? []}
               trashLoading={trashQuery.isLoading}
               onRestoreIssue={(issue) => changeIssueLifecycle(issue, "restore")}

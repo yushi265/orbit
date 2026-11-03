@@ -91,6 +91,7 @@ AI に実装を任せるほど「設計を読まずに書く」「過剰設計�
 | [`impl-reset`](./skills/impl-reset/SKILL.md) | 実装の一括リセット（対象承認 → 削除 → ハーネス残存の検証） |
 | [`retro-triage`](./skills/retro-triage/SKILL.md) | retro note の未対応 Try 棚卸し＋ハーネス剪定（人間の明示指示で実行） |
 | [`bolt-replay`](./skills/bolt-replay/SKILL.md) | ボルトの経緯を機械記録から時系列に再構成（read-only。Gate 3 の審査材料） |
+| [`orbit-api`](./skills/orbit-api/SKILL.md) | 本番orbitのタスクを外部bot用Service Token経由のAPIで追加・検索・更新・完了する（`scripts/orbit-api.mjs`） |
 | [`aidlc-init`](./skills/aidlc-init/SKILL.md) | **このテンプレを導入した直後の初期設定**（レイヤー・言語・検証コマンド・高リスク要素・プロジェクト固有 sensor の要否を対話で設定し、config 群を埋める） |
 
 ---

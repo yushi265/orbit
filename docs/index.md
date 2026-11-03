@@ -20,6 +20,7 @@
 | [requirements/index.md](./requirements/index.md) | プロダクト要件・受入条件・技術選定 |
 | [roadmap.md](./roadmap.md) | 実装済み範囲と残タスクの優先順位 |
 | [architecture.md](./architecture.md) | `orbit` の実装予定アーキテクチャ（レイヤー責務・依存方向） |
+| [external-api.md](./external-api.md) | 外部bot（Service Token）から`/api/v1`を使う設定手順とcurl例 |
 | [local-development.md](./local-development.md) | クラウド不要の初期化・起動・保存先・バックアップ・復元手順 |
 | [ローカル専用動作の実装計画](./spec/FEAT-local-only/index.md) | ローカル専用モードの契約・受け入れ基準・検証計画 |
 | [ai-dlc-flow-guide.md](./ai-dlc-flow-guide.md) | AI-DLC 開発フローの解説（チームメンバー・新規参入者向け。人間の承認ゲートの見方） |

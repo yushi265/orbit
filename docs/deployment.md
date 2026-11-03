@@ -42,6 +42,8 @@ Access Secretを登録した後、`OWNER_USER_ID`と`OWNER_EMAIL`を環境変数
 OWNER_USER_ID=... OWNER_EMAIL=... pnpm run db:bootstrap:production
 ```
 
+外部bot（Service Token）からAPIを使う場合は、任意のSecret `ACCESS_SERVICE_TOKEN_CLIENT_ID` も登録します。手順は[外部botからのAPI利用](./external-api.md)を参照してください。未登録の間、Service Token経由のリクエストは401になります。
+
 表示名も指定する場合は`ORBIT_OWNER_NAME`を追加します。値はshell履歴やリポジトリへ保存しないでください。
 
 Cloudflare AccessはOriginへ`Cf-Access-Jwt-Assertion`を渡します。Worker側でもJWTの署名・issuer・audienceを検証する必要があります。[Validate JWTs](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)

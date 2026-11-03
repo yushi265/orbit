@@ -130,8 +130,11 @@
 
 - WCAG の残り（FIX-a11y-aa-remaining）: 入力欄の枠線は `--orbit-input-border`（ダークは `:root[data-theme="dark"] <sel>:not(:focus)` で上書き）。`document.title` は `OrbitApp` の effect で「<画面名> — Orbit」（`src/routes/**` の `head()` は使わない）。Settings の select は見出しの `<strong id="setting-*-label">` を `aria-labelledby` で参照する。Inbox の切替は `aria-pressed` のトグル、Cycle のタブは roving tabindex の tab パターン。Issue 一覧は div のまま `role="table"` などを付けている。
 - 罠: `styles.css` の末尾にトップレベルのルールを足すと、前にある `@media (max-width: 767px)` 内の同じ詳細度のルール（モバイルの 44px など）を後勝ちで上書きする。デスクトップだけの値は `@media (min-width: 768px)` に入れる（`a11y-contrast.test.ts` に検出テストあり）。
+- 外部bot（FEAT-external-api-token）: Cloudflare Access の Service Token JWT は `email` を持たず、`common_name`=Client ID・`sub`=空文字になる。`resolveOwner` は `common_name` があれば Secret `ACCESS_SERVICE_TOKEN_CLIENT_ID` と照合し、一致時だけ `OWNER_EMAIL` で Owner 照合する。botも更新系では `X-Requested-With: XMLHttpRequest` が必須（参照: `src/server/auth.ts`、`docs/external-api.md`）。
 
 ## 最終更新
+
+FEAT-external-api-token / 2026-11-03
 
 FIX-ux-a11y-high / FIX-a11y-aa-remaining / 2026-10-06
 

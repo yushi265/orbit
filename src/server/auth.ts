@@ -77,9 +77,19 @@ export async function resolveOwner(
     if (error instanceof ServiceError) throw error;
     throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
   }
-  const email = typeof payload.email === "string" ? payload.email : "";
-  if (email.toLowerCase() !== ownerEmail.toLowerCase())
-    throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
+  let email: string;
+  if (payload.common_name !== undefined) {
+    // Service Token認証のJWTはemailを持たず、common_name=Client ID・sub=""になる。
+    // 登録したbot用Client IDだけをOwner本人として扱う。
+    const clientId = env.ACCESS_SERVICE_TOKEN_CLIENT_ID;
+    if (!clientId || payload.common_name !== clientId || payload.sub !== "")
+      throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
+    email = ownerEmail;
+  } else {
+    email = typeof payload.email === "string" ? payload.email : "";
+    if (email.toLowerCase() !== ownerEmail.toLowerCase())
+      throw new ServiceError(401, "AUTH_REQUIRED", "認証情報を確認できません。");
+  }
   let owner;
   try {
     owner = await findOwnedUser(createDb({ DB: database }), userId, email);

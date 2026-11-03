@@ -68,7 +68,7 @@ MVPでは単一 Worker 内のモジュールとして次を分ける。独立し
 - `projects`: Project、ステータス、進捗、Project詳細のIssue表示設定
 - `views`: Filter、Group、Order、Saved View
 - `notifications`: Inboxと通知設定
-- `auth`: Cloudflare Access JWT検証と本人スコープ
+- `auth`: Cloudflare Access JWT検証と本人スコープ（人間ログインのemail照合と、登録した外部bot用Service TokenのClient ID照合。[外部botからのAPI利用](./external-api.md)）
 - `background`: Manual Run、実行ロック、進捗、cursor、Lease復旧
 
 モジュール間の参照は公開関数・型を経由し、他モジュールのRepositoryやDBテーブルへ直接依存しない。

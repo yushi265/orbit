@@ -44,22 +44,22 @@ bot ──CF-Access-Client-Id/Secret──▶ Cloudflare Access（Service Auth p
 
 ## エラー・ログ方針（横断サマリ）
 
-| シナリオ | service | 表示層の挙動 |
-|---|---|---|
+| シナリオ                                | service                                         | 表示層の挙動 |
+| --------------------------------------- | ----------------------------------------------- | ------------ |
 | 登録外のService Token / Client ID未設定 | 401 AUTH_REQUIRED「認証情報を確認できません。」 | —（botのみ） |
-| Owner行なし | 401 AUTH_REQUIRED「所有者を確認できません。」 | — |
-| DB照会失敗 | 500 INTERNAL_ERROR | — |
+| Owner行なし                             | 401 AUTH_REQUIRED「所有者を確認できません。」   | —            |
+| DB照会失敗                              | 500 INTERNAL_ERROR                              | —            |
 
 ## テスト戦略
 
-| AC | 単体 | レイヤー内結合 |
-|----|------|--------------|
-| AC-1 | — | `auth-owner-boundary.test.ts`（jose mock + D1 stub） |
-| AC-2 | — | 同上（デシジョンテーブル） |
-| AC-3 | — | 同上 |
-| AC-4 | — | 既存`auth-owner-boundary.test.ts` / `auth.test.ts` |
-| AC-5 | — | `withOwner`経由で`createIssue`を呼ぶ結合テスト |
-| AC-6 | — | —（文書） |
+| AC   | 単体 | レイヤー内結合                                       |
+| ---- | ---- | ---------------------------------------------------- |
+| AC-1 | —    | `auth-service-token.test.ts`（jose mock + D1 stub） |
+| AC-2 | —    | 同上（デシジョンテーブル）                           |
+| AC-3 | —    | 同上                                                 |
+| AC-4 | — | `auth-service-token.test.ts`＋既存`auth-owner-boundary.test.ts` / `auth.test.ts` |
+| AC-5 | —    | `auth-service-token-api.test.ts`（実`createIssue`・Memory Store）       |
+| AC-6 | —    | —（文書）                                            |
 
 ## 既存実装との関係（再利用 / 差分 / 衝突）
 

@@ -645,7 +645,11 @@ describe("AC-6 Cycle select", () => {
     await openApp("/issues");
     await act(async () =>
       doc().body.dispatchEvent(
-        new dom.window.KeyboardEvent("keydown", { key: "c", bubbles: true }),
+        new dom.window.KeyboardEvent("keydown", {
+          key: "C",
+          shiftKey: true,
+          bubbles: true,
+        }),
       ),
     );
   }

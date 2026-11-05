@@ -17,8 +17,10 @@ describe("Phase 2 Issue core UI helpers", () => {
     expect(shortcutActionFor({ key: "k", ctrlKey: true, editable: true })).toBe("command");
     expect(shortcutActionFor({ key: "f", metaKey: true, editable: false })).toBe("focus-search");
     expect(shortcutActionFor({ key: "b", ctrlKey: true, editable: false })).toBe("toggle-board");
-    expect(shortcutActionFor({ key: "c", editable: false })).toBe("create");
+    expect(shortcutActionFor({ key: "c", editable: false })).toBe("quick-create");
+    expect(shortcutActionFor({ key: "C", shiftKey: true, editable: false })).toBe("create");
     expect(shortcutActionFor({ key: "c", editable: true })).toBeNull();
+    expect(shortcutActionFor({ key: "C", shiftKey: true, editable: true })).toBeNull();
     expect(shortcutActionFor({ key: "f", editable: true })).toBeNull();
     expect(shortcutActionFor({ key: "V", shiftKey: true, editable: false })).toBe("focus-display");
     expect(shortcutActionFor({ key: "x", editable: false })).toBe("toggle-selection");
@@ -245,8 +247,29 @@ describe("Phase 2 Issue core UI helpers", () => {
 });
 
 describe("AC-11 single-key shortcut gating", () => {
-  it("[デシジョンテーブル] 有効・body・cはcreateになる", () => {
-    expect(shortcutActionFor({ key: "c", editable: false, singleKeyEnabled: true })).toBe("create");
+  it("[デシジョンテーブル] 有効・body・cはquick-create、Shift+Cはcreateになる", () => {
+    expect(shortcutActionFor({ key: "c", editable: false, singleKeyEnabled: true })).toBe(
+      "quick-create",
+    );
+    expect(
+      shortcutActionFor({
+        key: "C",
+        shiftKey: true,
+        editable: false,
+        singleKeyEnabled: true,
+      }),
+    ).toBe("create");
+  });
+
+  it("[デシジョンテーブル] 無効のときShift+Cもnullになる", () => {
+    expect(
+      shortcutActionFor({
+        key: "C",
+        shiftKey: true,
+        editable: false,
+        singleKeyEnabled: false,
+      }),
+    ).toBeNull();
   });
 
   it.each(["c", "f", "x", "?"])("[デシジョンテーブル] 無効のとき %s はnullになる", (key) => {
@@ -255,7 +278,12 @@ describe("AC-11 single-key shortcut gating", () => {
 
   it("[デシジョンテーブル] 無効でもShift+Vの1文字ショートカットはnullになる", () => {
     expect(
-      shortcutActionFor({ key: "V", shiftKey: true, editable: false, singleKeyEnabled: false }),
+      shortcutActionFor({
+        key: "V",
+        shiftKey: true,
+        editable: false,
+        singleKeyEnabled: false,
+      }),
     ).toBeNull();
   });
 
@@ -271,14 +299,24 @@ describe("AC-11 single-key shortcut gating", () => {
     "[デシジョンテーブル] 有効でも選択系の部品にフォーカスがあると %s はnullになる",
     (key) => {
       expect(
-        shortcutActionFor({ key, editable: false, singleKeyEnabled: true, onSelectControl: true }),
+        shortcutActionFor({
+          key,
+          editable: false,
+          singleKeyEnabled: true,
+          onSelectControl: true,
+        }),
       ).toBeNull();
     },
   );
 
   it("[デシジョンテーブル] 選択系の部品でも修飾キー付きは動く", () => {
     expect(
-      shortcutActionFor({ key: "k", ctrlKey: true, editable: false, onSelectControl: true }),
+      shortcutActionFor({
+        key: "k",
+        ctrlKey: true,
+        editable: false,
+        onSelectControl: true,
+      }),
     ).toBe("command");
   });
 

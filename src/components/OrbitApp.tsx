@@ -251,6 +251,8 @@ function OrbitAppInner(props: Props) {
   const initial = getInitialSection(props.initialSection);
   const [section, setSection] = useState<Section>(initial);
   const [composerOpen, setComposerOpen] = useState(Boolean(props.issueId));
+  // クイック追加はタイトル・Project・Due dateだけ。「詳細で登録」でフル入力へ切り替える。
+  const [composerVariant, setComposerVariant] = useState<"quick" | "full">("full");
   const [newTitle, setNewTitle] = useState("");
   const [newProjectId, setNewProjectId] = useState("");
   const [newCycleChoice, setNewCycleChoice] = useState<string | null>(null);
@@ -329,7 +331,13 @@ function OrbitAppInner(props: Props) {
         replace: true,
         resetScroll: false,
       });
-    else void router.navigate({ to: "/issues", search, replace: true, resetScroll: false });
+    else
+      void router.navigate({
+        to: "/issues",
+        search,
+        replace: true,
+        resetScroll: false,
+      });
   }
   const setFilterText = (q: string) => updateIssueSearch({ q });
   const setStatusFilter = (status: string) => updateIssueSearch({ status });
@@ -343,7 +351,10 @@ function OrbitAppInner(props: Props) {
   const setIssueScope = (scope: IssueListScope) => updateIssueSearch({ scope });
   const setViewMode = (
     mode: "list" | "board" | ((current: "list" | "board") => "list" | "board"),
-  ) => updateIssueSearch({ mode: typeof mode === "function" ? mode(viewMode) : mode });
+  ) =>
+    updateIssueSearch({
+      mode: typeof mode === "function" ? mode(viewMode) : mode,
+    });
   function openIssue(issueId: string) {
     rememberIssueFocus(issueId);
     const search = currentIssueSearch();
@@ -563,6 +574,7 @@ function OrbitAppInner(props: Props) {
         if (!bulkBusy) setSelected([]);
       },
       create: openNewIssueComposer,
+      "quick-create": openQuickIssueComposer,
       help: () => setShortcutsOpen(true),
       "toggle-board": () => {
         if (section === "issues") setViewMode((mode) => (mode === "list" ? "board" : "list"));
@@ -609,7 +621,8 @@ function OrbitAppInner(props: Props) {
         dueAt: newDueAt,
         parentId: newParentId || null,
         projectId: projectIdFromSelection(newProjectId),
-        cycleId: newCycleId || null,
+        // Cycleは後から設定する前提なので、クイック追加ではActive Cycleを付けない。
+        cycleId: composerVariant === "quick" ? null : newCycleId || null,
       }),
     onSuccess: ({ issue }) => {
       queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) =>
@@ -700,7 +713,10 @@ function OrbitAppInner(props: Props) {
       showToast(
         "error",
         error instanceof ApiError ? error.message : "カラーテーマの変更に失敗しました。",
-        { label: "再試行", onClick: () => void saveColorTheme(colorTheme, mutationKey) },
+        {
+          label: "再試行",
+          onClick: () => void saveColorTheme(colorTheme, mutationKey),
+        },
       );
       throw error;
     }
@@ -710,22 +726,32 @@ function OrbitAppInner(props: Props) {
     setSection(next);
     setSelected([]);
     if (next === "issues")
-      await router.navigate({ to: "/issues", search: { completed: completedFallback } });
+      await router.navigate({
+        to: "/issues",
+        search: { completed: completedFallback },
+      });
     else await router.navigate({ to: NAV_PATHS[next] });
   }
 
-  function openIssueComposer(projectId = "") {
+  function openIssueComposer(projectId = "", variant: "quick" | "full" = "full") {
     setNewProjectId(projectId);
+    setComposerVariant(variant);
     setComposerOpen(true);
   }
 
   // Project詳細を開いている間は、どの作成導線からでもそのProjectを初期値にする。
+  function contextProjectId() {
+    return section === "projects" && projects.some((project) => project.id === props.projectId)
+      ? (props.projectId ?? "")
+      : "";
+  }
+
   function openNewIssueComposer() {
-    const contextProjectId =
-      section === "projects" && projects.some((project) => project.id === props.projectId)
-        ? (props.projectId ?? "")
-        : "";
-    openIssueComposer(contextProjectId);
+    openIssueComposer(contextProjectId());
+  }
+
+  function openQuickIssueComposer() {
+    openIssueComposer(contextProjectId(), "quick");
   }
 
   async function markNotificationRead(notification: BootstrapPayload["notifications"][number]) {
@@ -929,7 +955,9 @@ function OrbitAppInner(props: Props) {
     if (cycleCloseBusy) return;
     setCycleCloseBusy(true);
     try {
-      await apiPost(`/api/v1/cycles/${cycle.id}`, { idempotencyKey: idempotencyKey() });
+      await apiPost(`/api/v1/cycles/${cycle.id}`, {
+        idempotencyKey: idempotencyKey(),
+      });
       showToast("success", "Cycleを完了しました");
       await refresh();
     } catch (error) {
@@ -943,7 +971,9 @@ function OrbitAppInner(props: Props) {
     if (cycleStartBusy) return false;
     setCycleStartBusy(true);
     try {
-      await apiPost(`/api/v1/cycles/${cycle.id}/start`, { idempotencyKey: idempotencyKey() });
+      await apiPost(`/api/v1/cycles/${cycle.id}/start`, {
+        idempotencyKey: idempotencyKey(),
+      });
       showToast("success", "Cycleを開始しました");
       await refresh();
       return true;
@@ -978,7 +1008,11 @@ function OrbitAppInner(props: Props) {
     setSection("issues");
     setComposerOpen(false);
     void router
-      .navigate({ to: "/issues", search: currentIssueSearch(), resetScroll: false })
+      .navigate({
+        to: "/issues",
+        search: currentIssueSearch(),
+        resetScroll: false,
+      })
       .then(restoreIssueFocus);
   }
 
@@ -1229,7 +1263,10 @@ function OrbitAppInner(props: Props) {
               data={data}
               selectedViewId={props.viewSearch?.view ?? null}
               onSelectView={(view) =>
-                void router.navigate({ to: "/views", search: view ? { view } : {} })
+                void router.navigate({
+                  to: "/views",
+                  search: view ? { view } : {},
+                })
               }
               onOpenIssue={(issue) => openIssue(issue.id)}
               now={clockNow}
@@ -1288,6 +1325,9 @@ function OrbitAppInner(props: Props) {
           />
         ) : (
           <IssueComposer
+            key={composerVariant}
+            variant={composerVariant}
+            onExpand={() => setComposerVariant("full")}
             title={newTitle}
             setTitle={setNewTitle}
             projects={projects}
@@ -1364,6 +1404,10 @@ function OrbitAppInner(props: Props) {
             setCommandOpen(false);
             openNewIssueComposer();
           }}
+          onQuickCreate={() => {
+            setCommandOpen(false);
+            openQuickIssueComposer();
+          }}
           onNavigate={(next) => {
             setCommandOpen(false);
             void navigate(next);
@@ -1395,7 +1439,8 @@ function OrbitAppInner(props: Props) {
         <Modal title="キーボードショートカット" onClose={() => setShortcutsOpen(false)}>
           <div className="shortcut-list">
             {[
-              ["C", "Issueを作成"],
+              ["C", "Issueをクイック追加"],
+              ["Shift + C", "Issueを詳細で作成"],
               [`${modifierLabel} K`, "コマンドメニュー"],
               [`${modifierLabel} F`, "現在View内検索"],
               ["F", "Filterへ移動"],
@@ -2154,7 +2199,12 @@ export function IssuesView({
   );
   const hierarchyRows = useMemo(
     () =>
-      buildIssueHierarchyRows({ issues, allIssues, workflowStates, collapsed: collapsedParents }),
+      buildIssueHierarchyRows({
+        issues,
+        allIssues,
+        workflowStates,
+        collapsed: collapsedParents,
+      }),
     [issues, allIssues, workflowStates, collapsedParents],
   );
   useEffect(() => {
@@ -2171,7 +2221,10 @@ export function IssuesView({
     writeCollapsedParents(browserStorage(), next);
   }
   const grouped = workflowStates
-    .map((state) => ({ state, issues: issues.filter((issue) => issue.statusId === state.id) }))
+    .map((state) => ({
+      state,
+      issues: issues.filter((issue) => issue.statusId === state.id),
+    }))
     .filter((group) => group.issues.length > 0);
   const hasIssueFilter =
     openOnly ||
@@ -2962,7 +3015,9 @@ function IssueRow({
               value={issue.priority}
               disabled={pending}
               onChange={(event) =>
-                onUpdate(issue, { priority: priorityFromSelection(event.target.value) })
+                onUpdate(issue, {
+                  priority: priorityFromSelection(event.target.value),
+                })
               }
             >
               <PriorityOptions />
@@ -2979,7 +3034,9 @@ function IssueRow({
             value={issue.projectId ?? ""}
             disabled={pending}
             onChange={(event) =>
-              onUpdate(issue, { projectId: projectIdFromSelection(event.target.value) })
+              onUpdate(issue, {
+                projectId: projectIdFromSelection(event.target.value),
+              })
             }
           >
             <option value="">Projectなし</option>
@@ -4223,7 +4280,12 @@ export function ProjectsView({
   function moveProject(projectId: string, direction: "up" | "down") {
     const move = beforeProjectIdForMove(projects, projectId, direction);
     if (!move) return;
-    setOrderFocus({ projectId, direction, orderKey: projectOrderKey, failed: false });
+    setOrderFocus({
+      projectId,
+      direction,
+      orderKey: projectOrderKey,
+      failed: false,
+    });
     void onReorderProject(projectId, move.beforeProjectId).then((ok) => {
       if (!ok) setOrderFocus((current) => (current ? { ...current, failed: true } : current));
     });
@@ -4865,7 +4927,10 @@ export function SearchView({
           onChange={(value) => updateFilter("statusId", value)}
           options={[
             { value: "all", label: "すべてのStatus" },
-            ...workflowStates.map((state) => ({ value: state.id, label: state.name })),
+            ...workflowStates.map((state) => ({
+              value: state.id,
+              label: state.name,
+            })),
           ]}
         />
         <OrbitSelect
@@ -4880,7 +4945,10 @@ export function SearchView({
           onChange={(value) => updateFilter("projectId", value)}
           options={[
             { value: "all", label: "すべてのProject" },
-            ...projects.map((project) => ({ value: project.id, label: project.name })),
+            ...projects.map((project) => ({
+              value: project.id,
+              label: project.name,
+            })),
           ]}
         />
         <OrbitSelect
@@ -5267,11 +5335,18 @@ function SavedViewFilters({
     {
       key: "priorities" as const,
       name: "Priority",
-      options: ["urgent", "high", "medium", "low", "no_priority"].map((id) => ({ id, name: id })),
+      options: ["urgent", "high", "medium", "low", "no_priority"].map((id) => ({
+        id,
+        name: id,
+      })),
     },
     { key: "projectIds" as const, name: "Project", options: data.projects },
     { key: "cycleIds" as const, name: "Cycle", options: data.cycles },
-    { key: "labelIds" as const, name: "Label（選択したすべて）", options: data.labels },
+    {
+      key: "labelIds" as const,
+      name: "Label（選択したすべて）",
+      options: data.labels,
+    },
   ];
   return (
     <fieldset disabled={disabled} className="detail-card">
@@ -5378,7 +5453,11 @@ function SavedViewFilters({
           type="checkbox"
           checked={query.showEmptyGroups}
           onChange={(event) =>
-            onChange(updateSavedViewQuery(query, { showEmptyGroups: event.target.checked }))
+            onChange(
+              updateSavedViewQuery(query, {
+                showEmptyGroups: event.target.checked,
+              }),
+            )
           }
         />
         空のGroupを表示
@@ -7269,7 +7348,10 @@ export function IssueDetailPanel({
   }
 
   function syncDescriptionDraft(nextIssue: Issue) {
-    const nextDraft = { description: nextIssue.description, title: nextIssue.title };
+    const nextDraft = {
+      description: nextIssue.description,
+      title: nextIssue.title,
+    };
     issueRef.current = nextIssue;
     draftIssueIdRef.current = nextIssue.id;
     descriptionDraftRef.current = nextDraft;
@@ -7372,7 +7454,10 @@ export function IssueDetailPanel({
           const result = await apiPatch<{ issue: Issue }>(`/api/v1/issues/${targetIssue.id}`, {
             idempotencyKey: idempotencyKey(),
             version: targetIssue.version,
-            patch: { title: nextTitle, descriptionJson: textDocument(nextDescription) },
+            patch: {
+              title: nextTitle,
+              descriptionJson: textDocument(nextDescription),
+            },
           });
           applyUpdatedIssue(result.issue);
           issueRef.current = result.issue;
@@ -7534,7 +7619,11 @@ export function IssueDetailPanel({
         search: issueSearch,
         resetScroll: false,
       });
-    else await router.navigate({ to: "/issues/$issueId", params: { issueId: target.issueId } });
+    else
+      await router.navigate({
+        to: "/issues/$issueId",
+        params: { issueId: target.issueId },
+      });
   }
 
   async function openLabelSettings() {
@@ -8010,7 +8099,9 @@ export function IssueDetailPanel({
                     <button
                       className="text-button hierarchy-parent"
                       onClick={() =>
-                        void navigateAfterDescriptionSave({ issueId: detail.parent!.id })
+                        void navigateAfterDescriptionSave({
+                          issueId: detail.parent!.id,
+                        })
                       }
                     >
                       ↑ {detail.parent.identifier} · {detail.parent.title}
@@ -8025,7 +8116,11 @@ export function IssueDetailPanel({
                       <button
                         className="text-button child-issue-link"
                         key={child.id}
-                        onClick={() => void navigateAfterDescriptionSave({ issueId: child.id })}
+                        onClick={() =>
+                          void navigateAfterDescriptionSave({
+                            issueId: child.id,
+                          })
+                        }
                       >
                         {child.identifier} · {child.title}
                       </button>
@@ -8093,7 +8188,9 @@ export function IssueDetailPanel({
                       <button
                         className="relation-target"
                         onClick={() =>
-                          void navigateAfterDescriptionSave({ issueId: relation.target.id })
+                          void navigateAfterDescriptionSave({
+                            issueId: relation.target.id,
+                          })
                         }
                       >
                         <span className="issue-id">{relation.target.identifier}</span>
@@ -8154,7 +8251,9 @@ export function IssueDetailPanel({
                   value={issue.statusId}
                   disabled={pending || saving}
                   onChange={(event) =>
-                    void updateIssueAfterDescriptionSave({ statusId: event.target.value })
+                    void updateIssueAfterDescriptionSave({
+                      statusId: event.target.value,
+                    })
                   }
                 >
                   {workflowStates.map((state) => (
@@ -8383,6 +8482,8 @@ export function IssueDetailPanel({
 }
 
 export function IssueComposer({
+  variant = "full",
+  onExpand,
   title,
   setTitle,
   projects,
@@ -8403,6 +8504,8 @@ export function IssueComposer({
   onSubmit,
   busy,
 }: {
+  variant?: "quick" | "full";
+  onExpand?: () => void;
   title: string;
   setTitle: (value: string) => void;
   projects: Project[];
@@ -8432,6 +8535,7 @@ export function IssueComposer({
     },
   });
   useInitialTextCaretEnd(titleInputRef, title);
+  const quick = variant === "quick" && !existingIssue;
   return (
     <div
       ref={dialogRef}
@@ -8444,11 +8548,13 @@ export function IssueComposer({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="composer modal-panel">
+      <div className={quick ? "composer composer-quick modal-panel" : "composer modal-panel"}>
         <div className="composer-top">
-          <span className="eyebrow">{existingIssue ? existingIssue.identifier : "NEW ISSUE"}</span>
+          <span className="eyebrow">
+            {existingIssue ? existingIssue.identifier : quick ? "QUICK ADD" : "NEW ISSUE"}
+          </span>
           <h2 id="issue-composer-title" className="visually-hidden">
-            {existingIssue ? "Issue詳細" : "新しいIssue"}
+            {existingIssue ? "Issue詳細" : quick ? "クイック追加" : "新しいIssue"}
           </h2>
           <button className="icon-button" aria-label="閉じる" onClick={onClose}>
             ×
@@ -8489,7 +8595,7 @@ export function IssueComposer({
                 }
               }}
               placeholder="何を進めますか？"
-              rows={3}
+              rows={quick ? 2 : 3}
             />
             <div className="composer-fields">
               <div className="composer-field">
@@ -8511,34 +8617,38 @@ export function IssueComposer({
                   ))}
                 </select>
               </div>
-              <div className="composer-field">
-                <label className="field-label" htmlFor="new-issue-cycle">
-                  Cycle
-                </label>
-                <select
-                  id="new-issue-cycle"
-                  aria-label="新しいIssueのCycle"
-                  className="text-input"
-                  value={cycleId}
-                  onChange={(event) => setCycleId?.(event.target.value)}
-                >
-                  <CycleSelectOptions cycles={cycles} currentId={cycleId} />
-                </select>
-              </div>
-              <div className="composer-field">
-                <label className="field-label" htmlFor="new-issue-priority">
-                  Priority
-                </label>
-                <select
-                  id="new-issue-priority"
-                  aria-label="新しいIssueのPriority"
-                  className="text-input"
-                  value={priority}
-                  onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
-                >
-                  <PriorityOptions />
-                </select>
-              </div>
+              {!quick && (
+                <div className="composer-field">
+                  <label className="field-label" htmlFor="new-issue-cycle">
+                    Cycle
+                  </label>
+                  <select
+                    id="new-issue-cycle"
+                    aria-label="新しいIssueのCycle"
+                    className="text-input"
+                    value={cycleId}
+                    onChange={(event) => setCycleId?.(event.target.value)}
+                  >
+                    <CycleSelectOptions cycles={cycles} currentId={cycleId} />
+                  </select>
+                </div>
+              )}
+              {!quick && (
+                <div className="composer-field">
+                  <label className="field-label" htmlFor="new-issue-priority">
+                    Priority
+                  </label>
+                  <select
+                    id="new-issue-priority"
+                    aria-label="新しいIssueのPriority"
+                    className="text-input"
+                    value={priority}
+                    onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
+                  >
+                    <PriorityOptions />
+                  </select>
+                </div>
+              )}
               <div className="composer-field">
                 <label className="field-label" htmlFor="new-issue-due-date">
                   Due date
@@ -8550,27 +8660,29 @@ export function IssueComposer({
                   onChange={(value) => setDueAt(dateInputToUnix(value))}
                 />
               </div>
-              <div className="composer-field composer-field-wide">
-                <label className="field-label" htmlFor="new-issue-parent">
-                  Parent Issue
-                </label>
-                <select
-                  id="new-issue-parent"
-                  aria-label="新しいIssueのParent"
-                  className="text-input"
-                  value={parentId}
-                  onChange={(event) => setParentId(event.target.value)}
-                >
-                  <option value="">Parentなし</option>
-                  {issues
-                    .filter((issue) => issue.deletedAt === null && issue.archivedAt === null)
-                    .map((issue) => (
-                      <option value={issue.id} key={issue.id}>
-                        {issue.identifier} · {issue.title}
-                      </option>
-                    ))}
-                </select>
-              </div>
+              {!quick && (
+                <div className="composer-field composer-field-wide">
+                  <label className="field-label" htmlFor="new-issue-parent">
+                    Parent Issue
+                  </label>
+                  <select
+                    id="new-issue-parent"
+                    aria-label="新しいIssueのParent"
+                    className="text-input"
+                    value={parentId}
+                    onChange={(event) => setParentId(event.target.value)}
+                  >
+                    <option value="">Parentなし</option>
+                    {issues
+                      .filter((issue) => issue.deletedAt === null && issue.archivedAt === null)
+                      .map((issue) => (
+                        <option value={issue.id} key={issue.id}>
+                          {issue.identifier} · {issue.title}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
             <div className="composer-hint">
               <span>Enterで作成</span>
@@ -8581,6 +8693,11 @@ export function IssueComposer({
               <button className="button ghost" onClick={onClose}>
                 キャンセル
               </button>
+              {quick && onExpand && (
+                <button className="button ghost" disabled={busy} onClick={onExpand}>
+                  詳細で登録
+                </button>
+              )}
               <button
                 className="button primary"
                 disabled={busy || !title.trim()}
@@ -8599,6 +8716,7 @@ export function IssueComposer({
 export function CommandPalette({
   onClose,
   onCreate,
+  onQuickCreate,
   onNavigate,
   onSearch,
   selectedIssue,
@@ -8609,6 +8727,7 @@ export function CommandPalette({
 }: {
   onClose: () => void;
   onCreate: () => void;
+  onQuickCreate?: () => void;
   onNavigate: (section: Section) => void;
   onSearch: (value: string) => void;
   selectedIssue?: Issue;
@@ -8623,7 +8742,8 @@ export function CommandPalette({
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogBoundary(dialogRef, { initialFocus: "input", onEscape: onClose });
   const commands = [
-    { label: "新しいIssueを作成", hint: "C", action: onCreate },
+    ...(onQuickCreate ? [{ label: "Issueをクイック追加", hint: "C", action: onQuickCreate }] : []),
+    { label: "新しいIssueを作成", hint: "Shift C", action: onCreate },
     ...(
       ["home", "issues", "cycles", "projects", "search", "inbox", "views", "settings"] as Section[]
     ).map((item) => ({
@@ -8632,12 +8752,22 @@ export function CommandPalette({
       action: () => onNavigate(item),
     })),
     ...(query.trim()
-      ? [{ label: `検索「${query.trim()}」`, hint: "Enter", action: () => onSearch(query.trim()) }]
+      ? [
+          {
+            label: `検索「${query.trim()}」`,
+            hint: "Enter",
+            action: () => onSearch(query.trim()),
+          },
+        ]
       : []),
     ...(selectedIssue
       ? [
           { label: "選択中Issueを開く", hint: "↵", action: onOpenSelected },
-          { label: "選択中Issueをアーカイブ", hint: "Archive", action: onArchiveSelected },
+          {
+            label: "選択中Issueをアーカイブ",
+            hint: "Archive",
+            action: onArchiveSelected,
+          },
           { label: "選択解除", hint: "Esc", action: onClearSelection },
         ]
       : []),

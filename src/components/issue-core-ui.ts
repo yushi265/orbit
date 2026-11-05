@@ -1,6 +1,7 @@
 export type ShortcutAction =
   | "command"
   | "create"
+  | "quick-create"
   | "focus-search"
   | "focus-filter"
   | "focus-display"
@@ -62,7 +63,7 @@ export function shortcutActionFor(event: ShortcutEventLike): ShortcutAction | nu
   if (key === "escape") return "close";
   if (event.editable || modifier) return null;
   if (event.singleKeyEnabled === false || event.onSelectControl) return null;
-  if (key === "c") return "create";
+  if (key === "c") return event.shiftKey ? "create" : "quick-create";
   if (key === "f") return "focus-filter";
   if (key === "v" && event.shiftKey) return "focus-display";
   if (key === "x") return "toggle-selection";

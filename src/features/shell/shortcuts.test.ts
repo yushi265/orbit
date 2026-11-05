@@ -46,7 +46,8 @@ function press(init: KeyboardEventInit, target: EventTarget = dom.window) {
 describe("useShortcutDispatcher", () => {
   it.each<[string, KeyboardEventInit, ShortcutAction]>([
     ["Ctrl+K", { key: "k", ctrlKey: true }, "command"],
-    ["c", { key: "c" }, "create"],
+    ["c", { key: "c" }, "quick-create"],
+    ["Shift+C", { key: "C", shiftKey: true }, "create"],
     ["?", { key: "?" }, "help"],
     ["Escape", { key: "Escape" }, "close"],
     ["Ctrl+F", { key: "f", ctrlKey: true }, "focus-search"],
@@ -63,7 +64,7 @@ describe("useShortcutDispatcher", () => {
 
   it("[デシジョンテーブル] 抑止あり × ショートカット → ハンドラを呼ばず、既定動作も止めない", async () => {
     const handler = vi.fn();
-    await render(true, { create: handler });
+    await render(true, { "quick-create": handler });
     const event = press({ key: "c" });
     expect(handler).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
@@ -71,7 +72,7 @@ describe("useShortcutDispatcher", () => {
 
   it("[デシジョンテーブル] 抑止なし × ショートカット以外のキー → 何もしない", async () => {
     const handler = vi.fn();
-    await render(false, { create: handler });
+    await render(false, { "quick-create": handler });
     const event = press({ key: "z" });
     expect(handler).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
@@ -84,7 +85,7 @@ describe("useShortcutDispatcher", () => {
 
   it("[同値分割] IME 変換中 → 何もしない", async () => {
     const handler = vi.fn();
-    await render(false, { create: handler });
+    await render(false, { "quick-create": handler });
     const event = press({ key: "c", isComposing: true });
     expect(handler).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
@@ -94,7 +95,7 @@ describe("useShortcutDispatcher", () => {
     "[同値分割] 入力欄・select・combobox（#%s）での単一キー → 何もしない",
     async (id) => {
       const handler = vi.fn();
-      await render(false, { create: handler });
+      await render(false, { "quick-create": handler });
       const target = dom.window.document.getElementById(id)!;
       if (id === "editable") Object.defineProperty(target, "isContentEditable", { value: true });
       press({ key: "c" }, target);
@@ -105,19 +106,19 @@ describe("useShortcutDispatcher", () => {
   it("[状態遷移] 再描画で渡したハンドラと抑止状態が次のキー入力から使われる", async () => {
     const first = vi.fn();
     const second = vi.fn();
-    await render(false, { create: first });
-    await render(false, { create: second });
+    await render(false, { "quick-create": first });
+    await render(false, { "quick-create": second });
     press({ key: "c" });
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledOnce();
-    await render(true, { create: second });
+    await render(true, { "quick-create": second });
     press({ key: "c" });
     expect(second).toHaveBeenCalledOnce();
   });
 
   it("[代表値] unmount 後はキー入力を受け取らない", async () => {
     const handler = vi.fn();
-    await render(false, { create: handler });
+    await render(false, { "quick-create": handler });
     await act(async () => root.unmount());
     root = createRoot(dom.window.document.getElementById("root")!);
     press({ key: "c" });

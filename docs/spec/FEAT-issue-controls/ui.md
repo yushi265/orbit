@@ -3,7 +3,7 @@
 ## 担保 AC（[index.md](./index.md) の引用）
 
 - **AC-1**: Issue詳細のStatusセレクトでOwnerのworkflow stateを選択すると、既存の`PATCH /api/v1/issues/:issueId`へ現在の`version`と`patch.statusId`を送信し、成功時に詳細・一覧へ反映する。保存失敗時は既存のrollback / retry導線を維持する。
-- **AC-2**: Issues画面で「完了Issueを表示」を切り替えられ、初期状態は表示、OFF時はworkflow stateの`category === "completed"`に該当するIssueをList・Boardの両方から除外する。Canceledは完了Issueとして除外しない。非表示にしたIssueは選択状態からも解除する。
+- **AC-2**: Issues画面で「完了Issueを表示」を切り替えられ、初期状態は表示、OFF時はworkflow stateの`category === "completed"`または`category === "canceled"`に該当するIssueをList・Boardの両方から除外する（2026-11-05: Canceledも除外対象に変更）。非表示にしたIssueは選択状態からも解除する。
 - **AC-3**: Issues画面でソート順を「更新日（新しい順）」「作成日（新しい順）」「タイトル（昇順）」「ステータス順」「優先度（Urgent順）」「期限（近い順）」から選択でき、List・BoardのIssue順へ即時反映する。初期値は更新日（新しい順）で、同値の場合は更新日・作成日・識別子を用いて安定させる。
 - **AC-4**: 「完了Issueを表示」の選択状態をブラウザへ保存し、Issues画面の再読み込み後も同じ状態を復元する。保存できない環境ではメモリ上の状態で動作を継続する。
 - **AC-5**: IssueのStatus / Priority / Project等の保存成功Toastに「元に戻す」ボタンを表示し、押下時は保存直前の値を現在のversionから逆更新する。Undo成功時は「元に戻しました」を表示し、Undo後のToastからUndoを再実行しない。
@@ -53,7 +53,7 @@
 - [状態遷移] Issue詳細でworkflow stateを選択 → `statusId` PATCHが発生し、成功後に選択値が反映される。
 - [状態遷移/失敗系] Status PATCHが競合 → rollback / 最新値反映 / retry導線が既存契約どおり動く。
 - [デシジョンテーブル] `showCompleted=true` × completed / canceled / active → 全件表示。
-- [デシジョンテーブル] `showCompleted=false` × completed / canceled / active → completedのみ除外。
+- [デシジョンテーブル] `showCompleted=false` × completed / canceled / active → completedとcanceledを除外。
 - [代表値] 各sort optionでList・Boardへ渡すIssue順が期待順になる。
 - [代表値] 完了表示OFFを保存して再読み込み → OFF状態が復元される。
 - [状態遷移] Issue保存成功ToastのUndo → 保存前値へ戻り、「元に戻しました」が表示される。

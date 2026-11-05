@@ -562,7 +562,7 @@ function OrbitAppInner(props: Props) {
         setShortcutsOpen(false);
         if (!bulkBusy) setSelected([]);
       },
-      create: () => setComposerOpen(true),
+      create: openNewIssueComposer,
       help: () => setShortcutsOpen(true),
       "toggle-board": () => {
         if (section === "issues") setViewMode((mode) => (mode === "list" ? "board" : "list"));
@@ -717,6 +717,15 @@ function OrbitAppInner(props: Props) {
   function openIssueComposer(projectId = "") {
     setNewProjectId(projectId);
     setComposerOpen(true);
+  }
+
+  // Project詳細を開いている間は、どの作成導線からでもそのProjectを初期値にする。
+  function openNewIssueComposer() {
+    const contextProjectId =
+      section === "projects" && projects.some((project) => project.id === props.projectId)
+        ? (props.projectId ?? "")
+        : "";
+    openIssueComposer(contextProjectId);
   }
 
   async function markNotificationRead(notification: BootstrapPayload["notifications"][number]) {
@@ -986,7 +995,7 @@ function OrbitAppInner(props: Props) {
         section={section}
         unread={unread}
         onNavigate={navigate}
-        onCreate={() => setComposerOpen(true)}
+        onCreate={openNewIssueComposer}
       />
       <div className="main-shell">
         <header className="topbar">
@@ -1106,7 +1115,7 @@ function OrbitAppInner(props: Props) {
               resetBulkMutation={() => {
                 bulkMutationKey.reset();
               }}
-              onCreate={() => setComposerOpen(true)}
+              onCreate={openNewIssueComposer}
               onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
@@ -1254,7 +1263,7 @@ function OrbitAppInner(props: Props) {
         section={section}
         unread={unread}
         onNavigate={navigate}
-        onCreate={() => setComposerOpen(true)}
+        onCreate={openNewIssueComposer}
       />
       {activeRun && <RunOverlay run={activeRun} busy={runBusy} onResume={resumeMaintenance} />}
       {composerOpen &&
@@ -1353,7 +1362,7 @@ function OrbitAppInner(props: Props) {
           onClose={() => setCommandOpen(false)}
           onCreate={() => {
             setCommandOpen(false);
-            setComposerOpen(true);
+            openNewIssueComposer();
           }}
           onNavigate={(next) => {
             setCommandOpen(false);

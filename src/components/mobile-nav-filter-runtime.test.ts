@@ -175,6 +175,16 @@ describe("mobile bottom navigation", () => {
     await click(q(".mobile-create")!);
     expect(q(".composer")).not.toBeNull();
   });
+  it.each([
+    ["/projects/project-1", "project-1"],
+    ["/projects/missing-project", ""],
+    ["/projects", ""],
+    ["/issues", ""],
+  ])("[同値分割] %s でCreateを押すと新規IssueのProject初期値は「%s」", async (url, expected) => {
+    await render(url);
+    await click(q(".mobile-create")!);
+    expect((q("#new-issue-project") as unknown as HTMLSelectElement).value).toBe(expected);
+  });
 });
 
 describe("mobile Menu sheet", () => {

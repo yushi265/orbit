@@ -63,7 +63,7 @@ function issue(id: string, overrides: Partial<Issue> = {}): Issue {
 }
 
 describe("Project issue workspace filtering", () => {
-  it("[デシジョンテーブル] 完了表示OFFはcompletedだけを除外し、canceledは残す", () => {
+  it("[デシジョンテーブル] 完了表示OFFはcompletedとcanceledを除外する", () => {
     const settings = {
       ...defaultProjectIssueDisplaySettings(),
       showCompleted: false,
@@ -82,7 +82,7 @@ describe("Project issue workspace filtering", () => {
       "Asia/Tokyo",
     );
 
-    expect(result.map((item) => item.id)).toEqual(["todo", "canceled"]);
+    expect(result.map((item) => item.id)).toEqual(["todo"]);
   });
 
   it("[代表値] Project scope・Status・Priority・Label・Due・検索を同時に適用する", () => {

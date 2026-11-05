@@ -29,7 +29,7 @@ ProjectごとのIssue表示設定はサーバーへ保存して別端末へ同�
 ## 受け入れ基準（AC）
 
 - [x] **AC-1**: Homeは本人の表示名と本人のTimezoneに基づく日付を表示し、期限超過、今日が期限、今日から7日以内が期限、Current Cycleの未完了Issue、更新日時順の最近更新Issueを、該当するものから確認できる。各Issueと主要カードからIssue一覧、Issue詳細、Cycle、Projectへ移動でき、該当0件の状態では次の操作を案内する。
-- [x] **AC-2**: `/projects/:projectId` はProject一覧の下に詳細を埋め込まず、Project概要・Status・期限・進捗と、対象Projectに限定したIssue workspaceを表示する。Issue workspaceは既存Issue一覧と同じList / Board、検索、Status / Priority / Label / 期限Filter、並び順、完了Issue表示切替、インライン更新、一括更新、手動並び替えを提供し、完了カテゴリだけを非表示にできる。CanceledカテゴリのIssueは完了Issueとして扱わない。
+- [x] **AC-2**: `/projects/:projectId` はProject一覧の下に詳細を埋め込まず、Project概要・Status・期限・進捗と、対象Projectに限定したIssue workspaceを表示する。Issue workspaceは既存Issue一覧と同じList / Board、検索、Status / Priority / Label / 期限Filter、並び順、完了Issue表示切替、インライン更新、一括更新、手動並び替えを提供し、完了表示OFF時はCompletedとCanceledのカテゴリを非表示にする（2026-11-05変更）。
 - [x] **AC-3**: ProjectごとのIssue workspace表示設定（List / Board、検索、Status / Priority / Label / 期限Filter、並び順、完了Issue表示切替）はOwner scopedなサーバー状態として保存され、別端末のBootstrap再取得後に同じProjectで復元される。設定未保存のProjectは定義済み初期値で表示する。
 - [x] **AC-4**: Project表示設定のMutationは既存のOwner境界、same-origin、idempotencyKey、Runtime lockを守る。同じKey・同じRequestの再送は同じ設定を返し、同じKey・異なるRequestは409、入力不正は400、存在しないまたはOwner外Projectは404、Runtime lock中は423になり、設定を部分更新しない。Inboxは既存通知の既読化・対象遷移を維持したまま、Inboxの役割、通知の読み方、通知がない場合の次の行動を画面上で説明する。
 - [x] **AC-5**: Home、Project詳細、InboxはLoading、空、保存中、400 / 404 / 409 / 423 / 500系エラー、成功状態を既存のエラー表示方針で示し、Pointer / Keyboardの双方で主要操作を実行できる。Desktop（1200px以上）、Tablet（768〜1199px）、Mobile（767px以下、390pxを含む）で横方向の表示崩れを起こさない。

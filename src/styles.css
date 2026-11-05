@@ -515,3 +515,7 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 .detail-panel select, .detail-panel input[type="date"] { box-sizing: border-box; height: 36px; min-height: 36px; padding-block: 0; padding-left: 10px; border-radius: 7px; font-size: 12px; }
 .detail-panel select { padding-right: 10px; }
 @media (max-width: 767px) { .detail-panel select, .detail-panel input[type="date"] { height: 44px; min-height: 44px; } }
+/* 新規Issueの属性欄: mobile 1列 / tablet 2列 / desktop 3列。Parent Issue は候補名が長いので複数列時に2列分を使う。 */
+.composer-fields { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 14px; }.composer-field { min-width: 0; }.composer-field .orbit-date-picker { margin-top: 8px; }
+@media (min-width: 768px) { .composer-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }.composer-field-wide { grid-column: span 2; } }
+@media (min-width: 1024px) { .composer-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

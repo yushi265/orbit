@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CyclesView, IssuesView } from "./OrbitApp";
+import { CyclesView, IssueComposer, IssuesView } from "./OrbitApp";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -222,5 +222,62 @@ describe("responsive issue layout contract", () => {
     expect(columns(".settings-grid", TABLET)).toBe("minmax(0, 1fr)");
     expect(columns(".settings-grid")).toBe("repeat(2, minmax(280px, 1fr))");
     expect(declarationsFor(rules, ".settings-grid").get("display")).toBe("grid");
+  });
+});
+
+describe("issue composer property layout", () => {
+  const DESKTOP = "(min-width: 1024px)";
+  const TABLET_UP = "(min-width: 768px)";
+
+  it("[境界値] 新規Issueの属性欄はmobile 1列・tablet 2列・desktop 3列で並ぶ", () => {
+    expect(columns(".composer-fields")).toBe("minmax(0, 1fr)");
+    expect(columns(".composer-fields", TABLET_UP)).toBe("repeat(2, minmax(0, 1fr))");
+    expect(columns(".composer-fields", DESKTOP)).toBe("repeat(3, minmax(0, 1fr))");
+    expect(declarationsFor(rules, ".composer-fields").get("display")).toBe("grid");
+    // 長いselectがグリッドを押し広げないよう各欄は縮められる。
+    expect(declarationsFor(rules, ".composer-field").get("min-width")).toBe("0");
+    // 横並びで隣のselect（.text-input）と入力欄の上端を揃える。
+    expect(declarationsFor(rules, ".composer-field .orbit-date-picker").get("margin-top")).toBe(
+      declarationsFor(rules, ".text-input").get("margin-top"),
+    );
+  });
+
+  it("[境界値] Parent Issueは長い候補名を読めるよう複数列時に2列分を使う", () => {
+    expect(declarationsFor(rules, ".composer-field-wide").has("grid-column")).toBe(false);
+    expect(declarationsFor(rules, ".composer-field-wide", TABLET_UP).get("grid-column")).toBe(
+      "span 2",
+    );
+  });
+
+  it("[代表値] 属性欄5項目をグリッド内の欄に分けて描画する", () => {
+    const markup = renderToStaticMarkup(
+      createElement(IssueComposer, {
+        title: "",
+        setTitle: () => undefined,
+        projects: [],
+        projectId: "",
+        setProjectId: () => undefined,
+        priority: "no_priority",
+        setPriority: () => undefined,
+        dueAt: null,
+        setDueAt: () => undefined,
+        parentId: "",
+        setParentId: () => undefined,
+        issues: [],
+        onClose: () => undefined,
+        onSubmit: () => undefined,
+        busy: false,
+      }),
+    );
+    const document = new JSDOM(markup).window.document;
+    const fields = [...document.querySelectorAll(".composer-fields > .composer-field")];
+    expect(fields.map((field) => field.querySelector(".field-label")?.textContent)).toEqual([
+      "Project",
+      "Cycle",
+      "Priority",
+      "Due date",
+      "Parent Issue",
+    ]);
+    expect(fields.at(-1)?.classList.contains("composer-field-wide")).toBe(true);
   });
 });

@@ -8491,75 +8491,87 @@ export function IssueComposer({
               placeholder="何を進めますか？"
               rows={3}
             />
-            <label className="field-label" htmlFor="new-issue-project">
-              Project
-            </label>
-            <select
-              id="new-issue-project"
-              aria-label="新しいIssueのProject"
-              className="text-input"
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
-            >
-              <option value="">Projectなし</option>
-              {projects.map((project) => (
-                <option value={project.id} key={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <label className="field-label" htmlFor="new-issue-cycle">
-              Cycle
-            </label>
-            <select
-              id="new-issue-cycle"
-              aria-label="新しいIssueのCycle"
-              className="text-input"
-              value={cycleId}
-              onChange={(event) => setCycleId?.(event.target.value)}
-            >
-              <CycleSelectOptions cycles={cycles} currentId={cycleId} />
-            </select>
-            <label className="field-label" htmlFor="new-issue-priority">
-              Priority
-            </label>
-            <select
-              id="new-issue-priority"
-              aria-label="新しいIssueのPriority"
-              className="text-input"
-              value={priority}
-              onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
-            >
-              <PriorityOptions />
-            </select>
-            <label className="field-label" htmlFor="new-issue-due-date">
-              Due date
-            </label>
-            <OrbitDatePicker
-              id="new-issue-due-date"
-              label="新しいIssueのDue date"
-              value={dateInputValue(dueAt)}
-              onChange={(value) => setDueAt(dateInputToUnix(value))}
-            />
-            <label className="field-label" htmlFor="new-issue-parent">
-              Parent Issue
-            </label>
-            <select
-              id="new-issue-parent"
-              aria-label="新しいIssueのParent"
-              className="text-input"
-              value={parentId}
-              onChange={(event) => setParentId(event.target.value)}
-            >
-              <option value="">Parentなし</option>
-              {issues
-                .filter((issue) => issue.deletedAt === null && issue.archivedAt === null)
-                .map((issue) => (
-                  <option value={issue.id} key={issue.id}>
-                    {issue.identifier} · {issue.title}
-                  </option>
-                ))}
-            </select>
+            <div className="composer-fields">
+              <div className="composer-field">
+                <label className="field-label" htmlFor="new-issue-project">
+                  Project
+                </label>
+                <select
+                  id="new-issue-project"
+                  aria-label="新しいIssueのProject"
+                  className="text-input"
+                  value={projectId}
+                  onChange={(event) => setProjectId(event.target.value)}
+                >
+                  <option value="">Projectなし</option>
+                  {projects.map((project) => (
+                    <option value={project.id} key={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="composer-field">
+                <label className="field-label" htmlFor="new-issue-cycle">
+                  Cycle
+                </label>
+                <select
+                  id="new-issue-cycle"
+                  aria-label="新しいIssueのCycle"
+                  className="text-input"
+                  value={cycleId}
+                  onChange={(event) => setCycleId?.(event.target.value)}
+                >
+                  <CycleSelectOptions cycles={cycles} currentId={cycleId} />
+                </select>
+              </div>
+              <div className="composer-field">
+                <label className="field-label" htmlFor="new-issue-priority">
+                  Priority
+                </label>
+                <select
+                  id="new-issue-priority"
+                  aria-label="新しいIssueのPriority"
+                  className="text-input"
+                  value={priority}
+                  onChange={(event) => setPriority(priorityFromSelection(event.target.value))}
+                >
+                  <PriorityOptions />
+                </select>
+              </div>
+              <div className="composer-field">
+                <label className="field-label" htmlFor="new-issue-due-date">
+                  Due date
+                </label>
+                <OrbitDatePicker
+                  id="new-issue-due-date"
+                  label="新しいIssueのDue date"
+                  value={dateInputValue(dueAt)}
+                  onChange={(value) => setDueAt(dateInputToUnix(value))}
+                />
+              </div>
+              <div className="composer-field composer-field-wide">
+                <label className="field-label" htmlFor="new-issue-parent">
+                  Parent Issue
+                </label>
+                <select
+                  id="new-issue-parent"
+                  aria-label="新しいIssueのParent"
+                  className="text-input"
+                  value={parentId}
+                  onChange={(event) => setParentId(event.target.value)}
+                >
+                  <option value="">Parentなし</option>
+                  {issues
+                    .filter((issue) => issue.deletedAt === null && issue.archivedAt === null)
+                    .map((issue) => (
+                      <option value={issue.id} key={issue.id}>
+                        {issue.identifier} · {issue.title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
             <div className="composer-hint">
               <span>Enterで作成</span>
               <span>Shift + Enterで改行</span>

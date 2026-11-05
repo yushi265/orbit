@@ -16,6 +16,7 @@ Issueの新規作成・一覧・詳細画面から、本人が所有するProjec
 | # | ユニット | 含むAC | 依存 | 状態 |
 |---|---|---|---|---|
 | 1 | Issue Project assignment | AC-1〜AC-4 | 既存Issue / Project契約 | 完了 |
+| 2 | Project詳細からの作成初期値 | AC-5 | AC-2 | 完了 |
 
 ## 受け入れ基準（AC）
 
@@ -23,6 +24,7 @@ Issueの新規作成・一覧・詳細画面から、本人が所有するProjec
 - [x] **AC-2**: 新規Issue作成時にProjectを選択できる。指定Projectが存在しない、削除済み、または他Ownerの場合はサーバーが404で拒否し、Issueを作成しない。
 - [x] **AC-3**: Project保存が409またはその他の失敗になった場合、最新値との整合を保ち、入力をロールバックし、Project専用の再試行導線を表示する。
 - [x] **AC-4**: Desktop / Tablet / MobileでProject割り当て導線を利用でき、選択要素にラベルを付け、既存のIssue画面レイアウトとキーボード操作を維持する。
+- [x] **AC-5**: `/projects/:projectId`を開いている間は、サイドバー・モバイル下部タブ・ショートカット・コマンドパレット・Project内のどの作成導線から新規Issueを開いても、Projectの初期値をそのProjectにする（2026-11-05追加）。Bootstrapに無いProjectIDやProject詳細以外の画面では「Projectなし」のままにする。
 
 ## アーキテクチャ / レイヤー間フロー
 
@@ -51,6 +53,7 @@ Bootstrap(projects) → Issue list/detail/create select
 | AC-2 | — | Issue createのProject存在・Owner境界 |
 | AC-3 | — | 既存Issue mutationの409契約、UI状態はlocal smoke |
 | AC-4 | — | 既存UIのlocal browser smoke、型・Lint |
+| AC-5 | — | `mobile-nav-filter-runtime.test.ts` の作成初期値（Project詳細 / 不明ID / 一覧 / Issues） |
 
 ## 既存実装との関係（再利用 / 差分 / 衝突）
 

@@ -629,13 +629,15 @@ function OrbitAppInner(props: Props) {
         current ? { ...current, issues: [issue, ...current.issues] } : current,
       );
       setNewTitle("");
+      showToast("success", `${issue.identifier} を作成しました`);
+      // クイック追加は開いたまま、選んだProjectを維持して続けて登録できるようにする。
+      if (composerVariant === "quick") return;
       setNewProjectId("");
       setNewCycleChoice(null);
       setNewPriority("no_priority");
       setNewDueAt(null);
       setNewParentId("");
       setComposerOpen(false);
-      showToast("success", `${issue.identifier} を作成しました`);
     },
     onError: (error) =>
       showToast("error", error instanceof ApiError ? error.message : "Issueの作成に失敗しました。"),
@@ -8536,6 +8538,10 @@ export function IssueComposer({
   });
   useInitialTextCaretEnd(titleInputRef, title);
   const quick = variant === "quick" && !existingIssue;
+  // クイック追加は登録後も開いたまま連続登録するので、送信が終わったらタイトル欄へフォーカスを戻す。
+  useEffect(() => {
+    if (quick && !busy) titleInputRef.current?.focus();
+  }, [quick, busy]);
   return (
     <div
       ref={dialogRef}
@@ -8649,17 +8655,19 @@ export function IssueComposer({
                   </select>
                 </div>
               )}
-              <div className="composer-field">
-                <label className="field-label" htmlFor="new-issue-due-date">
-                  Due date
-                </label>
-                <OrbitDatePicker
-                  id="new-issue-due-date"
-                  label="新しいIssueのDue date"
-                  value={dateInputValue(dueAt)}
-                  onChange={(value) => setDueAt(dateInputToUnix(value))}
-                />
-              </div>
+              {!quick && (
+                <div className="composer-field">
+                  <label className="field-label" htmlFor="new-issue-due-date">
+                    Due date
+                  </label>
+                  <OrbitDatePicker
+                    id="new-issue-due-date"
+                    label="新しいIssueのDue date"
+                    value={dateInputValue(dueAt)}
+                    onChange={(value) => setDueAt(dateInputToUnix(value))}
+                  />
+                </div>
+              )}
               {!quick && (
                 <div className="composer-field composer-field-wide">
                   <label className="field-label" htmlFor="new-issue-parent">

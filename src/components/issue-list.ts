@@ -77,10 +77,13 @@ export function filterCompletedIssues(
   showCompleted: boolean,
 ): Issue[] {
   if (showCompleted) return [...issues];
-  const completedStateIds = new Set(
-    workflowStates.filter((state) => state.category === "completed").map((state) => state.id),
+  // 「完了Issueを表示」がOFFのときは、完了とキャンセルをどちらも閉じたIssueとして隠す。
+  const closedStateIds = new Set(
+    workflowStates
+      .filter((state) => state.category === "completed" || state.category === "canceled")
+      .map((state) => state.id),
   );
-  return issues.filter((issue) => !completedStateIds.has(issue.statusId));
+  return issues.filter((issue) => !closedStateIds.has(issue.statusId));
 }
 
 export function filterIssuesByProject(issues: readonly Issue[], projectFilter: string): Issue[] {

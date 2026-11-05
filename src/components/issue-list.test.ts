@@ -98,7 +98,7 @@ describe("Issue list controls", () => {
     ]);
   });
 
-  it("filters only completed workflow states and keeps canceled issues", () => {
+  it("[デシジョンテーブル] 完了非表示ではcompletedとcanceledを除外し、表示ではすべて残す", () => {
     const issues = [
       issue({ id: "todo-1", statusId: "todo" }),
       issue({ id: "done-1", statusId: "done" }),
@@ -107,7 +107,6 @@ describe("Issue list controls", () => {
 
     expect(filterCompletedIssues(issues, workflowStates, false).map((item) => item.id)).toEqual([
       "todo-1",
-      "canceled-1",
     ]);
     expect(filterCompletedIssues(issues, workflowStates, true)).toEqual(issues);
   });

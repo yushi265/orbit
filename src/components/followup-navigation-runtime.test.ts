@@ -106,11 +106,11 @@ describe("Home exact list links", () => {
     expect(dom.window.document.querySelector('[data-issue-id="done"]')).toBeNull();
     expect(dom.window.document.querySelector('[data-issue-id="canceled"]')).toBeNull();
   });
-  it("[既存条件] completed=falseはCanceledを維持しopen条件だけが追加で除外する", async () => {
+  it("[既存条件] completed=falseはCompletedとCanceledを除外する", async () => {
     await render("/issues?completed=false");
-    expect(dom.window.document.querySelectorAll(".issue-row")).toHaveLength(5);
+    expect(dom.window.document.querySelectorAll(".issue-row")).toHaveLength(4);
     expect(dom.window.document.querySelector('[data-issue-id="done"]')).toBeNull();
-    expect(dom.window.document.querySelector('[data-issue-id="canceled"]')).not.toBeNull();
+    expect(dom.window.document.querySelector('[data-issue-id="canceled"]')).toBeNull();
   });
   it.each([
     ["OVERDUE", "overdue", "past"],

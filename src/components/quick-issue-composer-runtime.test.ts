@@ -132,13 +132,13 @@ const button = (label: string) =>
   [...doc().querySelectorAll("button")].find((item) => item.textContent?.trim() === label);
 
 describe("クイック追加の開き方（デシジョンテーブル）", () => {
-  it("[デシジョンテーブル] c → タイトル・Project・Due dateだけのクイック追加が開く", async () => {
+  it("[デシジョンテーブル] c → タイトル・Projectだけのクイック追加が開く", async () => {
     await open("/issues");
     await press({ key: "c" });
     expect(q("#issue-composer-title")?.textContent).toBe("クイック追加");
     expect(title()).not.toBeNull();
     expect(project()).not.toBeNull();
-    expect(q("#new-issue-due-date")).not.toBeNull();
+    expect(q("#new-issue-due-date")).toBeNull();
     expect(q("#new-issue-cycle")).toBeNull();
     expect(q("#new-issue-priority")).toBeNull();
     expect(q("#new-issue-parent")).toBeNull();
@@ -181,6 +181,42 @@ describe("クイック追加の登録", () => {
       priority: "no_priority",
       parentId: null,
     });
+  });
+
+  it("[状態遷移] 登録後もクイック追加を開いたまま、タイトルだけ空にしてProjectを維持し、続けて登録できる", async () => {
+    await open("/projects/project-1");
+    await press({ key: "c" });
+    await typeTitle("1件目");
+    await press({ key: "Enter" }, title()!);
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    await vi.waitFor(() => expect(title()!.value).toBe(""));
+    expect(q("#issue-composer-title")?.textContent).toBe("クイック追加");
+    expect(project()!.value).toBe("project-1");
+    expect(doc().activeElement).toBe(title());
+    await typeTitle("2件目");
+    await press({ key: "Enter" }, title()!);
+    await vi.waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toMatchObject({ title: "2件目", projectId: "project-1" });
+  });
+
+  it("[状態遷移] ボタンで登録しても開いたままで、タイトル欄にフォーカスが戻る", async () => {
+    await open("/issues");
+    await press({ key: "c" });
+    await typeTitle("ボタンで登録");
+    await chooseProject("project-1");
+    await act(async () => button("Issueを作成")!.click());
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    await vi.waitFor(() => expect(title()!.value).toBe(""));
+    expect(project()!.value).toBe("project-1");
+    expect(doc().activeElement).toBe(title());
+  });
+
+  it("[状態遷移] フル入力で登録した場合は従来どおり閉じる", async () => {
+    await open("/issues");
+    await press({ key: "C", shiftKey: true });
+    await typeTitle("フル入力");
+    await act(async () => button("Issueを作成")!.click());
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
     await vi.waitFor(() => expect(q(".composer")).toBeNull());
   });
 

@@ -18,7 +18,7 @@ import {
   type IssueSummary,
   type ProjectIssueDisplaySettings,
 } from "../shared/contracts";
-import type { CycleHistoryViewModel } from "../shared/view-models";
+import type { CycleHistoryViewModel, CycleProgressViewModel } from "../shared/view-models";
 
 export const workflowCategories = WORKFLOW_CATEGORY_VALUES;
 export const priorities = PRIORITY_VALUES;
@@ -333,6 +333,7 @@ export interface BootstrapPayload {
   projectDisplayPreferences: ProjectDisplayPreference[];
   cycles: Cycle[];
   cycleHistory: CycleHistoryViewModel[];
+  cycleProgress: CycleProgressViewModel[];
   views: SavedView[];
   notifications: Notification[];
   background: { run: PublicRunSummary | null; lastRun?: PublicRunSummary | null };

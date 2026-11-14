@@ -242,6 +242,21 @@ export interface PublicRunViewModel {
   finished_at: number | null;
   resume_count: number;
 }
+export interface CycleProgressDayViewModel {
+  date: string;
+  tracked: boolean;
+  scope: number | null;
+  completed: number | null;
+  canceled: number | null;
+  remaining: number | null;
+  added: number | null;
+  removed: number | null;
+}
+export interface CycleProgressViewModel {
+  cycleId: string;
+  trackedFrom: string;
+  days: CycleProgressDayViewModel[];
+}
 export interface BootstrapViewModel {
   me: UserViewModel;
   preferences: PreferencesViewModel;
@@ -254,6 +269,7 @@ export interface BootstrapViewModel {
   projectDisplayPreferences: ProjectDisplayPreferenceViewModel[];
   cycles: CycleViewModel[];
   cycleHistory: CycleHistoryViewModel[];
+  cycleProgress: CycleProgressViewModel[];
   views: SavedViewViewModel[];
   notifications: NotificationViewModel[];
   background: { run: PublicRunViewModel | null; lastRun?: PublicRunViewModel | null };

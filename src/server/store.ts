@@ -62,7 +62,13 @@ import {
 } from "../shared/contracts";
 import { calculateCycleMetrics, type CycleMetrics } from "../shared/cycle-workspace";
 import { matchesIssueDueDate } from "../shared/issue-dates";
-import type { CycleHistoryViewModel } from "../shared/view-models";
+import type { CycleHistoryViewModel, CycleProgressViewModel } from "../shared/view-models";
+import {
+  expandCycleProgress,
+  localDateKey,
+  observeCycleProgress,
+  type CycleProgressRecord,
+} from "./cycle-progress";
 import { cycleEndAt, localDateAtMidnight, nextCycleStartAt } from "./cycle-schedule";
 
 export type OrbitStoreLock = {
@@ -103,6 +109,7 @@ export interface OrbitStoreSnapshot {
     toCycleId: string;
     movedAt: number;
   }>;
+  cycleProgress: CycleProgressRecord[];
   seededUsers: string[];
 }
 
@@ -331,6 +338,7 @@ export class OrbitStore {
     toCycleId: string;
     movedAt: number;
   }> = [];
+  readonly cycleProgress: CycleProgressRecord[] = [];
   private seededUsers = new Set<string>();
   private backgroundStateDirty = false;
   private rejectedRunStateDirty = false;
@@ -361,6 +369,7 @@ export class OrbitStore {
       runs: [...this.runs.values()],
       locks: [...this.locks.values()],
       cycleHistory: this.cycleHistory,
+      cycleProgress: this.cycleProgress,
       seededUsers: [...this.seededUsers],
     });
   }
@@ -378,6 +387,7 @@ export class OrbitStore {
     if (!Array.isArray(normalized.recentSearches)) normalized.recentSearches = [];
     if (!Array.isArray(normalized.projectDisplayPreferences))
       normalized.projectDisplayPreferences = [];
+    if (!Array.isArray(normalized.cycleProgress)) normalized.cycleProgress = [];
     if (Array.isArray(normalized.preferences)) {
       normalized.preferences = normalized.preferences.map((preference) => {
         if (
@@ -447,6 +457,7 @@ export class OrbitStore {
       this.receipts.set(`${receipt.userId}:${receipt.idempotencyKey}`, receipt),
     );
     this.cycleHistory.splice(0, this.cycleHistory.length, ...source.cycleHistory);
+    this.cycleProgress.splice(0, this.cycleProgress.length, ...source.cycleProgress);
     this.seededUsers = new Set(source.seededUsers);
   }
 
@@ -476,6 +487,7 @@ export class OrbitStore {
       "runs",
       "locks",
       "cycleHistory",
+      "cycleProgress",
       "seededUsers",
     ];
     if (!arrays.every((key) => Array.isArray(candidate[key as keyof OrbitStoreSnapshot])))
@@ -639,6 +651,26 @@ export class OrbitStore {
         strings: ["id", "userId", "issueId", "fromCycleId", "toCycleId"],
         numbers: ["movedAt"],
       }) &&
+      hasTypes("cycleProgress", {
+        strings: ["userId", "cycleId", "trackedFrom"],
+        booleans: ["closed"],
+      }) &&
+      items("cycleProgress").every(
+        (entry) =>
+          isRecord(entry) &&
+          Array.isArray(entry.lastIssueIds) &&
+          entry.lastIssueIds.every((id) => typeof id === "string") &&
+          Array.isArray(entry.points) &&
+          entry.points.length > 0 &&
+          entry.points.every(
+            (point) =>
+              isRecord(point) &&
+              typeof point.date === "string" &&
+              ["scope", "completed", "canceled", "added", "removed"].every(
+                (field) => typeof point[field] === "number",
+              ),
+          ),
+      ) &&
       hasTypes("locks", { strings: ["userId", "status"] }) &&
       hasIdOwner &&
       items("seededUsers").every((entry) => typeof entry === "string");
@@ -673,6 +705,7 @@ export class OrbitStore {
       "outbox",
       "receipts",
       "cycleHistory",
+      "cycleProgress",
       "locks",
     ] as const;
     const scopedToOwner = ownerScoped.every((key) =>
@@ -1491,6 +1524,56 @@ export class OrbitStore {
       `issue.cycle.auto_assigned:${issue.id}:${issue.version}`,
       { issueId: issue.id, cycleId: cycle.id, version: issue.version },
     );
+  }
+
+  /** CYC-16: Mutation成功後に呼び、Active Cycleの「その日の終わりの値」を記録する。 */
+  recordCycleProgress(userId: string): void {
+    for (const cycle of this.listCycles(userId))
+      if (cycle.status === "active") this.observeCycleProgressFor(userId, cycle);
+  }
+
+  private observeCycleProgressFor(userId: string, cycle: Cycle, options: { close?: boolean } = {}) {
+    const issues = [...this.issues.values()].filter(
+      (issue) =>
+        issue.userId === userId &&
+        issue.cycleId === cycle.id &&
+        issue.archivedAt === null &&
+        issue.deletedAt === null,
+    );
+    const category = (issue: Issue) => this.workflowStates.get(issue.statusId)?.category;
+    const index = this.cycleProgress.findIndex(
+      (item) => item.userId === userId && item.cycleId === cycle.id,
+    );
+    const next = observeCycleProgress(
+      index === -1 ? undefined : this.cycleProgress[index],
+      {
+        userId,
+        cycleId: cycle.id,
+        date: localDateKey(this.clock(), this.ownerTimeZone(userId)),
+        issueIds: issues.map((issue) => issue.id),
+        completed: issues.filter((issue) => category(issue) === "completed").length,
+        canceled: issues.filter((issue) => category(issue) === "canceled").length,
+      },
+      options,
+    );
+    if (!next) return;
+    if (index === -1) this.cycleProgress.push(next);
+    else this.cycleProgress[index] = next;
+  }
+
+  private ownerTimeZone(userId: string): string {
+    return this.preferences.get(userId)?.timezone ?? "UTC";
+  }
+
+  listCycleProgress(userId: string): CycleProgressViewModel[] {
+    const now = this.clock();
+    const timeZone = this.ownerTimeZone(userId);
+    return this.cycleProgress.flatMap((record) => {
+      const cycle = this.cycles.get(record.cycleId);
+      if (record.userId !== userId || !cycle || cycle.userId !== userId) return [];
+      if (cycle.status === "upcoming") return [];
+      return [expandCycleProgress(record, cycle, now, timeZone)];
+    });
   }
 
   listCycleHistory(userId: string): CycleHistoryViewModel[] {
@@ -2908,6 +2991,7 @@ export class OrbitStore {
     const next =
       this.listCycles(userId).find((item) => item.number === cycle.number + 1) ??
       this.createNextCycle(userId, cycle);
+    this.observeCycleProgressFor(userId, cycle, { close: true });
     cycle.status = "completed";
     cycle.completedAt = this.clock();
     const moveable = this.matchingIssues(userId, {
@@ -3262,6 +3346,7 @@ export class OrbitStore {
       projects: this.listProjects(userId),
       cycles: this.listCycles(userId),
       cycleHistory: this.listCycleHistory(userId),
+      cycleProgress: this.listCycleProgress(userId),
       views: this.listViews(userId),
       projectDisplayPreferences: this.listProjectDisplayPreferences(userId),
       notifications: this.listNotifications(userId),

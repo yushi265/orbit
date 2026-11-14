@@ -137,6 +137,8 @@ export async function withOwner(
         await session.persist();
       throw error;
     }
+    // CYC-16: Mutation成功後にCycleの日別進捗を記録してから保存する（GETでは書かない）。
+    if (response.ok && isMutation) session.store.recordCycleProgress(resolvedOwner.userId);
     if (response.ok && (isMutation || session.needsInitialPersist)) await session.persist();
     return response;
   } catch (error) {

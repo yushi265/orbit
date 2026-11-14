@@ -26,6 +26,7 @@ import type {
   IssueNoteViewModel,
   IssueRelationTypeViewModel,
   CycleHistoryViewModel,
+  CycleProgressViewModel,
   LabelViewModel as Label,
   RecentIssueViewModel,
   RecentSearchViewModel,
@@ -47,6 +48,14 @@ import {
 import type { IssueQuery } from "../shared/contracts/issues";
 import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
+import {
+  BURNDOWN_HEIGHT,
+  BURNDOWN_WIDTH,
+  burndownChart,
+  burndownRows,
+  scopeChangeLabel,
+  shortDate,
+} from "./cycle-burndown";
 import {
   beforeIssueIdForDrop,
   beforeIssueIdForMove,
@@ -1155,6 +1164,7 @@ function OrbitAppInner(props: Props) {
             <CyclesView
               cycles={cycles}
               cycleHistory={data.cycleHistory}
+              cycleProgress={data.cycleProgress}
               issues={issues}
               projects={projects}
               timezone={data.preferences.timezone}
@@ -3241,6 +3251,157 @@ function CycleIssueCard({
   );
 }
 
+export function CycleBurndownSection({
+  progress,
+  cycleName,
+  endDate,
+}: {
+  progress: CycleProgressViewModel | undefined;
+  cycleName: string;
+  endDate: string;
+}) {
+  const heading = (
+    <div className="detail-section-heading">
+      <div>
+        <span className="eyebrow">BURNDOWN</span>
+        <h3>バーンダウン</h3>
+      </div>
+    </div>
+  );
+  if (!progress)
+    return (
+      <section className="detail-section cycle-burndown-section" aria-label="バーンダウン">
+        {heading}
+        <p className="detail-empty">このCycleの日別記録はまだありません。</p>
+      </section>
+    );
+  const chart = burndownChart(progress, endDate);
+  const trackedDays = progress.days.filter((day) => day.tracked);
+  const latest = trackedDays.at(-1);
+  const first = trackedDays[0];
+  const label = latest
+    ? `${cycleName}のバーンダウン。残り${latest.remaining}件、記録開始時${first.scope}件`
+    : `${cycleName}のバーンダウン。記録なし`;
+  const lastIndex = chart.totalDays - 1;
+  return (
+    <section className="detail-section cycle-burndown-section" aria-label="バーンダウン">
+      {heading}
+      <svg
+        className="burndown-chart"
+        viewBox={`0 0 ${BURNDOWN_WIDTH} ${BURNDOWN_HEIGHT}`}
+        role="img"
+        aria-label={label}
+      >
+        <line
+          className="burndown-axis"
+          x1={chart.x(0)}
+          y1={chart.y(0)}
+          x2={chart.x(lastIndex)}
+          y2={chart.y(0)}
+        />
+        <text
+          className="burndown-tick"
+          x={chart.x(0) - 6}
+          y={chart.y(chart.maxY) + 4}
+          textAnchor="end"
+        >
+          {chart.maxY}
+        </text>
+        <text className="burndown-tick" x={chart.x(0) - 6} y={chart.y(0) + 4} textAnchor="end">
+          0
+        </text>
+        <text className="burndown-tick" x={chart.x(0)} y={BURNDOWN_HEIGHT - 6} textAnchor="start">
+          {shortDate(progress.days[0].date)}
+        </text>
+        <text
+          className="burndown-tick"
+          x={chart.x(lastIndex)}
+          y={BURNDOWN_HEIGHT - 6}
+          textAnchor="end"
+        >
+          {shortDate(endDate)}
+        </text>
+        {chart.untrackedRanges.map((range) => (
+          <text
+            key={range.from}
+            className="burndown-untracked-label"
+            x={(chart.x(range.from) + chart.x(range.to)) / 2}
+            y={chart.y(chart.maxY / 2)}
+            textAnchor="middle"
+          >
+            記録なし
+          </text>
+        ))}
+        {chart.ideal && (
+          <line
+            className="burndown-ideal"
+            x1={chart.ideal.x1}
+            y1={chart.ideal.y1}
+            x2={chart.ideal.x2}
+            y2={chart.ideal.y2}
+          />
+        )}
+        {chart.remainingSegments.map((segment, index) => (
+          <polyline
+            key={index}
+            className="burndown-remaining"
+            points={segment.map((point) => `${point.x},${point.y}`).join(" ")}
+          />
+        ))}
+        {chart.remainingSegments.flat().map((point, index) => (
+          <circle key={index} className="burndown-dot" cx={point.x} cy={point.y} r={3} />
+        ))}
+        {chart.scopeMarks.map((mark) => (
+          <text
+            key={mark.date}
+            className="burndown-scope"
+            x={chart.x(mark.index)}
+            y={chart.y(0) - 6}
+            textAnchor="middle"
+          >
+            {scopeChangeLabel(mark.added, mark.removed)}
+          </text>
+        ))}
+      </svg>
+      <div className="burndown-legend">
+        <span className="burndown-legend-remaining">━ Remaining</span>
+        <span className="burndown-legend-ideal">┅ 理想線</span>
+        <span>+ / − Scope change</span>
+      </div>
+      {progress.days[0].date < progress.trackedFrom && (
+        <p className="burndown-note">
+          {shortDate(progress.trackedFrom)}より前は記録なし（この機能の導入前）
+        </p>
+      )}
+      <details className="burndown-details">
+        <summary>日別の数値</summary>
+        <div className="burndown-table-wrap">
+          <table className="burndown-table">
+            <thead>
+              <tr>
+                <th scope="col">日付</th>
+                <th scope="col">Completed</th>
+                <th scope="col">Remaining</th>
+                <th scope="col">Scope change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {burndownRows(progress.days).map((row) => (
+                <tr key={row.date}>
+                  <th scope="row">{row.date}</th>
+                  <td>{row.completed}</td>
+                  <td>{row.remaining}</td>
+                  <td>{row.scopeChange}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  );
+}
+
 export function CycleBreakdownSection({ breakdown }: { breakdown: CycleBreakdown }) {
   return (
     <section className="detail-section cycle-breakdown-section" aria-label="Cycleの内訳">
@@ -3296,6 +3457,7 @@ export function CyclesView({
   cycles,
   cycleId,
   cycleHistory = [],
+  cycleProgress = [],
   issues,
   projects = [],
   timezone,
@@ -3316,6 +3478,7 @@ export function CyclesView({
   cycles: Cycle[];
   cycleId?: string;
   cycleHistory?: CycleHistoryViewModel[];
+  cycleProgress?: CycleProgressViewModel[];
   issues: Issue[];
   projects?: Project[];
   timezone?: string;
@@ -3883,6 +4046,11 @@ export function CyclesView({
               <span>{metrics.canceled} canceled</span>
             </div>
           </div>
+          <CycleBurndownSection
+            progress={cycleProgress.find((item) => item.cycleId === selectedCycle.id)}
+            cycleName={selectedCycle.nameOverride ?? selectedCycle.name}
+            endDate={dateInputValueInTimeZone(selectedCycle.endsAt, timezone)}
+          />
           <CycleBreakdownSection breakdown={breakdown} />
           <section
             className="detail-section cycle-carryover-section"

@@ -145,6 +145,7 @@ function bootstrap(issues: Issue[] = [issue("1")]): BootstrapViewModel {
       },
     ],
     cycleHistory: [],
+    cycleProgress: [],
     views: [],
     notifications: [],
     background: { run: null },

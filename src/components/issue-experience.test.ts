@@ -219,10 +219,10 @@ describe("Issue experience UI contract", () => {
     expect(route?.options.validateSearch).toBeTypeOf("function");
   });
 
-  it("[代表値] Issues見出しの補足文を表示しない", () => {
+  it("[代表値] Issues画面は見出しと補足文を持たず、作成ボタンを出す（ページ名は上部バー）", () => {
     const markup = renderToStaticMarkup(createElement(IssuesView, issuesViewProps() as never));
 
-    expect(markup).toContain("<h1>Issues</h1>");
+    expect(markup).not.toContain("<h1");
     expect(markup).toContain("＋ 新しいIssue");
     expect(markup).not.toContain("すべての作業を、ここから見渡します。");
   });

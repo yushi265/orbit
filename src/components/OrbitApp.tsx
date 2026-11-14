@@ -1039,11 +1039,7 @@ function OrbitAppInner(props: Props) {
             <span className="brand-mark small">O</span>
             <span>Orbit</span>
           </div>
-          <div className="breadcrumbs">
-            <span className="eyebrow">WORKSPACE</span>
-            <span className="crumb-slash">/</span>
-            <strong>{sectionLabels[section]}</strong>
-          </div>
+          <h1 className="topbar-title">{sectionLabels[section]}</h1>
           <div className="topbar-actions">
             <button
               className="search-trigger"
@@ -1691,12 +1687,8 @@ export function HomeView({
   );
   return (
     <div className="page">
-      <div className="page-heading home-heading">
-        <div>
-          <span className="eyebrow home-date">{homeDateLabel(now, data.preferences.timezone)}</span>
-          <h1>Home</h1>
-          <p className="subheading">今日やることを確認して、次の一歩を始めましょう。</p>
-        </div>
+      <div className="page-actions home-heading">
+        <span className="eyebrow home-date">{homeDateLabel(now, data.preferences.timezone)}</span>
         <div className="home-heading-actions">
           <button className="button secondary" onClick={() => onNavigate("issues")}>
             Issuesを見る
@@ -2276,17 +2268,6 @@ export function IssuesView({
 
   return (
     <div className={`page ${showHeading ? "" : "issue-workspace-embedded"}`}>
-      {showHeading && (
-        <div className="page-heading compact-heading">
-          <div>
-            <span className="eyebrow">WORKSPACE / ISSUES</span>
-            <h1>Issues</h1>
-          </div>
-          <button className="button primary" onClick={onCreate}>
-            ＋ 新しいIssue <kbd>C</kbd>
-          </button>
-        </div>
-      )}
       <div className="toolbar">
         <div className="inline-search">
           <span>⌕</span>
@@ -2489,6 +2470,11 @@ export function IssuesView({
             ▦ Board
           </button>
         </div>
+        {showHeading && (
+          <button className="button primary toolbar-create" onClick={onCreate}>
+            ＋ 新しいIssue <kbd>C</kbd>
+          </button>
+        )}
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
@@ -3456,7 +3442,7 @@ export function CyclesView({
     return (
       <div className="page error-screen">
         <span className="eyebrow coral">CYCLE DETAIL</span>
-        <h1>Cycleが見つかりません</h1>
+        <h2>Cycleが見つかりません</h2>
         <button className="button secondary" onClick={onNavigateCycles}>
           Cyclesへ戻る
         </button>
@@ -3661,12 +3647,7 @@ export function CyclesView({
           </div>
         </div>
       )}
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">PLANNING / CYCLES</span>
-          <h1>Cycles</h1>
-          <p className="subheading">短い期間に、集中する仕事を選びます。</p>
-        </div>
+      <div className="page-actions">
         <div className="cycle-page-actions">
           {nextCycle && (
             <button
@@ -4449,7 +4430,7 @@ export function ProjectsView({
     return (
       <div className="page error-screen">
         <span className="eyebrow coral">PROJECT DETAIL</span>
-        <h1>Projectが見つかりません</h1>
+        <h2>Projectが見つかりません</h2>
         <button
           className="button secondary"
           onClick={() => void router.navigate({ to: "/projects" })}
@@ -4548,7 +4529,7 @@ export function ProjectsView({
                   disabled={saving}
                 />
               ) : (
-                <h1>{selectedProject.name}</h1>
+                <h2>{selectedProject.name}</h2>
               )}
             </div>
             <p className="subheading">
@@ -4748,12 +4729,7 @@ export function ProjectsView({
 
   return (
     <div className="page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">DELIVERY / PROJECTS</span>
-          <h1>Projects</h1>
-          <p className="subheading">成果物単位で、進捗とIssueを束ねます。</p>
-        </div>
+      <div className="page-actions">
         <button className="button primary" onClick={onCreate} disabled={saving}>
           ＋ 新しいProject
         </button>
@@ -4881,13 +4857,6 @@ export function SearchView({
 
   return (
     <div className="page search-page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">DISCOVER</span>
-          <h1>Search</h1>
-          <p className="subheading">Issue ID、タイトル、説明から探します。</p>
-        </div>
-      </div>
       <div className="search-hero">
         <span>⌕</span>
         <input
@@ -5197,12 +5166,7 @@ export function InboxView({
 
   return (
     <div className="page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">UPDATES</span>
-          <h1>Inbox</h1>
-          <p className="subheading">Orbitからのお知らせを確認して、次の行動につなげます。</p>
-        </div>
+      <div className="page-actions">
         <button
           className="button ghost"
           onClick={() => void markAll()}
@@ -5766,12 +5730,7 @@ export function ViewsView({
 
   return (
     <div className="page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">SAVED VIEWS</span>
-          <h1>Views</h1>
-          <p className="subheading">よく使う見え方を保存しておきます。</p>
-        </div>
+      <div className="page-actions">
         <button className="button secondary" onClick={startCreate} disabled={saving}>
           ＋ Viewを保存
         </button>
@@ -6205,13 +6164,6 @@ export function SettingsView({
 
   return (
     <div className="page settings-page">
-      <div className="page-heading compact-heading">
-        <div>
-          <span className="eyebrow">WORKSPACE</span>
-          <h1>Settings</h1>
-          <p className="subheading">Orbitを自分の作業スタイルに合わせます。</p>
-        </div>
-      </div>
       <div className="settings-grid">
         <section className="settings-card">
           <div className="settings-card-title">

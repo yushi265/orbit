@@ -196,7 +196,7 @@ function projectViewElement(overrides: Partial<ProjectViewProps> = {}) {
 }
 
 describe("Home / Project / Inbox workspace UI", () => {
-  it("[代表値] Homeは日付・控えめな見出しと今日の作業セクションを表示する", () => {
+  it("[代表値] Homeは日付と今日の作業セクションを表示し、見出しは上部バーに任せる", () => {
     const markup = renderToStaticMarkup(
       createElement(HomeView, {
         data: bootstrap([
@@ -209,7 +209,7 @@ describe("Home / Project / Inbox workspace UI", () => {
       }),
     );
 
-    expect(markup).toContain("<h1>Home</h1>");
+    expect(markup).not.toContain("<h1");
     expect(markup).toContain("home-date");
     expect(markup).not.toContain("おかえりなさい");
     expect(markup).toContain("期限超過");

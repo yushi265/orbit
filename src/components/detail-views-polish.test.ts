@@ -367,7 +367,7 @@ describe("AC-4 Views画面", () => {
     const list = doc().querySelector(".view-list") as HTMLElement;
     const inspector = doc().querySelector(".view-inspector") as HTMLElement;
     const results = doc().querySelector(".view-results") as HTMLElement;
-    const heading = doc().querySelector(".page-heading") as HTMLElement;
+    const heading = doc().querySelector(".page-actions") as HTMLElement;
     const follows = (a: Element, b: Element) =>
       Boolean(a.compareDocumentPosition(b) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
     expect(follows(heading, list)).toBe(true);

@@ -1,5 +1,7 @@
 # FEAT-inbox-notifications: ui契約
 
+> 2026-11-14: Inboxの通知UIは [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で削除し、Inboxは振り分け待ちIssueの一覧になった。以下は通知UI実装時の記録。
+
 ## 担保AC
 
 - **AC-2**: 個別通知のクリックで既読化し、Issue / Cycle / Projectの対象画面へ遷移できる。「すべて既読」で未読を一括既読化し、未読badgeが0になる。

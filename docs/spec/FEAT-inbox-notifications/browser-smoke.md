@@ -1,5 +1,7 @@
 # FEAT-inbox-notifications Browser Smoke
 
+> 2026-11-14: Inboxの通知UIは [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で削除し、Inboxは振り分け待ちIssueの一覧になった。以下は通知UI実装時の記録。
+
 ## 実行条件
 
 - 実行日: 2026-08-24

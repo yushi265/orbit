@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api-client";
 import { defaultProjectIssueDisplaySettings } from "../shared/contracts/project-display";
 import type { BootstrapViewModel, IssueViewModel as Issue } from "../shared/view-models";
-import { HomeView, InboxView, ProjectsView } from "./OrbitApp";
+import { HomeView, ProjectsView } from "./OrbitApp";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -281,182 +281,6 @@ describe("Home / Project / Inbox workspace UI", () => {
     expect(markup).toContain('id="issues-due-filter"');
     expect(markup).toContain("完了Issueを表示");
     expect(markup).not.toContain("project-detail-workspace");
-  });
-
-  it("[代表値] Inboxは役割・手順・未読範囲を説明し、通知の開き方を示す", () => {
-    const notification = {
-      id: "notification-1",
-      userId: "owner",
-      type: "due_soon",
-      title: "期限が近いIssue",
-      body: "対象を確認してください。",
-      entityType: "issue",
-      entityId: "issue-1",
-      readAt: null,
-      deletedAt: null,
-      createdAt: now,
-    } as const;
-    const markup = renderToStaticMarkup(
-      createElement(InboxView, {
-        notifications: [notification],
-        onOpenNotification: async () => undefined,
-        onMarkAllRead: async () => undefined,
-        onNavigateIssues: () => undefined,
-      }),
-    );
-
-    expect(markup).toContain("Inboxは通知を処理する場所です");
-    expect(markup).toContain("通知の内容を確認");
-    expect(markup).toContain("未読");
-    expect(markup).toContain("期限が近い");
-    expect(markup).toContain("開いて対象を確認");
-    expect(markup).not.toContain("•••");
-  });
-
-  it("[境界値] 通知がないInboxも用途説明とIssue導線を表示する", () => {
-    const markup = renderToStaticMarkup(
-      createElement(InboxView, {
-        notifications: [],
-        onOpenNotification: async () => undefined,
-        onMarkAllRead: async () => undefined,
-        onNavigateIssues: () => undefined,
-      }),
-    );
-
-    expect(markup).toContain("Inboxは通知を処理する場所です");
-    expect(markup).toContain("新しい通知はありません");
-    expect(markup).toContain("Issueを見る");
-  });
-
-  it("[回帰] Inboxは未実装の通知生成を約束しない", () => {
-    const markup = renderToStaticMarkup(
-      createElement(InboxView, {
-        notifications: [],
-        onOpenNotification: async () => undefined,
-        onMarkAllRead: async () => undefined,
-        onNavigateIssues: () => undefined,
-      }),
-    );
-    expect(markup).toContain("期限・Cycleの自動通知はまだ配信していません");
-    expect(markup).not.toContain("Orbitからのお知らせがここに届きます");
-  });
-
-  it("[状態遷移] 未読に戻す失敗後も通知を保持し、再試行できる", async () => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/inbox",
-    });
-    for (const key of ["window", "document", "navigator", "HTMLElement", "Node"] as const)
-      vi.stubGlobal(key, key === "window" ? dom.window : dom.window[key]);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const notification = {
-      id: "n1",
-      userId: "owner",
-      type: "due_soon" as const,
-      title: "期限",
-      body: "対象を確認",
-      entityType: "issue" as const,
-      entityId: "i1",
-      readAt: now,
-      deletedAt: null,
-      createdAt: now,
-    };
-    const onMarkUnread = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValue(undefined);
-    const onOpenNotification = vi.fn();
-    const root = createRoot(dom.window.document.getElementById("root")!);
-    await act(async () =>
-      root.render(
-        createElement(InboxView, {
-          notifications: [notification],
-          onMarkUnread,
-          onOpenNotification,
-          onMarkAllRead: async () => undefined,
-          onNavigateIssues: () => undefined,
-        }),
-      ),
-    );
-    await act(async () =>
-      (dom.window.document.querySelector(".notification-unread") as HTMLButtonElement).click(),
-    );
-    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
-      "未読に戻せません",
-    );
-    expect(dom.window.document.querySelectorAll(".notification-row")).toHaveLength(1);
-    await act(async () =>
-      (dom.window.document.querySelector('[role="alert"] button') as HTMLButtonElement).click(),
-    );
-    expect(onMarkUnread).toHaveBeenCalledTimes(2);
-    expect(onMarkUnread).toHaveBeenLastCalledWith(notification);
-    expect(onOpenNotification).not.toHaveBeenCalled();
-    expect(dom.window.document.querySelector('[role="alert"]')).toBeNull();
-    await act(async () => root.unmount());
-    dom.window.close();
-  });
-
-  it("[状態遷移] Inboxの未読切替・個別既読・すべて既読を呼び出せる", async () => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/inbox",
-    });
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("navigator", dom.window.navigator);
-    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
-    vi.stubGlobal("Node", dom.window.Node);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const onOpenNotification = vi.fn().mockResolvedValue(undefined);
-    const onMarkAllRead = vi.fn().mockResolvedValue(undefined);
-    const notification = {
-      id: "notification-1",
-      userId: "owner",
-      type: "due_soon" as const,
-      title: "期限が近いIssue",
-      body: "対象を確認してください。",
-      entityType: "issue" as const,
-      entityId: "issue-1",
-      readAt: null,
-      deletedAt: null,
-      createdAt: now,
-    };
-    const root = createRoot(dom.window.document.getElementById("root")!);
-
-    await act(async () => {
-      root.render(
-        createElement(InboxView, {
-          notifications: [notification],
-          onOpenNotification,
-          onMarkAllRead,
-          onNavigateIssues: () => undefined,
-        }),
-      );
-    });
-    const unreadTab = dom.window.document.querySelector(
-      'button.inbox-filter[aria-pressed="false"]',
-    ) as HTMLButtonElement;
-    await act(async () => {
-      unreadTab.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(dom.window.document.querySelectorAll(".notification-row")).toHaveLength(1);
-    await act(async () => {
-      (dom.window.document.querySelector(".notification-main") as HTMLButtonElement).click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(onOpenNotification).toHaveBeenCalledWith(notification);
-    await act(async () => {
-      (dom.window.document.querySelector(".inbox-filter") as HTMLButtonElement).click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    await act(async () => {
-      (dom.window.document.querySelector(".button.ghost") as HTMLButtonElement).click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(onMarkAllRead).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      root.unmount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
   });
 
   it("[状態遷移] Projectの完了表示切替をdebounce保存し、保存中は操作を無効化する", async () => {
@@ -819,14 +643,9 @@ describe("Home / Project / Inbox workspace UI", () => {
     const mobile = "(max-width: 767px)";
     expect(declarationsFor(rules, ".home-deadline-grid").get("display")).toBe("grid");
     expect(declarationsFor(rules, ".project-detail-page").get("max-width")).toBe("1180px");
-    expect(declarationsFor(rules, ".inbox-guide").get("max-width")).toBe("850px");
     expect(declarationsFor(rules, ".project-issues-workspace").get("padding")).toBe("22px");
     expect(declarationsFor(rules, ".home-deadline-grid", mobile).get("grid-template-columns")).toBe(
       "1fr",
-    );
-    expect(declarationsFor(rules, ".inbox-guide", mobile).get("padding")).toBe("18px");
-    expect(declarationsFor(rules, ".inbox-guide-steps", mobile).get("flex-direction")).toBe(
-      "column",
     );
     expect(declarationsFor(rules, ".project-issues-workspace", mobile).get("padding")).toBe(
       "18px 17px",

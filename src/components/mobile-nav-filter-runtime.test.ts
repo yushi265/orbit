@@ -16,25 +16,16 @@ type Section =
 let dom: JSDOM;
 let app: RenderedApp | undefined;
 let unexpected: string[];
-let unread = 0;
+let untriaged = 0;
 let mediaListeners: Array<(event: { matches: boolean }) => void>;
 const first = reviewIssue("issue-1", { title: "needle" });
 const second = reviewIssue("issue-2", { title: "other", priority: "low", labelIds: [] });
 function payload() {
-  const base = reviewBootstrap([first, second]);
-  const notifications = Array.from({ length: unread }, (_, index) => ({
-    id: `notification-${index}`,
-    userId: "owner",
-    type: "issue",
-    title: "unread",
-    body: "",
-    entityType: "issue",
-    entityId: "issue-1",
-    readAt: null,
-    deletedAt: null,
-    createdAt: 1,
-  }));
-  return { ...base, notifications };
+  // Inboxバッジは振り分け待ち（Projectなし・未完了）のIssue件数（FEAT-inbox-triage AC-4）
+  const inbox = Array.from({ length: untriaged }, (_, index) =>
+    reviewIssue(`inbox-${index}`, { title: `inbox ${index}`, projectId: null }),
+  );
+  return reviewBootstrap([first, second, ...inbox]);
 }
 function json(value: unknown) {
   return new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
@@ -71,7 +62,7 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
   vi.stubGlobal("Node", dom.window.Node);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  unread = 0;
+  untriaged = 0;
   unexpected = [];
   vi.stubGlobal(
     "fetch",
@@ -164,8 +155,8 @@ describe("mobile bottom navigation", () => {
   it.each([
     [0, null],
     [3, "3"],
-  ])("[同値分割/AC-1] Inboxバッジ: 未読%i件 -> %s", async (count, badge) => {
-    unread = count;
+  ])("[同値分割/AC-1] Inboxバッジ: 振り分け待ち%i件 -> %s", async (count, badge) => {
+    untriaged = count;
     await render();
     expect(q(".mobile-nav .nav-badge")?.textContent ?? null).toBe(badge);
   });

@@ -244,7 +244,6 @@ describe("mobile readability baseline (<=767px)", () => {
   it.each([
     [".issue-main strong"],
     [".issue-card strong"],
-    [".notification-copy strong"],
     [".search-result strong"],
     [".home-issue-main strong"],
     [".home-project-copy strong"],

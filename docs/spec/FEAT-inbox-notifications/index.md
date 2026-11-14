@@ -1,5 +1,7 @@
 # FEAT-inbox-notifications: Inbox / Notification
 
+> 2026-11-14: UI（AC-2・AC-3）は [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で置き換えた。サーバー側（AC-1）は残している。
+
 ## 概要
 
 Inboxで通知を一覧し、個別または全件を既読化できるようにする。通知の対象がIssue / Cycle / Projectの場合は対象画面へ遷移し、未読数をNavigationへ反映する。

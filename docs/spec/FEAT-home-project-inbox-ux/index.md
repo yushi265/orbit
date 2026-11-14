@@ -1,5 +1,7 @@
 # FEAT-home-project-inbox-ux: Home・Project詳細・Inbox UX
 
+> 2026-11-14: Inboxの部分は [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で振り分け待ちIssueの一覧へ置き換えた。以下のInboxに関する記述は当時の記録。
+
 ## 概要
 
 Homeを「今日やることが分かる」入口へ再構成し、Project詳細をIssue一覧相当の作業画面へ刷新する。

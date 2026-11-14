@@ -175,29 +175,6 @@ describe("AC-1 search params の正規化", () => {
 });
 
 describe("AC-5 型付きにした遷移の遷移先", () => {
-  const notification = (entityType: string, entityId: string) => ({
-    id: `n-${entityType}`,
-    userId: "owner",
-    type: "cycle_started",
-    title: `${entityType} notification`,
-    body: "",
-    entityType,
-    entityId,
-    readAt: 1,
-    deletedAt: null,
-    createdAt: 1,
-  });
-
-  it.each([
-    ["project", "project-1", "/projects/project-1"],
-    ["cycle", "cycle-1", "/cycles/cycle-1"],
-  ])("[同値分割] Inbox の %s 通知を開く → %s の詳細 URL へ遷移する", async (type, id, pathname) => {
-    payload.notifications = [notification(type, id)];
-    await open("/inbox");
-    await act(async () => (doc().querySelector(".notification-main") as HTMLButtonElement).click());
-    await vi.waitFor(() => expect(app!.router.state.location.pathname).toBe(pathname));
-  });
-
   it.each([
     ["/", "a.home-project-item"],
     ["/projects", "a.project-card"],

@@ -79,7 +79,7 @@ LinearのCycleは1〜8週間、曜日・タイムゾーン・クールダウン�
 | View | List / Board、Filter、Group、Order、保存View | Must |
 | 操作 | コマンドメニュー、主要ショートカット、一括操作 | Must |
 | 検索 | Issue ID・タイトル・説明の検索、属性絞り込み | Must |
-| Inbox | アプリ内通知、既読、削除、遷移 | Should |
+| Inbox | Project未設定の未完了Issueを集めて振り分ける（[FEAT-inbox-triage](../spec/FEAT-inbox-triage/index.md)）。アプリ内通知はInboxから外し保留 | Should |
 | UI | PC・スマホ・タブレット対応、ライト/ダーク | Must |
 | PWA | ホーム画面追加、Manifest・version付きJS / CSS / Icon等の公開静的AssetのCache | Should |
 | 監査 | 主要エンティティの変更履歴 | Must |

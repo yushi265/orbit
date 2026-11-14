@@ -1,5 +1,7 @@
 # FEAT-home-project-inbox-ux: ui 詳細設計
 
+> 2026-11-14: Inboxの部分は [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で振り分け待ちIssueの一覧へ置き換えた。以下のInboxに関する記述は当時の記録。
+
 > 2026-10-02の追加依頼で、Homeの表示名入り挨拶を除去し、主要カードの遷移条件を[FEAT-review-followup AC-1 / AC-8](../FEAT-review-followup/index.md)へ更新する。以下は初回実装時の記録。
 
 ## 担保 AC（[index.md](./index.md) の AC からの引用）

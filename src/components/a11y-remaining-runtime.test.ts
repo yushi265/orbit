@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CycleViewModel } from "../shared/view-models";
-import { CommandPalette, CyclesView, InboxView, SearchView } from "./OrbitApp";
+import { CommandPalette, CyclesView, SearchView } from "./OrbitApp";
 import { OrbitDatePicker } from "./orbit-date-picker";
 import { queryClient } from "../lib/query";
 import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
@@ -229,29 +229,6 @@ describe("AC-3 Cycle tabs", () => {
   });
 });
 
-describe("AC-4 Inbox トグル", () => {
-  it("[代表値] role=tab が無く、選択中のボタンだけ aria-pressed=true", async () => {
-    await act(async () =>
-      root.render(
-        createElement(InboxView, {
-          notifications: [],
-          onOpenNotification: async () => undefined,
-          onMarkAllRead: async () => undefined,
-          onNavigateIssues: () => undefined,
-        }),
-      ),
-    );
-    expect(all('[role="tab"]')).toHaveLength(0);
-    const buttons = all(".inbox-filter");
-    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
-    await act(async () => buttons[1].click());
-    expect(all(".inbox-filter").map((b) => b.getAttribute("aria-pressed"))).toEqual([
-      "false",
-      "true",
-    ]);
-  });
-});
-
 describe("AC-8 カレンダーの focusout", () => {
   async function renderPicker() {
     await act(async () =>
@@ -341,27 +318,6 @@ describe("AC-10 ボタン名・優先度", () => {
     );
     expect(bare.length).toBeGreaterThan(0);
     for (const b of bare) expect(b.getAttribute("aria-label")).toBe("閉じる");
-  });
-  it("[同値分割] 未読 0 件 → 「通知」、未読 3 件 → 「通知（未読3件）」", async () => {
-    await openApp("/");
-    expect(one(".topbar-actions .icon-button").getAttribute("aria-label")).toBe("通知");
-    const unread = (i: number) => ({
-      id: `n${i}`,
-      userId: "owner",
-      type: "due_soon" as const,
-      title: `t${i}`,
-      body: "",
-      entityType: "issue" as const,
-      entityId: "issue-1",
-      readAt: null,
-      deletedAt: null,
-      createdAt: 1,
-    });
-    await openApp("/", {
-      ...reviewBootstrap([issueA]),
-      notifications: [unread(1), unread(2), unread(3)],
-    });
-    expect(one(".topbar-actions .icon-button").getAttribute("aria-label")).toBe("通知（未読3件）");
   });
   it("[代表値] Cycle List の行に .priority-dot が無く PriorityIcon がある", async () => {
     await renderCycles();

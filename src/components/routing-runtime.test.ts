@@ -7,6 +7,7 @@ import { reviewBootstrap, reviewDetail, reviewIssue } from "./review-ui.test-fix
 
 // REFACTOR-ui-architecture AC-1: 既存 12 URL と各 validateSearch の正規化が、ルート構造の変更後も同じ結果になる。
 // 見出しの期待値は Phase 3a 着手時に現行アプリで描画した値（特性テスト）。
+// 見出し凝縮後は上部バーの h1（セクション名）を見る。本文側の見出しは page-title-condense-runtime.test.ts で検証する。
 
 let dom: JSDOM;
 let app: RenderedApp | undefined;
@@ -111,7 +112,7 @@ describe("AC-1 既存 URL のページ描画", () => {
     ["/issues", "Issues"],
     ["/issues/issue-1", "Issues"],
     ["/projects", "Projects"],
-    ["/projects/project-1", "Project 1"],
+    ["/projects/project-1", "Projects"],
     ["/settings", "Settings"],
     ["/settings/labels", "Settings"],
   ])("[同値分割] %s → 見出し「%s」", async (url, heading) => {
@@ -121,8 +122,8 @@ describe("AC-1 既存 URL のページ描画", () => {
   });
 
   it.each([
-    ["/projects/missing", "Projectが見つかりません"],
-    ["/cycles/missing", "Cycleが見つかりません"],
+    ["/projects/missing", "Projects"],
+    ["/cycles/missing", "Cycles"],
     ["/settings/unknown", "Settings"],
   ])("[同値分割] 存在しない %s → 見出し「%s」", async (url, heading) => {
     await open(url);

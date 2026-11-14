@@ -222,9 +222,7 @@ describe("Issue date inputs and current calendar", () => {
   });
   it("[Composer保存] date入力は従来のUTC midnight数値で作成する", async () => {
     await render();
-    const open = dom.window.document.querySelector(
-      ".page-heading .button.primary",
-    ) as HTMLButtonElement;
+    const open = dom.window.document.querySelector(".toolbar .button.primary") as HTMLButtonElement;
     await act(async () => open.click());
     const title = dom.window.document.querySelector(".composer textarea") as HTMLTextAreaElement;
     const due = dom.window.document.querySelector("#new-issue-due-date") as HTMLInputElement;

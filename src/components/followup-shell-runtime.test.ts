@@ -217,7 +217,7 @@ describe("followup shell state", () => {
   });
   it("[Home/brand] 挨拶をHomeと日付へ置き換えMVP spanを除去する", async () => {
     await render("home");
-    expect(dom.window.document.querySelector(".home-heading h1")?.textContent).toBe("Home");
+    expect(dom.window.document.querySelector(".topbar h1")?.textContent).toBe("Home");
     expect(dom.window.document.querySelector(".home-date")?.textContent).toContain("10月2日");
     expect(dom.window.document.querySelector(".brand-version")).toBeNull();
     expect(dom.window.document.body.textContent).not.toContain("おかえりなさい");

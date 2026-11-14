@@ -119,6 +119,7 @@ function data(issues: ReturnType<typeof issue>[]): BootstrapViewModel {
       },
     ],
     cycleHistory: [],
+    cycleProgress: [],
     views: [],
     notifications: [],
     projectDisplayPreferences: [],

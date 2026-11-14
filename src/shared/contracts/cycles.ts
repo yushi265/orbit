@@ -81,3 +81,38 @@ export const CycleMetadataMutationSchema = cycleMetadataMutationSchema;
 export const CycleStartMutationSchema = cycleStartMutationSchema;
 export const CycleSettingsMutationSchema = cycleSettingsMutationSchema;
 export const CycleScheduleMutationSchema = cycleScheduleMutationSchema;
+
+const progressCount = z.number().int().nonnegative();
+const cycleProgressDaySchema = z
+  .strictObject({
+    date: cycleDateSchema,
+    tracked: z.boolean(),
+    scope: progressCount.nullable(),
+    completed: progressCount.nullable(),
+    canceled: progressCount.nullable(),
+    remaining: progressCount.nullable(),
+    added: progressCount.nullable(),
+    removed: progressCount.nullable(),
+  })
+  .superRefine((day, context) => {
+    const values = [day.scope, day.completed, day.canceled, day.remaining, day.added, day.removed];
+    if (
+      day.tracked ? values.some((value) => value === null) : values.some((value) => value !== null)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["tracked"],
+        message: "tracked days need all counts and untracked days need none",
+      });
+    else if (day.tracked && day.remaining !== day.scope! - day.completed! - day.canceled!)
+      context.addIssue({
+        code: "custom",
+        path: ["remaining"],
+        message: "remaining must equal scope - completed - canceled",
+      });
+  });
+export const cycleProgressSchema = z.strictObject({
+  cycleId: z.string().min(1),
+  trackedFrom: cycleDateSchema,
+  days: z.array(cycleProgressDaySchema).min(1),
+});

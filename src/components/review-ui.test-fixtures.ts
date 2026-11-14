@@ -99,6 +99,7 @@ export function reviewBootstrap(issues = [reviewIssue()]): BootstrapViewModel {
     projectDisplayPreferences: [],
     cycles: [],
     cycleHistory: [],
+    cycleProgress: [],
     views: [],
     notifications: [],
     background: { run: null },

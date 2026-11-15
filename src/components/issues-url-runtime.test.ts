@@ -118,7 +118,10 @@ describe("review Issues URL navigation", () => {
     await settled();
     expect(value("#issues-filter-input")).toBe("needle");
     expect(value("#issues-priority-filter")).toBe("high");
-    expect(value("#issues-project-filter")).toBe("project-1");
+    expect(
+      dom.window.document.querySelector('[role="tab"][aria-selected="true"] .project-tab-name')
+        ?.textContent,
+    ).toBe("Project 1");
     expect(value("#issues-status-filter")).toBe("todo");
     expect(value('select[aria-label="Labelで絞り込む"]')).toBe("label-1");
     expect(value("#issues-sort-select")).toBe("manual");
@@ -258,7 +261,10 @@ describe("review Issues URL navigation", () => {
       label: "label-1",
       completed: false,
     });
-    expect(value("#issues-project-filter")).toBe("project-1");
+    expect(
+      dom.window.document.querySelector('[role="tab"][aria-selected="true"] .project-tab-name')
+        ?.textContent,
+    ).toBe("Project 1");
     expect(value("#issues-status-filter")).toBe("all");
   });
   it("[一括解除] Filter解除を1回replaceし、Mode/Orderを保持する", async () => {

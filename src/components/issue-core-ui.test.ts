@@ -204,8 +204,6 @@ describe("Phase 2 Issue core UI helpers", () => {
         setFilterText: () => undefined,
         priorityFilter: "all",
         setPriorityFilter: () => undefined,
-        projectFilter: "all",
-        setProjectFilter: () => undefined,
         labelFilter: "all",
         setLabelFilter: () => undefined,
         showCompleted: true,
@@ -237,9 +235,7 @@ describe("Phase 2 Issue core UI helpers", () => {
       }),
     );
     expect(markup).toContain('aria-label="Issueの表示範囲"');
-    expect(markup).toContain('aria-label="Projectで絞り込む"');
-    expect(markup).toContain("Projectなし");
-    expect(markup).toContain('value="project-1">Roadmap</option>');
+    expect(markup).not.toContain('aria-label="Projectで絞り込む"');
     expect(markup).toContain("復元");
     expect(markup).not.toContain('aria-label="TASK-2のEstimate"');
     expect(markup).toContain('class="view-toggle-group"');

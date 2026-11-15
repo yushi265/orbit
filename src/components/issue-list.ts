@@ -1,6 +1,5 @@
 import type { Priority } from "../shared/contracts";
 import type {
-  ProjectIssueDisplaySettings,
   ProjectIssueDueFilter,
   ProjectIssueDisplayOrder,
 } from "../shared/contracts/project-display";
@@ -130,34 +129,6 @@ export function filterIssues(
     return matchesText && matchesStatus && matchesPriority && matchesProject && matchesLabel;
   });
   return filterIssuesByDue(filtered, filters.dueFilter, now, timeZone);
-}
-
-export function filterProjectIssues(
-  issues: readonly Issue[],
-  projectId: string,
-  settings: ProjectIssueDisplaySettings,
-  workflowStates: readonly WorkflowState[],
-  now: number,
-  timeZone: string,
-): Issue[] {
-  const filtered = filterIssues(
-    issues.filter((issue) => !issue.archivedAt && !issue.deletedAt),
-    {
-      filterText: settings.filterText,
-      statusFilter: settings.statusFilter,
-      priorityFilter: settings.priorityFilter,
-      projectFilter: projectId,
-      labelFilter: settings.labelFilter,
-      dueFilter: settings.dueFilter,
-    },
-    now,
-    timeZone,
-  );
-  return sortIssues(
-    filterCompletedIssues(filtered, workflowStates, settings.showCompleted),
-    settings.order,
-    workflowStates,
-  );
 }
 
 function tieBreak(left: Issue, right: Issue): number {

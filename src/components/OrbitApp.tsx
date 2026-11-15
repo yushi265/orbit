@@ -30,14 +30,8 @@ import type {
   LabelViewModel as Label,
   RecentIssueViewModel,
   RecentSearchViewModel,
-  ProjectDisplayPreferenceViewModel,
 } from "../shared/view-models";
-import {
-  defaultProjectIssueDisplaySettings,
-  type ColorTheme,
-  type IssueListScope,
-  type ProjectIssueDisplaySettings,
-} from "../shared/contracts";
+import { type ColorTheme, type IssueListScope } from "../shared/contracts";
 import { calculateCycleMetrics, cycleTabForStatus, type CycleTab } from "../shared/cycle-workspace";
 import {
   selectSavedViewIssues,
@@ -62,7 +56,6 @@ import {
   countActiveIssueFilters,
   filterCompletedIssues,
   filterIssues,
-  filterProjectIssues,
   issueSortOptions,
   type IssueDueFilter,
   type IssueSort,
@@ -141,6 +134,14 @@ import { LinkifiedText } from "./LinkifiedText";
 import { OrbitDatePicker } from "./orbit-date-picker";
 import { OrbitIcon } from "./orbit-icon";
 import { selectInboxIssues } from "./inbox-triage";
+import {
+  ALL_PROJECTS_TAB,
+  LAST_ISSUES_PROJECT_STORAGE_KEY,
+  countOpenIssues,
+  issuesEntryProjectId,
+  selectProjectTabs,
+} from "./project-tabs";
+import { ProjectTabBar, ProjectTabHeader } from "./ProjectTabs";
 import { OrbitSelect } from "./orbit-select";
 import { linkifyText } from "./linkified-text";
 import {
@@ -353,7 +354,14 @@ function OrbitAppInner(props: Props) {
   const setStatusFilter = (status: string) => updateIssueSearch({ status });
   const setPriorityFilter = (priority: Issue["priority"] | "all") =>
     updateIssueSearch({ priority });
-  const setProjectFilter = (project: string) => updateIssueSearch({ project });
+  function selectProjectTab(projectId: string) {
+    updateIssueSearch({ project: projectId === ALL_PROJECTS_TAB ? undefined : projectId });
+    try {
+      browserStorage()?.setItem(LAST_ISSUES_PROJECT_STORAGE_KEY, projectId);
+    } catch {
+      // 前回のタブを覚えられなくても、タブの切り替えは続ける。
+    }
+  }
   const setLabelFilter = (label: string) => updateIssueSearch({ label });
   const setDueFilter = (due: IssueDueFilter) => updateIssueSearch({ due });
   const setShowCompleted = (completed: boolean) => updateIssueSearch({ completed });
@@ -447,10 +455,21 @@ function OrbitAppInner(props: Props) {
   const issueWorkspaceIssues =
     issueScope === "active" ? issues : (scopedIssuesQuery.data?.items ?? []);
   const projects = data?.projects ?? [];
-  const projectDisplayPreferences = data?.projectDisplayPreferences ?? [];
   const cycles = data?.cycles ?? [];
   const labels = data?.labels ?? [];
   const workflowStates = data?.workflowStates ?? [];
+  const projectTabs = useMemo(
+    () =>
+      selectProjectTabs({
+        projects,
+        projectStatuses: data?.projectStatuses ?? [],
+        issues,
+        workflowStates,
+        selectedProjectId: projectFilter === ALL_PROJECTS_TAB ? null : projectFilter,
+      }),
+    [projects, data?.projectStatuses, issues, workflowStates, projectFilter],
+  );
+  const selectedTabProject = projects.find((project) => project.id === projectFilter);
   const activeCycle = cycles.find((cycle) => cycle.status === "active");
   const newCycleId = newCycleChoice ?? activeCycle?.id ?? "";
   const inboxIssues = useMemo(
@@ -674,30 +693,6 @@ function OrbitAppInner(props: Props) {
     );
   }
 
-  async function saveProjectDisplayPreferences(
-    projectId: string,
-    displayPreferences: ProjectIssueDisplaySettings,
-    mutationKey = idempotencyKey(),
-  ): Promise<ProjectDisplayPreferenceViewModel> {
-    const result = await apiPatch<{
-      projectDisplayPreference: ProjectDisplayPreferenceViewModel;
-    }>(`/api/v1/projects/${projectId}`, {
-      idempotencyKey: mutationKey,
-      displayPreferences,
-    });
-    queryClient.setQueryData<BootstrapPayload>(queryKeys.bootstrap, (current) => {
-      if (!current) return current;
-      const next = current.projectDisplayPreferences.filter(
-        (preference) => preference.projectId !== projectId,
-      );
-      return {
-        ...current,
-        projectDisplayPreferences: [...next, result.projectDisplayPreference],
-      };
-    });
-    return result.projectDisplayPreference;
-  }
-
   async function saveCycleSettings(
     patch: CycleSettingsPatch,
     mutationKey = idempotencyKey(),
@@ -739,12 +734,16 @@ function OrbitAppInner(props: Props) {
   async function navigate(next: Section) {
     setSection(next);
     setSelected([]);
-    if (next === "issues")
+    if (next === "issues") {
+      const project = issuesEntryProjectId(
+        projectTabs,
+        browserStorage()?.getItem(LAST_ISSUES_PROJECT_STORAGE_KEY) ?? null,
+      );
       await router.navigate({
         to: "/issues",
-        search: { completed: completedFallback },
+        search: normalizeIssueSearch({ completed: completedFallback, project }),
       });
-    else await router.navigate({ to: NAV_PATHS[next] });
+    } else await router.navigate({ to: NAV_PATHS[next] });
   }
 
   function openIssueComposer(projectId = "", variant: "quick" | "full" = "full") {
@@ -753,11 +752,11 @@ function OrbitAppInner(props: Props) {
     setComposerOpen(true);
   }
 
-  // Project詳細を開いている間は、どの作成導線からでもそのProjectを初期値にする。
+  // Project詳細やIssuesのProjectタブを開いている間は、どの作成導線からでもそのProjectを初期値にする。
   function contextProjectId() {
-    return section === "projects" && projects.some((project) => project.id === props.projectId)
-      ? (props.projectId ?? "")
-      : "";
+    const contextId =
+      section === "projects" ? props.projectId : section === "issues" ? projectFilter : undefined;
+    return projects.some((project) => project.id === contextId) ? (contextId ?? "") : "";
   }
 
   function openNewIssueComposer() {
@@ -1040,6 +1039,24 @@ function OrbitAppInner(props: Props) {
           )}
           {section === "issues" && (
             <IssuesView
+              header={
+                <>
+                  <ProjectTabBar
+                    tabs={projectTabs}
+                    selectedId={projectFilter}
+                    totalOpenCount={countOpenIssues(issues, workflowStates)}
+                    onSelect={selectProjectTab}
+                  />
+                  {selectedTabProject && (
+                    <ProjectTabHeader
+                      project={selectedTabProject}
+                      projectStatuses={data.projectStatuses}
+                      issues={issues}
+                      workflowStates={workflowStates}
+                    />
+                  )}
+                </>
+              }
               issues={visibleIssues}
               scope={issueScope}
               scopeLoading={scopedIssuesQuery.isLoading}
@@ -1052,7 +1069,6 @@ function OrbitAppInner(props: Props) {
                   q: undefined,
                   status: undefined,
                   priority: undefined,
-                  project: undefined,
                   label: undefined,
                   due: undefined,
                   completed: true,
@@ -1064,8 +1080,6 @@ function OrbitAppInner(props: Props) {
               setPriorityFilter={setPriorityFilter}
               statusFilter={statusFilter}
               setStatusFilter={setStatusFilter}
-              projectFilter={projectFilter}
-              setProjectFilter={setProjectFilter}
               labelFilter={labelFilter}
               setLabelFilter={setLabelFilter}
               dueFilter={dueFilter}
@@ -1151,34 +1165,9 @@ function OrbitAppInner(props: Props) {
               projectReorderBusy={projectReorderBusy}
               workflowStates={workflowStates}
               projectStatuses={data.projectStatuses}
-              timezone={data.preferences.timezone}
-              cycles={cycles}
-              labels={labels}
-              projectDisplayPreferences={projectDisplayPreferences}
-              selected={selected}
-              setSelected={setSelected}
-              pendingIssueId={pendingIssueId}
-              reorderBusy={reorderIssueMutation.isPending}
-              onUpdateIssue={(issue, patch) => updateIssue.mutate({ issue, patch })}
-              onReorderIssue={(issue, beforeIssueId, projectId) =>
-                reorderIssueMutation.mutate({
-                  issue,
-                  beforeIssueId,
-                  projectId,
-                  idempotencyKey: idempotencyKey(),
-                })
-              }
-              onBulk={bulkUpdateIssues}
-              bulkBusy={bulkBusy}
-              resetBulkMutation={() => {
-                bulkMutationKey.reset();
-              }}
               onCreateIssue={openIssueComposer}
-              onSaveDisplayPreferences={saveProjectDisplayPreferences}
-              modifierLabel={modifierLabel}
               onCreate={() => setProjectComposerOpen(true)}
               onRefresh={refresh}
-              onOpenIssue={(issue) => openIssue(issue.id)}
             />
           )}
           {section === "search" && (
@@ -1996,8 +1985,6 @@ export function IssuesView({
   setPriorityFilter,
   statusFilter = "all",
   setStatusFilter = () => undefined,
-  projectFilter,
-  setProjectFilter,
   labelFilter,
   setLabelFilter,
   dueFilter = "all",
@@ -2028,10 +2015,7 @@ export function IssuesView({
   resetBulkMutation,
   onCreate,
   onOpenIssue,
-  showProjectFilter = true,
-  showScopeFilter = true,
-  showHeading = true,
-  displaySettingsBusy = false,
+  header,
 }: {
   issues: Issue[];
   scope: IssueListScope;
@@ -2046,8 +2030,6 @@ export function IssuesView({
   setPriorityFilter: (value: Issue["priority"] | "all") => void;
   statusFilter?: string;
   setStatusFilter?: (value: string) => void;
-  projectFilter: string;
-  setProjectFilter: (value: string) => void;
   labelFilter: string;
   setLabelFilter: (value: string) => void;
   dueFilter?: IssueDueFilter;
@@ -2078,10 +2060,7 @@ export function IssuesView({
   resetBulkMutation: () => void;
   onCreate: () => void;
   onOpenIssue: (issue: Issue, trigger?: HTMLButtonElement) => void;
-  showProjectFilter?: boolean;
-  showScopeFilter?: boolean;
-  showHeading?: boolean;
-  displaySettingsBusy?: boolean;
+  header?: ReactNode;
 }) {
   const [bulkField, setBulkField] = useState<"status" | "priority" | "cycle" | "project" | "label">(
     "status",
@@ -2135,10 +2114,10 @@ export function IssuesView({
   const activeFilterCount = countActiveIssueFilters({
     status: statusFilter,
     priority: priorityFilter,
-    project: showProjectFilter ? projectFilter : "all",
+    project: "all",
     label: labelFilter,
     due: dueFilter,
-    scope: showScopeFilter ? scope : "active",
+    scope,
   });
   const [draggedIssueId, setDraggedIssueId] = useState<string | null>(null);
   const [dropTargetIssueId, setDropTargetIssueId] = useState<string | null>(null);
@@ -2184,7 +2163,6 @@ export function IssuesView({
     Boolean(filterText.trim()) ||
     statusFilter !== "all" ||
     priorityFilter !== "all" ||
-    (showProjectFilter && projectFilter !== "all") ||
     labelFilter !== "all" ||
     dueFilter !== "all" ||
     !showCompleted;
@@ -2196,7 +2174,6 @@ export function IssuesView({
     setFilterText("");
     setStatusFilter("all");
     setPriorityFilter("all");
-    if (showProjectFilter) setProjectFilter("all");
     setLabelFilter("all");
     setDueFilter("all");
     setShowCompleted(true);
@@ -2226,7 +2203,8 @@ export function IssuesView({
   }
 
   return (
-    <div className={`page ${showHeading ? "" : "issue-workspace-embedded"}`}>
+    <div className="page">
+      {header}
       <div className="toolbar">
         <div className="inline-search">
           <span>⌕</span>
@@ -2237,7 +2215,6 @@ export function IssuesView({
             value={filterText}
             onChange={(event) => setFilterText(event.target.value)}
             placeholder="Issueを検索…"
-            disabled={displaySettingsBusy}
           />
           <kbd>{modifierLabel} F</kbd>
         </div>
@@ -2275,7 +2252,6 @@ export function IssuesView({
                 id="issues-status-filter"
                 aria-label="Statusで絞り込む"
                 value={statusFilter}
-                disabled={displaySettingsBusy}
                 onChange={(event) => setStatusFilter(event.target.value)}
               >
                 <option value="all">すべてのStatus</option>
@@ -2293,7 +2269,6 @@ export function IssuesView({
                 id="issues-priority-filter"
                 aria-label="Priorityで絞り込む"
                 value={priorityFilter}
-                disabled={displaySettingsBusy}
                 onChange={(event) =>
                   setPriorityFilter(event.target.value as Issue["priority"] | "all")
                 }
@@ -2302,50 +2277,26 @@ export function IssuesView({
                 <PriorityOptions />
               </select>
             </label>
-            {showProjectFilter && (
-              <label className="filter-field">
-                <span className="filter-field-label">Project</span>
-                <select
-                  className="filter-select"
-                  id="issues-project-filter"
-                  aria-label="Projectで絞り込む"
-                  value={projectFilter}
-                  disabled={displaySettingsBusy}
-                  onChange={(event) => setProjectFilter(event.target.value)}
-                >
-                  <option value="all">すべてのProject</option>
-                  <option value={NO_PROJECT_OPTION}>Projectなし</option>
-                  {projects.map((project) => (
-                    <option value={project.id} key={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {showScopeFilter && (
-              <label className="filter-field">
-                <span className="filter-field-label">表示範囲</span>
-                <select
-                  className="filter-select"
-                  id="issues-scope-filter"
-                  aria-label="Issueの表示範囲"
-                  value={scope}
-                  disabled={scopeLoading || displaySettingsBusy}
-                  onChange={(event) => setScope(event.target.value as IssueListScope)}
-                >
-                  <option value="active">Active Issues</option>
-                  <option value="archived">Archived Issues</option>
-                </select>
-              </label>
-            )}
+            <label className="filter-field">
+              <span className="filter-field-label">表示範囲</span>
+              <select
+                className="filter-select"
+                id="issues-scope-filter"
+                aria-label="Issueの表示範囲"
+                value={scope}
+                disabled={scopeLoading}
+                onChange={(event) => setScope(event.target.value as IssueListScope)}
+              >
+                <option value="active">Active Issues</option>
+                <option value="archived">Archived Issues</option>
+              </select>
+            </label>
             <label className="filter-field">
               <span className="filter-field-label">Label</span>
               <select
                 className="filter-select"
                 aria-label="Labelで絞り込む"
                 value={labelFilter}
-                disabled={displaySettingsBusy}
                 onChange={(event) => setLabelFilter(event.target.value)}
               >
                 <option value="all">すべてのLabel</option>
@@ -2364,7 +2315,6 @@ export function IssuesView({
                 id="issues-sort-select"
                 aria-label="Issueのソート"
                 value={issueSort}
-                disabled={displaySettingsBusy}
                 onChange={(event) => setIssueSort(event.target.value as IssueSort)}
               >
                 {issueSortOptions.map((option) => (
@@ -2381,7 +2331,6 @@ export function IssuesView({
                 id="issues-due-filter"
                 aria-label="Due dateで絞り込む"
                 value={dueFilter}
-                disabled={displaySettingsBusy}
                 onChange={(event) => setDueFilter(event.target.value as IssueDueFilter)}
               >
                 <option value="all">すべての期限</option>
@@ -2396,7 +2345,6 @@ export function IssuesView({
               <input
                 type="checkbox"
                 checked={showCompleted}
-                disabled={displaySettingsBusy}
                 onChange={(event) => setShowCompleted(event.target.checked)}
               />
               完了Issueを表示
@@ -2416,24 +2364,20 @@ export function IssuesView({
         <div className="view-toggle-group">
           <button
             className={`view-toggle ${viewMode === "list" ? "selected" : ""}`}
-            disabled={displaySettingsBusy}
             onClick={() => setViewMode("list")}
           >
             ☷ List
           </button>
           <button
             className={`view-toggle ${viewMode === "board" ? "selected" : ""}`}
-            disabled={displaySettingsBusy}
             onClick={() => setViewMode("board")}
           >
             ▦ Board
           </button>
         </div>
-        {showHeading && (
-          <button className="button primary toolbar-create" onClick={onCreate}>
-            ＋ 新しいIssue <kbd>C</kbd>
-          </button>
-        )}
+        <button className="button primary toolbar-create" onClick={onCreate}>
+          ＋ 新しいIssue <kbd>C</kbd>
+        </button>
       </div>
       {scopeLoading && <p className="detail-empty">表示範囲を読み込んでいます…</p>}
       {manualOrder && viewMode === "list" && (
@@ -4296,25 +4240,9 @@ export function ProjectsView({
   projectReorderBusy,
   workflowStates,
   projectStatuses,
-  timezone,
-  cycles,
-  labels,
-  projectDisplayPreferences,
-  selected,
-  setSelected,
-  pendingIssueId,
-  reorderBusy,
-  onUpdateIssue,
-  onReorderIssue,
-  onBulk,
-  bulkBusy,
-  resetBulkMutation,
   onCreateIssue,
-  onSaveDisplayPreferences,
-  modifierLabel,
   onCreate,
   onRefresh,
-  onOpenIssue,
 }: {
   projects: Project[];
   issues: Issue[];
@@ -4323,29 +4251,9 @@ export function ProjectsView({
   projectReorderBusy: boolean;
   workflowStates: WorkflowState[];
   projectStatuses: BootstrapPayload["projectStatuses"];
-  timezone: string;
-  cycles: Cycle[];
-  labels: Label[];
-  projectDisplayPreferences: BootstrapPayload["projectDisplayPreferences"];
-  selected: string[];
-  setSelected: (value: string[]) => void;
-  pendingIssueId: string | null;
-  reorderBusy: boolean;
-  onUpdateIssue: (issue: Issue, patch: Partial<Issue>) => void;
-  onReorderIssue: (issue: Issue, beforeIssueId: string | null, projectId: string) => void;
-  onBulk: (patch: Record<string, unknown>) => Promise<void>;
-  bulkBusy: boolean;
-  resetBulkMutation: () => void;
   onCreateIssue: (projectId: string) => void;
-  onSaveDisplayPreferences: (
-    projectId: string,
-    settings: ProjectIssueDisplaySettings,
-    mutationKey?: string,
-  ) => Promise<ProjectDisplayPreferenceViewModel>;
-  modifierLabel: "⌘" | "Ctrl";
   onCreate: () => void;
   onRefresh: () => void;
-  onOpenIssue: (issue: Issue) => void;
 }) {
   const router = useRouter();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projectId ?? null);
@@ -4390,17 +4298,6 @@ export function ProjectsView({
       if (!ok) setOrderFocus((current) => (current ? { ...current, failed: true } : current));
     });
   }
-  const [displaySettings, setDisplaySettings] = useState<ProjectIssueDisplaySettings>(() =>
-    defaultProjectIssueDisplaySettings(),
-  );
-  const [displaySettingsReady, setDisplaySettingsReady] = useState(false);
-  const [displaySaving, setDisplaySaving] = useState(false);
-  const [displayError, setDisplayError] = useState<string | null>(null);
-  const displaySaveTimerRef = useRef<number | undefined>(undefined);
-  const displayMutationKey = useMutationKey();
-  const persistedDisplaySettingsRef = useRef<string | null>(null);
-  const projectIssueFilterInputRef = useRef<HTMLInputElement>(null);
-  const projectIssueDisplayInputRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
     if (projectId) setSelectedProjectId(projectId);
@@ -4416,19 +4313,6 @@ export function ProjectsView({
       )
     : [];
   const projectMetrics = calculateCycleMetrics(projectIssues, workflowStates);
-  const savedDisplayPreferences = selectedProject
-    ? projectDisplayPreferences.find((item) => item.projectId === selectedProject.id)
-    : undefined;
-  const projectVisibleIssues = selectedProject
-    ? filterProjectIssues(
-        projectIssues,
-        selectedProject.id,
-        displaySettings,
-        workflowStates,
-        Date.now(),
-        timezone,
-      )
-    : [];
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -4449,99 +4333,6 @@ export function ProjectsView({
     selectedProject?.statusId,
     selectedProject?.targetAt,
   ]);
-
-  useEffect(() => {
-    if (!selectedProject) {
-      setDisplaySettingsReady(false);
-      return;
-    }
-    const next = savedDisplayPreferences?.settings ?? defaultProjectIssueDisplaySettings();
-    setDisplaySettings(next);
-    persistedDisplaySettingsRef.current = JSON.stringify(next);
-    displayMutationKey.reset();
-    setDisplaySettingsReady(true);
-    setDisplayError(null);
-  }, [selectedProject?.id, savedDisplayPreferences?.updatedAt]);
-
-  useEffect(
-    () => () => {
-      if (displaySaveTimerRef.current !== undefined)
-        window.clearTimeout(displaySaveTimerRef.current);
-    },
-    [],
-  );
-
-  const displaySettingsKey = JSON.stringify(displaySettings);
-
-  useEffect(() => {
-    if (!displaySettingsReady || !selectedProject) return;
-    if (displaySettingsKey === persistedDisplaySettingsRef.current) return;
-    if (displaySaveTimerRef.current !== undefined) window.clearTimeout(displaySaveTimerRef.current);
-    displaySaveTimerRef.current = window.setTimeout(() => {
-      displaySaveTimerRef.current = undefined;
-      void persistDisplaySettings(displaySettings);
-    }, 250);
-  }, [displaySettingsKey, displaySettingsReady, selectedProject?.id]);
-
-  function updateDisplaySettings(patch: Partial<ProjectIssueDisplaySettings>) {
-    setDisplaySettings((current) => ({ ...current, ...patch }));
-    setDisplayError(null);
-  }
-
-  async function persistDisplaySettings(settings: ProjectIssueDisplaySettings): Promise<void> {
-    if (!selectedProject || displaySaving) return;
-    setDisplaySaving(true);
-    setDisplayError(null);
-    const mutationKey = displayMutationKey.keyFor("project-display");
-    try {
-      await onSaveDisplayPreferences(selectedProject.id, settings, mutationKey);
-      if (JSON.stringify(settings) === displaySettingsKey)
-        persistedDisplaySettingsRef.current = JSON.stringify(settings);
-      displayMutationKey.reset();
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 409) {
-        displayMutationKey.reset();
-        await onRefresh();
-        setDisplayError("別の表示設定が保存されています。最新の表示設定を読み込みました。");
-        return;
-      }
-      if (caught instanceof ApiError && caught.status !== 423) displayMutationKey.reset();
-      setDisplayError(
-        caught instanceof ApiError && caught.fieldErrors
-          ? Object.values(caught.fieldErrors).flat().join(" ")
-          : caught instanceof ApiError
-            ? caught.message
-            : "表示設定の保存に失敗しました。",
-      );
-    } finally {
-      setDisplaySaving(false);
-    }
-  }
-
-  function retryDisplaySettings() {
-    void persistDisplaySettings(displaySettings);
-  }
-
-  useEffect(() => {
-    const visibleIds = new Set(projectVisibleIssues.map((issue) => issue.id));
-    const next = selected.filter((issueId) => visibleIds.has(issueId));
-    if (next.length !== selected.length) setSelected(next);
-  }, [projectVisibleIssues, selected, setSelected]);
-
-  useEffect(() => {
-    const patch: Partial<ProjectIssueDisplaySettings> = {};
-    if (
-      displaySettings.statusFilter !== "all" &&
-      !workflowStates.some((state) => state.id === displaySettings.statusFilter)
-    )
-      patch.statusFilter = "all";
-    if (
-      displaySettings.labelFilter !== "all" &&
-      !labels.some((label) => label.id === displaySettings.labelFilter)
-    )
-      patch.labelFilter = "all";
-    if (Object.keys(patch).length > 0) updateDisplaySettings(patch);
-  }, [displaySettings.labelFilter, displaySettings.statusFilter, labels, workflowStates]);
 
   if (projectId && !selectedProject) {
     return (
@@ -4665,14 +4456,14 @@ export function ProjectsView({
             <button
               className="button secondary"
               onClick={() => onCreateIssue(selectedProject.id)}
-              disabled={saving || displaySaving}
+              disabled={saving}
             >
               ＋ Issueを追加
             </button>
             <button
               className="button ghost"
               onClick={() => (editing ? cancelEdit() : setEditing(true))}
-              disabled={saving || displaySaving}
+              disabled={saving}
             >
               {editing ? "取消" : "Projectを編集"}
             </button>
@@ -4766,80 +4557,13 @@ export function ProjectsView({
             <span>Progress</span>
           </div>
         </div>
-        <section className="detail-card project-issues-workspace" aria-label="ProjectのIssue">
-          <div className="section-heading project-issues-heading">
-            <div>
-              <span className="eyebrow">PROJECT ISSUES</span>
-              <h2>このProjectのIssue</h2>
-            </div>
-            <span className="project-display-status" aria-live="polite">
-              {displaySaving ? "表示設定を保存中…" : "表示設定は自動保存"}
-            </span>
-          </div>
-          {displayError && (
-            <div className="detail-live-error" role="alert">
-              {displayError}
-              <button
-                className="text-button"
-                onClick={retryDisplaySettings}
-                disabled={displaySaving}
-              >
-                再試行
-              </button>
-            </div>
-          )}
-          <IssuesView
-            issues={projectVisibleIssues}
-            scope="active"
-            scopeLoading={false}
-            setScope={() => undefined}
-            workflowStates={workflowStates}
-            filterText={displaySettings.filterText}
-            setFilterText={(value) => updateDisplaySettings({ filterText: value })}
-            statusFilter={displaySettings.statusFilter}
-            setStatusFilter={(value) => updateDisplaySettings({ statusFilter: value })}
-            priorityFilter={displaySettings.priorityFilter}
-            setPriorityFilter={(value) => updateDisplaySettings({ priorityFilter: value })}
-            projectFilter={selectedProject.id}
-            setProjectFilter={() => undefined}
-            labelFilter={displaySettings.labelFilter}
-            setLabelFilter={(value) => updateDisplaySettings({ labelFilter: value })}
-            dueFilter={displaySettings.dueFilter}
-            setDueFilter={(value) => updateDisplaySettings({ dueFilter: value })}
-            showCompleted={displaySettings.showCompleted}
-            setShowCompleted={(value) => updateDisplaySettings({ showCompleted: value })}
-            issueSort={displaySettings.order}
-            setIssueSort={(value) => updateDisplaySettings({ order: value })}
-            projects={projects}
-            allIssues={projectIssues}
-            cycles={cycles}
-            labels={labels}
-            viewMode={displaySettings.mode}
-            setViewMode={(value) => updateDisplaySettings({ mode: value })}
-            selected={selected}
-            setSelected={setSelected}
-            pendingIssueId={pendingIssueId}
-            reorderBusy={reorderBusy}
-            onUpdate={onUpdateIssue}
-            onRestore={() => undefined}
-            onFocusIssue={() => undefined}
-            filterInputRef={projectIssueFilterInputRef}
-            displayInputRef={projectIssueDisplayInputRef}
-            modifierLabel={modifierLabel}
-            onReorder={(issue, beforeIssueId) =>
-              onReorderIssue(issue, beforeIssueId, selectedProject.id)
-            }
-            onBulk={onBulk}
-            bulkBusy={bulkBusy}
-            resetBulkMutation={resetBulkMutation}
-            onCreate={() => onCreateIssue(selectedProject.id)}
-            onOpenIssue={onOpenIssue}
-            showProjectFilter={false}
-            showScopeFilter={false}
-            showHeading={false}
-            displaySettingsBusy={displaySaving}
-          />
-        </section>
+        <Link
+          className="button secondary project-open-issues"
+          to="/issues"
+          search={{ project: selectedProject.id }}
+        >
+          Issuesで開く（未完了{countOpenIssues(projectIssues, workflowStates)}件）→
+        </Link>
       </div>
     );
   }

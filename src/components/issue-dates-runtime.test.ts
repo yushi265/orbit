@@ -119,8 +119,6 @@ function readonlyList(issue: IssueViewModel) {
     setFilterText: () => undefined,
     priorityFilter: "all",
     setPriorityFilter: () => undefined,
-    projectFilter: "all",
-    setProjectFilter: () => undefined,
     labelFilter: "all",
     setLabelFilter: () => undefined,
     showCompleted: true,
@@ -149,7 +147,6 @@ function readonlyList(issue: IssueViewModel) {
     resetBulkMutation: () => undefined,
     onCreate: () => undefined,
     onOpenIssue: () => undefined,
-    showScopeFilter: false,
   });
 }
 

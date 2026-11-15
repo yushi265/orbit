@@ -1,5 +1,7 @@
 # FIX-mobile-nav-filter-sheet: モバイルの下部タブ5つ化とIssueフィルターのBottom sheet
 
+> 2026-11-16: Issue一覧のProjectフィルター欄は、Issues画面上部のProjectタブに置き換えて削除した。Project詳細の一覧も無くなったため、ツールバーはIssues画面だけで使う。以下のProject欄に関する記述は当時の記録。
+
 ## 概要
 
 モバイル（〜767px）で、下部タブが7つあるのにIssuesとViewsへ行けず、Issue一覧のフィルターがラベルの読めない小さな選択欄の列になっている（2026-10-03 画面監査）。要件定義（[03-ux-and-nfr.md](../../requirements/03-ux-and-nfr.md) 7.2、[05-acceptance-and-delivery.md](../../requirements/05-acceptance-and-delivery.md) の画面一覧）に合わせ、下部タブを5つ＋Menuシートにし、フィルターをBottom sheetへまとめる。

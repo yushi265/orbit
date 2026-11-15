@@ -313,12 +313,20 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 .project-detail-title-line h2 { min-width: 0; flex: 1; margin-top: 0; color: #1d2838; font-size: clamp(22px, 2vw, 28px); line-height: 1.2; overflow-wrap: anywhere; }
 .project-detail-title-line .project-icon { width: 38px; height: 38px; flex: 0 0 38px; }
 .project-detail-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }.project-detail-actions .button { flex-shrink: 0; white-space: nowrap; }
-.project-issues-workspace { margin-top: 28px; padding: 22px; }
-.project-issues-heading { margin-bottom: 18px; }
-.project-display-status { color: var(--orbit-muted); font-size: 10px; }
-.issue-workspace-embedded { margin: 0 -22px; padding-bottom: 22px; }
-.issue-workspace-embedded .toolbar { padding: 0 22px; }
-.issue-workspace-embedded .manual-order-hint, .issue-workspace-embedded .bulk-bar, .issue-workspace-embedded .board-grid, .issue-workspace-embedded .issue-table { margin-left: 22px; margin-right: 22px; }
+.project-open-issues { margin-top: 24px; }
+.project-tabs { display: flex; gap: 18px; margin: -8px 0 16px; overflow-x: auto; border-bottom: 1px solid var(--orbit-border, #e7ebef); scrollbar-width: none; }
+.project-tabs::-webkit-scrollbar { display: none; }
+.project-tab { min-height: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; padding: 0 2px 10px; border: 0; border-bottom: 2px solid transparent; color: var(--orbit-muted); background: transparent; font-size: 13px; white-space: nowrap; }
+.project-tab[aria-selected="true"] { border-color: var(--orbit-accent); color: var(--orbit-text, #1d2838); font-weight: 700; }
+.project-tab-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 3px; }
+.project-tab-count { min-width: 20px; padding: 2px 6px; border-radius: 999px; color: var(--orbit-muted); background: var(--orbit-surface-raised, #f0f2f5); font-size: 12px; font-weight: 400; text-align: center; }
+.project-tab-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--orbit-border, #e7ebef); border-radius: 10px; background: var(--orbit-surface, #fff); }
+.project-tab-header-name { color: var(--orbit-text, #1d2838); font-size: 15px; }
+.project-tab-header-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--orbit-muted); font-size: 12px; }
+.project-tab-progress { width: 96px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--orbit-surface-raised, #f0f2f5); }
+.project-tab-progress > span { display: block; height: 100%; border-radius: 3px; background: #2fa36b; }
+.project-tab-detail-link { margin-left: auto; color: var(--orbit-accent-solid); font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+:root[data-theme="dark"] .project-tab-detail-link { color: var(--orbit-accent); }
 .inbox-triage-count { margin: 0 0 10px; color: var(--orbit-muted); font-size: 12px; }
 @media (max-width: 767px) {
   .home-heading-actions { width: 100%; }
@@ -330,10 +338,9 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
   .project-detail-heading .project-detail-actions { width: 100%; align-items: stretch; flex-direction: column; }
   .project-detail-actions .button { width: 100%; }
   .project-detail-title-line h2 { font-size: 24px; }
-  .project-issues-workspace { margin-right: -17px; margin-left: -17px; padding: 18px 17px; border-right: 0; border-left: 0; border-radius: 0; }
-  .issue-workspace-embedded { margin-right: -17px; margin-left: -17px; }
-  .issue-workspace-embedded .toolbar { padding: 0 17px; }
-  .issue-workspace-embedded .manual-order-hint, .issue-workspace-embedded .bulk-bar, .issue-workspace-embedded .board-grid, .issue-workspace-embedded .issue-table { margin-left: 17px; margin-right: 17px; }
+  .project-tabs { gap: 14px; margin: -14px -17px 14px; padding: 0 17px; }
+  .project-tab-detail-link { margin-left: 0; }
+  .project-open-issues { width: 100%; }
 }
 :root[data-theme="dark"] .home-issue-section, :root[data-theme="dark"] .home-project-item { border-color: var(--orbit-border); color: var(--orbit-text); background: var(--orbit-surface); }
 :root[data-theme="dark"] .home-issue-row, :root[data-theme="dark"] .home-issue-list { border-color: var(--orbit-border); }
@@ -359,13 +366,7 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
   .due-cell::before { flex: 0 0 auto; }
   .search-filters select { max-width: calc(50% - 4px); width: calc(50% - 4px); }
   .toolbar .filter-select { min-height: 40px; }
-  .project-issues-workspace { margin-bottom: 20px; }
-  .issue-workspace-embedded { padding-bottom: 18px; }
 }
-
-/* Leave breathing room after the last project Issue, including desktop. */
-.project-issues-workspace { margin-bottom: 28px; }
-.issue-workspace-embedded { padding-bottom: 24px; }
 
 .orbit-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; min-height: 44px; max-width: 100%; padding: 10px 12px; border: 1px solid var(--orbit-border, #e3e8ee); border-radius: 8px; color: var(--orbit-text, #344156); background: var(--orbit-surface, #fff); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .orbit-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -461,7 +462,7 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
   .issue-main strong, .issue-card strong, .search-result strong, .home-issue-main strong, .home-project-copy strong, .mini-issue strong, .timeline-row strong, .saved-view-row strong, .saved-view-select strong, .relation-target strong, .trash-row strong, .cycle-history-route strong, .description-preview, .note-body { font-size: 14px; }
 
   /* Supplementary text >= 12px */
-  .nav-label, .eyebrow, .nav-badge, .text-button, .cycle-stats span, .metric-foot, .table-header, .table-header .reorder-cell, .issue-id, .issue-description, .priority-badge, .project-cell, .due-cell, .issue-row .due-cell::before, .bulk-bar, .bulk-bar button, .completed-toggle, .column-heading, .count-pill, .card-meta, .cycle-tab-count, .cycle-metrics span, .progress-caption, .timeline-row span:not(.timeline-dot):not(.status-pill), .status-pill, .cycle-blocking-card span:last-child, .project-card p, .project-progress > span, .search-result, .search-result span, .saved-view-row div span, .saved-view-select small, .settings-card-title p, .setting-row strong, .setting-row div span, .setting-value, .setting-checkbox, .run-status-box strong, .run-status-box span, .setting-note, .empty-state p, .composer-description, .composer-hint, .field-label, .command-footer, .command-empty, .toast, .toast span, .run-overlay-card p, .run-safe-note, .detail-date, .detail-label, .detail-count, .note-footer, .detail-empty, .relation-type, .activity-item strong, .activity-item span, .detail-error, .detail-live-error, .project-detail-properties, .label-chip, .view-inspector p, .view-inspector-meta, .manual-order-hint, .setting-field-error, .child-progress-summary, .trash-row span, .cycle-carryover-origin, .cycle-history-route span, .cycle-breakdown-card h4, .cycle-breakdown-row, .home-issue-status, .home-issue-due, .home-issue-empty, .home-more-hint, .home-empty-card, .home-project-copy span, .project-display-status, .detail-label-editor legend, .detail-property-status, .detail-label-hint, .detail-label-empty, .orbit-calendar-weekday, .filter-count, .issue-child-progress, .issue-parent-hint { font-size: 12px; }
+  .nav-label, .eyebrow, .nav-badge, .text-button, .cycle-stats span, .metric-foot, .table-header, .table-header .reorder-cell, .issue-id, .issue-description, .priority-badge, .project-cell, .due-cell, .issue-row .due-cell::before, .bulk-bar, .bulk-bar button, .completed-toggle, .column-heading, .count-pill, .card-meta, .cycle-tab-count, .cycle-metrics span, .progress-caption, .timeline-row span:not(.timeline-dot):not(.status-pill), .status-pill, .cycle-blocking-card span:last-child, .project-card p, .project-progress > span, .search-result, .search-result span, .saved-view-row div span, .saved-view-select small, .settings-card-title p, .setting-row strong, .setting-row div span, .setting-value, .setting-checkbox, .run-status-box strong, .run-status-box span, .setting-note, .empty-state p, .composer-description, .composer-hint, .field-label, .command-footer, .command-empty, .toast, .toast span, .run-overlay-card p, .run-safe-note, .detail-date, .detail-label, .detail-count, .note-footer, .detail-empty, .relation-type, .activity-item strong, .activity-item span, .detail-error, .detail-live-error, .project-detail-properties, .label-chip, .view-inspector p, .view-inspector-meta, .manual-order-hint, .setting-field-error, .child-progress-summary, .trash-row span, .cycle-carryover-origin, .cycle-history-route span, .cycle-breakdown-card h4, .cycle-breakdown-row, .home-issue-status, .home-issue-due, .home-issue-empty, .home-more-hint, .home-empty-card, .home-project-copy span, .detail-label-editor legend, .detail-property-status, .detail-label-hint, .detail-label-empty, .orbit-calendar-weekday, .filter-count, .issue-child-progress, .issue-parent-hint { font-size: 12px; }
 }
 
 .inline-search:focus-within, .search-hero:focus-within, .command-input:focus-within { outline: 2px solid var(--orbit-focus); outline-offset: 2px; }

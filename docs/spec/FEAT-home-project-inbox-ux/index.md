@@ -1,6 +1,8 @@
 # FEAT-home-project-inbox-ux: Home・Project詳細・Inbox UX
 
 > 2026-11-14: Inboxの部分は [FEAT-inbox-triage](../FEAT-inbox-triage/index.md) で振り分け待ちIssueの一覧へ置き換えた。以下のInboxに関する記述は当時の記録。
+>
+> 2026-11-16: Project詳細のIssue workspace（AC-2の後半・AC-3）は画面から外し、Issues画面のProjectタブへ移した。Project詳細には「Issuesで開く（未完了N件）」リンクだけを置く。Project表示設定の保存API・Snapshot（AC-3・AC-4）はサーバー側に残しているが、画面からは使っていない。
 
 ## 概要
 

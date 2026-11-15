@@ -1,5 +1,3 @@
-export { filterProjectIssues } from "./issue-list";
-
 /** 表示中の並びで 1 つ動かすときの `beforeProjectId`。動けない（端・対象なし）は null。 */
 export function beforeProjectIdForMove(
   ordered: ReadonlyArray<{ id: string }>,

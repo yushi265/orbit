@@ -3,8 +3,6 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../lib/api-client";
-import { defaultProjectIssueDisplaySettings } from "../shared/contracts/project-display";
 import type { BootstrapViewModel, IssueViewModel as Issue } from "../shared/view-models";
 import { HomeView, ProjectsView } from "./OrbitApp";
 import { declarationsFor, parseStyleRules } from "./css-rules.test-fixtures";
@@ -161,33 +159,11 @@ function projectViewProps(overrides: Partial<ProjectViewProps> = {}): ProjectVie
     projectId: project.id,
     workflowStates: states,
     projectStatuses: bootstrap().projectStatuses,
-    timezone: "Asia/Tokyo",
-    cycles: bootstrap().cycles,
-    labels: bootstrap().labels,
-    projectDisplayPreferences: [],
-    selected: [],
-    setSelected: () => undefined,
-    pendingIssueId: null,
-    reorderBusy: false,
     onReorderProject: async () => true,
     projectReorderBusy: false,
-    onUpdateIssue: () => undefined,
-    onReorderIssue: () => undefined,
-    onBulk: async () => undefined,
-    bulkBusy: false,
-    resetBulkMutation: () => undefined,
     onCreateIssue: () => undefined,
-    onSaveDisplayPreferences: async (projectId, nextSettings) => ({
-      id: "preference-1",
-      userId: "owner",
-      projectId,
-      settings: nextSettings,
-      updatedAt: now,
-    }),
-    modifierLabel: "Ctrl",
     onCreate: () => undefined,
     onRefresh: () => undefined,
-    onOpenIssue: () => undefined,
     ...overrides,
   };
 }
@@ -238,404 +214,12 @@ describe("Home / Project / Inbox workspace UI", () => {
     expect(markup).toContain("Projectはまだありません");
   });
 
-  it("[代表値] Project詳細は専用workspaceとしてIssue一覧操作を表示する", () => {
-    const markup = renderToStaticMarkup(
-      createElement(ProjectsView, {
-        projects: [project],
-        issues: [issue("1")],
-        projectId: project.id,
-        workflowStates: states,
-        projectStatuses: bootstrap().projectStatuses,
-        timezone: "Asia/Tokyo",
-        cycles: bootstrap().cycles,
-        labels: bootstrap().labels,
-        projectDisplayPreferences: [],
-        selected: [],
-        setSelected: () => undefined,
-        pendingIssueId: null,
-        reorderBusy: false,
-        onReorderProject: async () => true,
-        projectReorderBusy: false,
-        onUpdateIssue: () => undefined,
-        onReorderIssue: () => undefined,
-        onBulk: async () => undefined,
-        bulkBusy: false,
-        resetBulkMutation: () => undefined,
-        onCreateIssue: () => undefined,
-        onSaveDisplayPreferences: async () => ({
-          id: "preference-1",
-          userId: "owner",
-          projectId: project.id,
-          settings: defaultProjectIssueDisplaySettings(),
-          updatedAt: now,
-        }),
-        modifierLabel: "Ctrl",
-        onCreate: () => undefined,
-        onRefresh: () => undefined,
-        onOpenIssue: () => undefined,
-      }),
-    );
+  it("[代表値] Project詳細はIssue一覧を持たず、Issuesで開くリンクで未完了件数を示す", () => {
+    const markup = renderToStaticMarkup(projectViewElement());
 
-    expect(markup).toContain("PROJECT ISSUES");
-    expect(markup).toContain('id="issues-status-filter"');
-    expect(markup).toContain('id="issues-due-filter"');
-    expect(markup).toContain("完了Issueを表示");
-    expect(markup).not.toContain("project-detail-workspace");
-  });
-
-  it("[状態遷移] Projectの完了表示切替をdebounce保存し、保存中は操作を無効化する", async () => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/projects/project-1",
-    });
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("navigator", dom.window.navigator);
-    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
-    vi.stubGlobal("Node", dom.window.Node);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    let resolveSave!: () => void;
-    const save = new Promise<void>((resolve) => {
-      resolveSave = resolve;
-    });
-    const onSaveDisplayPreferences = vi
-      .fn()
-      .mockImplementation(
-        async (
-          projectId: string,
-          settings: ReturnType<typeof defaultProjectIssueDisplaySettings>,
-        ) => {
-          await save;
-          return { id: "preference-1", userId: "owner", projectId, settings, updatedAt: now };
-        },
-      );
-    const root = createRoot(dom.window.document.getElementById("root")!);
-
-    await act(async () => {
-      root.render(
-        createElement(ProjectsView, {
-          projects: [project],
-          issues: [issue("1")],
-          projectId: project.id,
-          workflowStates: states,
-          projectStatuses: bootstrap().projectStatuses,
-          timezone: "Asia/Tokyo",
-          cycles: bootstrap().cycles,
-          labels: bootstrap().labels,
-          projectDisplayPreferences: [],
-          selected: [],
-          setSelected: () => undefined,
-          pendingIssueId: null,
-          reorderBusy: false,
-          onReorderProject: async () => true,
-          projectReorderBusy: false,
-          onUpdateIssue: () => undefined,
-          onReorderIssue: () => undefined,
-          onBulk: async () => undefined,
-          bulkBusy: false,
-          resetBulkMutation: () => undefined,
-          onCreateIssue: () => undefined,
-          onSaveDisplayPreferences,
-          modifierLabel: "Ctrl",
-          onCreate: () => undefined,
-          onRefresh: () => undefined,
-          onOpenIssue: () => undefined,
-        }),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const completedToggle = dom.window.document.querySelector(
-      '.completed-toggle input[type="checkbox"]',
-    ) as HTMLInputElement;
-    expect(completedToggle).not.toBeNull();
-    await act(async () => {
-      completedToggle.click();
-      await new Promise((resolve) => setTimeout(resolve, 320));
-    });
-
-    expect(onSaveDisplayPreferences).toHaveBeenCalledWith(
-      project.id,
-      expect.objectContaining({ showCompleted: false }),
-      expect.any(String),
-    );
-    expect(
-      (
-        dom.window.document.querySelector(
-          'select[aria-label="Statusで絞り込む"]',
-        ) as HTMLSelectElement
-      ).disabled,
-    ).toBe(true);
-    await act(async () => {
-      resolveSave();
-      await save;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    await act(async () => {
-      root.unmount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  });
-
-  it("[異常系] Project表示設定の409は最新再取得とRetryを表示する", async () => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/projects/project-1",
-    });
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("navigator", dom.window.navigator);
-    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
-    vi.stubGlobal("Node", dom.window.Node);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const onRefresh = vi.fn().mockResolvedValue(undefined);
-    const onSaveDisplayPreferences = vi
-      .fn()
-      .mockRejectedValue(
-        new ApiError(409, "IDEMPOTENCY_KEY_REUSED", "別の表示設定が保存されています。"),
-      );
-    const root = createRoot(dom.window.document.getElementById("root")!);
-
-    await act(async () => {
-      root.render(
-        createElement(ProjectsView, {
-          projects: [project],
-          issues: [issue("1")],
-          projectId: project.id,
-          workflowStates: states,
-          projectStatuses: bootstrap().projectStatuses,
-          timezone: "Asia/Tokyo",
-          cycles: bootstrap().cycles,
-          labels: bootstrap().labels,
-          projectDisplayPreferences: [],
-          selected: [],
-          setSelected: () => undefined,
-          pendingIssueId: null,
-          reorderBusy: false,
-          onReorderProject: async () => true,
-          projectReorderBusy: false,
-          onUpdateIssue: () => undefined,
-          onReorderIssue: () => undefined,
-          onBulk: async () => undefined,
-          bulkBusy: false,
-          resetBulkMutation: () => undefined,
-          onCreateIssue: () => undefined,
-          onSaveDisplayPreferences,
-          modifierLabel: "Ctrl",
-          onCreate: () => undefined,
-          onRefresh,
-          onOpenIssue: () => undefined,
-        }),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    const completedToggle = dom.window.document.querySelector(
-      '.completed-toggle input[type="checkbox"]',
-    ) as HTMLInputElement;
-    await act(async () => {
-      completedToggle.click();
-      await new Promise((resolve) => setTimeout(resolve, 320));
-    });
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(completedToggle.checked).toBe(false);
-    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
-      "最新の表示設定を読み込みました",
-    );
-    const retry = [...dom.window.document.querySelectorAll("button")].find(
-      (button) => button.textContent === "再試行",
-    ) as HTMLButtonElement;
-    await act(async () => {
-      retry.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(2);
-    expect(onSaveDisplayPreferences.mock.calls[1][1]).toEqual(
-      expect.objectContaining({ showCompleted: false }),
-    );
-    await act(async () => {
-      root.unmount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  });
-
-  it("[代表値] Project workspaceのStatus・Bulk・Project scope reorderを既存操作へ接続する", async () => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/projects/project-1",
-    });
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("navigator", dom.window.navigator);
-    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
-    vi.stubGlobal("Node", dom.window.Node);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const first = issue("1");
-    const second = issue("2", { position: 1 });
-    const onUpdateIssue = vi.fn();
-    const onBulk = vi.fn().mockResolvedValue(undefined);
-    const onReorderIssue = vi.fn();
-    const settings = { ...defaultProjectIssueDisplaySettings(), order: "manual" as const };
-    const otherProject = { ...project, id: "project-2", name: "Other Project" };
-    const root = createRoot(dom.window.document.getElementById("root")!);
-
-    await act(async () => {
-      root.render(
-        createElement(ProjectsView, {
-          projects: [project, otherProject],
-          issues: [first, second, issue("foreign", { projectId: "project-2" })],
-          projectId: project.id,
-          workflowStates: states,
-          projectStatuses: bootstrap().projectStatuses,
-          timezone: "Asia/Tokyo",
-          cycles: bootstrap().cycles,
-          labels: bootstrap().labels,
-          projectDisplayPreferences: [
-            {
-              id: "preference-1",
-              userId: "owner",
-              projectId: project.id,
-              settings,
-              updatedAt: now,
-            },
-          ],
-          selected: [first.id],
-          setSelected: () => undefined,
-          pendingIssueId: null,
-          reorderBusy: false,
-          onReorderProject: async () => true,
-          projectReorderBusy: false,
-          onUpdateIssue,
-          onReorderIssue,
-          onBulk,
-          bulkBusy: false,
-          resetBulkMutation: () => undefined,
-          onCreateIssue: () => undefined,
-          onSaveDisplayPreferences: async () => ({
-            id: "preference-1",
-            userId: "owner",
-            projectId: project.id,
-            settings,
-            updatedAt: now,
-          }),
-          modifierLabel: "Ctrl",
-          onCreate: () => undefined,
-          onRefresh: () => undefined,
-          onOpenIssue: () => undefined,
-        }),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const status = dom.window.document.querySelector(
-      'select[aria-label="TASK-1のStatus"]',
-    ) as HTMLSelectElement;
-    await act(async () => {
-      status.value = "done";
-      status.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    });
-    expect(onUpdateIssue).toHaveBeenCalledWith(first, { statusId: "done" });
-    await act(async () => {
-      const priority = dom.window.document.querySelector(
-        'select[aria-label="TASK-1のPriority"]',
-      ) as HTMLSelectElement;
-      priority.value = "urgent";
-      priority.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-      const projectSelect = dom.window.document.querySelector(
-        'select[aria-label="TASK-1のProject"]',
-      ) as HTMLSelectElement;
-      projectSelect.value = otherProject.id;
-      projectSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    });
-    expect(onUpdateIssue).toHaveBeenCalledWith(first, { priority: "urgent" });
-    expect(onUpdateIssue).toHaveBeenCalledWith(first, { projectId: otherProject.id });
-    expect(
-      dom.window.document.querySelector('input[aria-label="TASK-1のDue date"]'),
-    ).not.toBeNull();
-    expect(dom.window.document.body.textContent).not.toContain("foreign");
-
-    const bulkValue = dom.window.document.querySelector(
-      'select[aria-label="一括更新値"]',
-    ) as HTMLSelectElement;
-    await act(async () => {
-      bulkValue.value = "done";
-      bulkValue.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-      (dom.window.document.querySelector(".bulk-bar .button") as HTMLButtonElement).click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(onBulk).toHaveBeenCalledWith({ statusId: "done" });
-
-    await act(async () => {
-      (
-        dom.window.document.querySelector(
-          'button.drag-handle[aria-label="TASK-1の並び替え"]',
-        ) as HTMLButtonElement
-      ).dispatchEvent(
-        new dom.window.KeyboardEvent("keydown", {
-          key: "ArrowDown",
-          altKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    });
-    expect(onReorderIssue).toHaveBeenCalledWith(first, null, project.id);
-    await act(async () => {
-      root.unmount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  });
-
-  it.each([
-    [400, "入力内容を確認してください。"],
-    [423, "処理中のため保存できません。"],
-    [500, "表示設定サービスに接続できません。"],
-  ])("[異常系] Project表示設定の%j失敗はdraftを保持し自動再試行しない", async (status, message) => {
-    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
-      url: "https://orbit.example/projects/project-1",
-    });
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("navigator", dom.window.navigator);
-    vi.stubGlobal("HTMLElement", dom.window.HTMLElement);
-    vi.stubGlobal("Node", dom.window.Node);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const onSaveDisplayPreferences = vi
-      .fn()
-      .mockRejectedValue(
-        new ApiError(status, status === 423 ? "OPERATION_IN_PROGRESS" : "INTERNAL_ERROR", message),
-      );
-    const root = createRoot(dom.window.document.getElementById("root")!);
-
-    await act(async () => {
-      root.render(projectViewElement({ onSaveDisplayPreferences }));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    const completedToggle = dom.window.document.querySelector(
-      '.completed-toggle input[type="checkbox"]',
-    ) as HTMLInputElement;
-    await act(async () => {
-      completedToggle.click();
-      await new Promise((resolve) => setTimeout(resolve, 320));
-    });
-
-    expect(completedToggle.checked).toBe(false);
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(1);
-    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(message);
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 320));
-    });
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(1);
-    const retry = [...dom.window.document.querySelectorAll("button")].find(
-      (button) => button.textContent === "再試行",
-    ) as HTMLButtonElement;
-    expect(retry).not.toBeUndefined();
-    await act(async () => {
-      retry.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(2);
-    await act(async () => {
-      root.unmount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    expect(markup).not.toContain("PROJECT ISSUES");
+    expect(markup).not.toContain('id="issues-status-filter"');
+    expect(markup).toContain("Issuesで開く（未完了1件）");
   });
 
   it("[アクセシビリティ/レスポンシブ] 新しいworkspaceの主要CSSと390px向け縮退を持つ", () => {
@@ -643,13 +227,13 @@ describe("Home / Project / Inbox workspace UI", () => {
     const mobile = "(max-width: 767px)";
     expect(declarationsFor(rules, ".home-deadline-grid").get("display")).toBe("grid");
     expect(declarationsFor(rules, ".project-detail-page").get("max-width")).toBe("1180px");
-    expect(declarationsFor(rules, ".project-issues-workspace").get("padding")).toBe("22px");
+    expect(declarationsFor(rules, ".project-tabs").get("overflow-x")).toBe("auto");
     expect(declarationsFor(rules, ".home-deadline-grid", mobile).get("grid-template-columns")).toBe(
       "1fr",
     );
-    expect(declarationsFor(rules, ".project-issues-workspace", mobile).get("padding")).toBe(
-      "18px 17px",
-    );
+    expect(declarationsFor(rules, ".project-open-issues", mobile).get("width")).toBe("100%");
+    expect(declarationsFor(rules, ".project-tab-header").get("flex-wrap")).toBe("wrap");
+    expect(declarationsFor(rules, ".project-tabs", mobile).get("margin")).toBe("-14px -17px 14px");
   });
 });
 
@@ -676,49 +260,6 @@ describe("Project 冪等キーの保持", () => {
       await settle();
     });
   };
-
-  it("[状態遷移] Project表示設定が423で失敗した後の再試行は同じ冪等キーで送り、成功後の変更は新しいキーにする", async () => {
-    const { dom, root } = mount();
-    const onSaveDisplayPreferences = vi
-      .fn()
-      .mockRejectedValueOnce(new ApiError(423, "OPERATION_IN_PROGRESS", "ロック中です。"))
-      .mockImplementation(async (projectId: string, settings: unknown) => ({
-        id: "preference-1",
-        userId: "owner",
-        projectId,
-        settings,
-        updatedAt: now,
-      }));
-    await act(async () => {
-      root.render(projectViewElement({ onSaveDisplayPreferences }));
-      await settle();
-    });
-    const toggle = async () => {
-      await act(async () => {
-        (
-          dom.window.document.querySelector(
-            '.completed-toggle input[type="checkbox"]',
-          ) as HTMLInputElement
-        ).click();
-        await settle(320);
-      });
-    };
-    await toggle();
-    await clickText(dom, "再試行");
-
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(2);
-    const [first, second] = onSaveDisplayPreferences.mock.calls.map(([, , key]) => key);
-    expect(first).toEqual(expect.any(String));
-    expect(second).toBe(first);
-
-    await toggle();
-    expect(onSaveDisplayPreferences).toHaveBeenCalledTimes(3);
-    expect(onSaveDisplayPreferences.mock.calls[2][2]).not.toBe(first);
-    await act(async () => {
-      root.unmount();
-      await settle();
-    });
-  });
 
   it("[状態遷移] Project編集保存が423で失敗した後の再試行は同じ冪等キーで送り、成功後の保存は新しいキーにする", async () => {
     const { dom, root } = mount();

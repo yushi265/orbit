@@ -281,7 +281,7 @@ describe("aria-current and selected Menu tab", () => {
 
 describe("mobile filter sheet", () => {
   const closedLabels = () => qa(".filter-field-label").map((item) => item.textContent);
-  it("[状態遷移/AC-5/AC-6] 閉: roleなし・完了ボタンなし → 開: dialog・見えるラベル7種・完了ボタン", async () => {
+  it("[状態遷移/AC-5/AC-6] 閉: roleなし・完了ボタンなし → 開: dialog・見えるラベル6種・完了ボタン", async () => {
     await render("/issues");
     const fields = q(".filter-fields")!;
     expect(fields.hasAttribute("role")).toBe(false);
@@ -296,32 +296,16 @@ describe("mobile filter sheet", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(filterButton().getAttribute("aria-expanded")).toBe("true");
     expect(doc().activeElement).toBe(q("#issues-status-filter"));
-    expect(closedLabels()).toEqual([
-      "Status",
-      "Priority",
-      "Project",
-      "表示範囲",
-      "Label",
-      "並び順",
-      "期限",
-    ]);
+    expect(closedLabels()).toEqual(["Status", "Priority", "表示範囲", "Label", "並び順", "期限"]);
     expect(dialog.querySelector("h2")?.textContent).toBe("フィルター");
     expect(q(".filter-sheet-done")?.textContent).toBe("完了");
     expect(dialog.querySelector(".completed-toggle input")).not.toBeNull();
-  });
-  it("[同値分割/AC-6] Project詳細ではProjectと表示範囲の欄を出さない", async () => {
-    await render("/projects/project-1");
-    await click(filterButton());
-    expect(closedLabels()).toEqual(["Status", "Priority", "Label", "並び順", "期限"]);
-    expect(q("#issues-project-filter")).toBeNull();
-    expect(q("#issues-scope-filter")).toBeNull();
   });
   it("[代表値/AC-8] 各欄のidとaria-labelは従来どおり、欄は1組だけ描画される", async () => {
     await render("/issues");
     const ids = [
       "#issues-status-filter",
       "#issues-priority-filter",
-      "#issues-project-filter",
       "#issues-scope-filter",
       "#issues-sort-select",
       "#issues-due-filter",
@@ -329,13 +313,13 @@ describe("mobile filter sheet", () => {
     for (const id of ids) expect(qa(id)).toHaveLength(1);
     expect(q("#issues-status-filter")!.getAttribute("aria-label")).toBe("Statusで絞り込む");
     expect(q("#issues-priority-filter")!.getAttribute("aria-label")).toBe("Priorityで絞り込む");
-    expect(q("#issues-project-filter")!.getAttribute("aria-label")).toBe("Projectで絞り込む");
+    expect(q("#issues-project-filter")).toBeNull();
     expect(q("#issues-scope-filter")!.getAttribute("aria-label")).toBe("Issueの表示範囲");
     expect(q('select[aria-label="Labelで絞り込む"]')).not.toBeNull();
     expect(q("#issues-sort-select")!.getAttribute("aria-label")).toBe("Issueのソート");
     expect(q("#issues-due-filter")!.getAttribute("aria-label")).toBe("Due dateで絞り込む");
-    expect(qa(".filter-select")).toHaveLength(7);
-    expect(qa(".filter-field")).toHaveLength(7);
+    expect(qa(".filter-select")).toHaveLength(6);
+    expect(qa(".filter-field")).toHaveLength(6);
   });
   it.each([
     ["/issues", "0", null],

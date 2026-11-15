@@ -144,7 +144,7 @@ Issue期限の`due_at`は時刻を持たない暦日であり、既存互換の�
 - `recent_issue_views(user_id, issue_id)` unique
 - `recent_searches(user_id, normalized_query_json)` unique。`normalized_query_json`はKey順・既定値・空条件を正規化したCanonical JSONとする
 - `workflow_states(user_id)`と`project_statuses(user_id)`は、それぞれ`is_default = true`を1件だけ許可する部分Unique Indexを持つ
-- Project詳細のIssue表示設定は、MVPでは`orbit_store_snapshots.state_json`内のOwner scoped配列として保存し、別端末のBootstrapで復元する。正規化D1 tableへの移行は将来のSnapshot bridge整理で判断する。
+- Project詳細のIssue表示設定は、MVPでは`orbit_store_snapshots.state_json`内のOwner scoped配列として保存し、別端末のBootstrapで復元する。正規化D1 tableへの移行は将来のSnapshot bridge整理で判断する。2026-11-16にProject詳細のIssue一覧を画面から外したため、この設定は現在UIから使っていない。
 - `workflow_states.category`はBacklog / Unstarted / Started / Completed / Canceled、`project_statuses.category`はBacklog / Planned / In Progress / Completed / Canceledだけを許可する
 - 最近閲覧と最近の検索は上記Unique制約をConflict targetとしてUpsertし、種別ごとに新しい20件だけを保持する
 - 親子Issueは同一ユーザー所有に限定し、再帰更新前に循環を検出する

@@ -27,12 +27,15 @@ const rowAndHeaderColumns = (scope: string, media: string | null = null) => [
 ];
 const NOT_MANUAL = ".issue-table:not(.manual-order)";
 const MANUAL = ".issue-table.manual-order";
+// Inbox振り分け一覧（Projectを2段目で選ぶ）を除いた Issues 一覧。
+const ISSUES_LIST = ".issue-table:not(.inbox-triage-list)";
 
 describe("responsive issue layout contract", () => {
-  it("[境界値] mobileのIssue一覧は本文幅を確保し期限を2行目で編集できる", () => {
+  it("[境界値] mobileのIssue一覧は本文幅を確保し、期限を出さず1行に収める", () => {
     const expected = "44px minmax(0, 1fr) 96px 44px";
     expect(rowAndHeaderColumns(NOT_MANUAL, MOBILE)).toEqual([expected, expected]);
 
+    // tablet 以下の共通ルールでは期限は本文下（2行目）に出る。
     const due = declarationsFor(rules, ".issue-row .due-cell", BELOW_DESKTOP);
     expect(due.get("grid-column")).toBe("2 / -1");
     expect(due.get("grid-row")).toBe("2");
@@ -40,13 +43,38 @@ describe("responsive issue layout contract", () => {
     expect(dateInput.get("width")).toBe("130px");
     expect(dateInput.get("max-width")).toBe("100%");
     expect(dateInput.get("font-size")).toBe("11px");
-    // 期限セルは mobile を含むどの breakpoint でも非表示にしない。
-    const hiddenDueRule = rules.filter(
+
+    // mobile の Issues 一覧だけは期限を隠して1行にする（期限は行タップで開く詳細で見る）。
+    expect(
+      declarationsFor(rules, `${ISSUES_LIST} .issue-row .due-cell`, MOBILE).get("display"),
+    ).toBe("none");
+    const title = declarationsFor(rules, `${ISSUES_LIST} .issue-main strong`, MOBILE);
+    expect(title.get("white-space")).toBe("nowrap");
+    expect(title.get("text-overflow")).toBe("ellipsis");
+    expect(title.get("display")).toBe("block");
+    for (const extra of [
+      ".issue-description",
+      ".issue-labels",
+      ".issue-parent-hint",
+      ".issue-child-progress",
+    ]) {
+      expect(
+        declarationsFor(rules, `${ISSUES_LIST} .issue-main ${extra}`, MOBILE).get("display"),
+      ).toBe("none");
+    }
+  });
+
+  it("[境界値] 期限を隠すのはmobileのIssues一覧だけで、tablet以上とInbox振り分けでは隠さない", () => {
+    const hiddenDueRules = rules.filter(
       (rule) =>
-        rule.selectors.some((selector) => selector.startsWith(".issue-row .due-cell")) &&
+        rule.selectors.some((selector) => selector.includes(".due-cell")) &&
+        !rule.selectors.some((selector) => selector.startsWith(".table-header")) &&
         rule.declarations.get("display") === "none",
     );
-    expect(hiddenDueRule).toEqual([]);
+    expect(hiddenDueRules.map((rule) => rule.media)).toEqual([MOBILE]);
+    expect(hiddenDueRules.flatMap((rule) => rule.selectors)).toEqual([
+      `${ISSUES_LIST} .issue-row .due-cell`,
+    ]);
   });
 
   it("[境界値] tabletのIssue一覧はProjectを省略し期限は本文下で表示する", () => {

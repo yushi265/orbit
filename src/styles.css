@@ -504,3 +504,15 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 @media (max-width: 767px) { .burndown-tick, .burndown-scope, .burndown-untracked-label { font-size: 21px; } }
 /* FEAT-inbox-triage: 振り分けの主操作なので、タブレット・スマホでもProjectセレクトを2段目に出す。 */
 @media (max-width: 1023px) { .issue-table.inbox-triage-list .issue-row .project-cell { display: flex; grid-column: 2 / -1; grid-row: 2; align-items: center; }.issue-table.inbox-triage-list .issue-row .due-cell { grid-row: 3; } }
+
+/* mobile の Issues 一覧は1行に収める。期限・説明・Labelは行タップで開く詳細で見る（Inbox振り分けは2段目のProject選択を残す） */
+@media (max-width: 767px) {
+  .issue-table:not(.inbox-triage-list) .issue-row { padding-top: 0; padding-bottom: 0; }
+  .issue-table:not(.inbox-triage-list) .issue-row .due-cell { display: none; }
+  .issue-table:not(.inbox-triage-list) .issue-main { gap: 2px; }
+  .issue-table:not(.inbox-triage-list) .issue-main strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .issue-table:not(.inbox-triage-list) .issue-main .issue-description,
+  .issue-table:not(.inbox-triage-list) .issue-main .issue-labels,
+  .issue-table:not(.inbox-triage-list) .issue-main .issue-parent-hint,
+  .issue-table:not(.inbox-triage-list) .issue-main .issue-child-progress { display: none; }
+}

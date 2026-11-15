@@ -20,6 +20,7 @@
     "production": {
       "name": "orbit",
       "workers_dev": true,
+      "routes": [{ "pattern": "orbit.okogelab.com", "custom_domain": true }],
       "vars": {
         "APP_ENV": "production"
       },

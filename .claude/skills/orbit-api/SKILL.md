@@ -13,7 +13,7 @@ description: 本番orbitのタスク（Issue）を外部bot用Service Token経�
 
 | 変数 | 値 |
 |---|---|
-| `ORBIT_URL` | `https://orbit.ae265-1108.workers.dev` |
+| `ORBIT_URL` | `https://orbit.okogelab.com`（従来の `https://orbit.ae265-1108.workers.dev` も当面使える） |
 | `ORBIT_CF_CLIENT_ID` | Service Token `orbit-grok-bot` の Client ID |
 | `ORBIT_CF_CLIENT_SECRET` | 同 Client Secret（Ownerのパスワードマネージャーにある） |
 

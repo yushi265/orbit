@@ -5,7 +5,8 @@
 2026-10-02に既存本番構成を読み取り専用で確認しました。
 
 - D1: `orbit`（`53d2ce53-5326-47da-95b6-386732c50a9b`）。バックアップのコピーでOwner関連行とOwner Snapshotの存在を確認済みです。値はこの文書や検証ログに記載しません。
-- Worker: `orbit`、URLは `https://orbit.ae265-1108.workers.dev`、`APP_ENV=production`、上記D1 bindingを使用します。
+- Worker: `orbit`、URLは `https://orbit.okogelab.com`（Custom Domain。2026-11-16 追加）と `https://orbit.ae265-1108.workers.dev`（従来、当面は併用）、`APP_ENV=production`、上記D1 bindingを使用します。
+- Custom Domain は Cloudflare Access の orbit アプリに同じホスト名を追加してから有効にします（Access を通らない経路を作らないため。Worker 側も production では JWT が無いと 401 を返します）。
 - 確認時の稼働Versionは `c9ba19fc-a647-46d6-ac95-ab731d536338`（2026-10-01作成）、GitHubの`15eb0eb`のWorkers Builds checkが同じVersion IDを返すことを照合しました。
 - `OWNER_USER_ID` / `OWNER_EMAIL` / `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` の4つのSecret名がVersion bindingに存在します。秘密値や認証後の動作をこの確認だけで保証するものではありません。
 - 未認証のルートはCloudflare Accessへ`302`になります。認証後のBootstrap `200`と主要操作は、この確認時点では未確認です。

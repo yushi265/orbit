@@ -764,7 +764,7 @@ function OrbitAppInner(props: Props) {
 
   // IssuesのProjectタブは横スワイプでも切り替えられる（左で次、右で前）。
   const swipeStartRef = useRef<TouchPoint | null>(null);
-  function onIssuesTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
+  function onIssuesTouchStart(event: ReactTouchEvent<HTMLElement>) {
     const touch = event.touches[0];
     swipeStartRef.current =
       event.touches.length === 1 &&
@@ -773,7 +773,7 @@ function OrbitAppInner(props: Props) {
         ? { x: touch.clientX, y: touch.clientY }
         : null;
   }
-  function onIssuesTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+  function onIssuesTouchEnd(event: ReactTouchEvent<HTMLElement>) {
     const start = swipeStartRef.current;
     swipeStartRef.current = null;
     const touch = event.changedTouches[0];
@@ -1065,7 +1065,16 @@ function OrbitAppInner(props: Props) {
             <MobileMenuButton section={section} onNavigate={navigate} />
           </div>
         </header>
-        <main className="content-area" id="main-content">
+        <main
+          className="content-area"
+          id="main-content"
+          // Issuesでは一覧の下の余白も含め、本文のどこを横スワイプしてもProjectタブを移動する。
+          onTouchStart={section === "issues" ? onIssuesTouchStart : undefined}
+          onTouchEnd={section === "issues" ? onIssuesTouchEnd : undefined}
+          onTouchCancel={() => {
+            swipeStartRef.current = null;
+          }}
+        >
           {bootstrap.error && (
             <div className="detail-live-error" role="alert">
               最新情報を取得できませんでした。表示中の情報を保持しています。
@@ -1087,96 +1096,87 @@ function OrbitAppInner(props: Props) {
             />
           )}
           {section === "issues" && (
-            <div
-              className="issues-swipe-area"
-              onTouchStart={onIssuesTouchStart}
-              onTouchEnd={onIssuesTouchEnd}
-              onTouchCancel={() => {
-                swipeStartRef.current = null;
-              }}
-            >
-              <IssuesView
-                header={
-                  <>
-                    <ProjectTabBar
-                      tabs={projectTabs}
-                      selectedId={projectFilter}
-                      totalOpenCount={countOpenIssues(issues, workflowStates)}
-                      onSelect={selectProjectTab}
+            <IssuesView
+              header={
+                <>
+                  <ProjectTabBar
+                    tabs={projectTabs}
+                    selectedId={projectFilter}
+                    totalOpenCount={countOpenIssues(issues, workflowStates)}
+                    onSelect={selectProjectTab}
+                  />
+                  {selectedTabProject && (
+                    <ProjectTabHeader
+                      project={selectedTabProject}
+                      projectStatuses={data.projectStatuses}
+                      issues={issues}
+                      workflowStates={workflowStates}
                     />
-                    {selectedTabProject && (
-                      <ProjectTabHeader
-                        project={selectedTabProject}
-                        projectStatuses={data.projectStatuses}
-                        issues={issues}
-                        workflowStates={workflowStates}
-                      />
-                    )}
-                  </>
-                }
-                issues={visibleIssues}
-                scope={issueScope}
-                scopeLoading={scopedIssuesQuery.isLoading}
-                setScope={setIssueScope}
-                workflowStates={workflowStates}
-                filterText={filterText}
-                openOnly={openOnly}
-                onClearFilters={() =>
-                  updateIssueSearch({
-                    q: undefined,
-                    status: undefined,
-                    priority: undefined,
-                    label: undefined,
-                    due: undefined,
-                    completed: true,
-                    open: undefined,
-                  })
-                }
-                setFilterText={setFilterText}
-                priorityFilter={priorityFilter}
-                setPriorityFilter={setPriorityFilter}
-                statusFilter={statusFilter}
-                setStatusFilter={setStatusFilter}
-                labelFilter={labelFilter}
-                setLabelFilter={setLabelFilter}
-                dueFilter={dueFilter}
-                setDueFilter={setDueFilter}
-                showCompleted={showCompleted}
-                setShowCompleted={setShowCompleted}
-                issueSort={issueSort}
-                setIssueSort={setIssueSort}
-                projects={projects}
-                allIssues={issueWorkspaceIssues}
-                cycles={cycles}
-                labels={labels}
-                viewMode={viewMode}
-                setViewMode={setViewMode}
-                selected={selected}
-                setSelected={setSelected}
-                pendingIssueId={pendingIssueId}
-                reorderBusy={reorderIssueMutation.isPending}
-                onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
-                onRestore={(issue) => void changeIssueLifecycle(issue, "restore")}
-                onFocusIssue={setFocusedIssueId}
-                filterInputRef={issueFilterInputRef}
-                displayInputRef={issueDisplayInputRef}
-                modifierLabel={modifierLabel}
-                onReorder={(issue, beforeIssueId) =>
-                  reorderIssueMutation.mutate({
-                    issue,
-                    beforeIssueId,
-                    idempotencyKey: idempotencyKey(),
-                  })
-                }
-                onBulk={bulkUpdateIssues}
-                bulkBusy={bulkBusy}
-                resetBulkMutation={() => {
-                  bulkMutationKey.reset();
-                }}
-                onCreate={openNewIssueComposer}
-                onOpenIssue={(issue) => openIssue(issue.id)}
-              />
-            </div>
+                  )}
+                </>
+              }
+              issues={visibleIssues}
+              scope={issueScope}
+              scopeLoading={scopedIssuesQuery.isLoading}
+              setScope={setIssueScope}
+              workflowStates={workflowStates}
+              filterText={filterText}
+              openOnly={openOnly}
+              onClearFilters={() =>
+                updateIssueSearch({
+                  q: undefined,
+                  status: undefined,
+                  priority: undefined,
+                  label: undefined,
+                  due: undefined,
+                  completed: true,
+                  open: undefined,
+                })
+              }
+              setFilterText={setFilterText}
+              priorityFilter={priorityFilter}
+              setPriorityFilter={setPriorityFilter}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              labelFilter={labelFilter}
+              setLabelFilter={setLabelFilter}
+              dueFilter={dueFilter}
+              setDueFilter={setDueFilter}
+              showCompleted={showCompleted}
+              setShowCompleted={setShowCompleted}
+              issueSort={issueSort}
+              setIssueSort={setIssueSort}
+              projects={projects}
+              allIssues={issueWorkspaceIssues}
+              cycles={cycles}
+              labels={labels}
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              selected={selected}
+              setSelected={setSelected}
+              pendingIssueId={pendingIssueId}
+              reorderBusy={reorderIssueMutation.isPending}
+              onUpdate={(issue, patch) => updateIssue.mutate({ issue, patch })}
+              onRestore={(issue) => void changeIssueLifecycle(issue, "restore")}
+              onFocusIssue={setFocusedIssueId}
+              filterInputRef={issueFilterInputRef}
+              displayInputRef={issueDisplayInputRef}
+              modifierLabel={modifierLabel}
+              onReorder={(issue, beforeIssueId) =>
+                reorderIssueMutation.mutate({
+                  issue,
+                  beforeIssueId,
+                  idempotencyKey: idempotencyKey(),
+                })
+              }
+              onBulk={bulkUpdateIssues}
+              bulkBusy={bulkBusy}
+              resetBulkMutation={() => {
+                bulkMutationKey.reset();
+              }}
+              onCreate={openNewIssueComposer}
+              onOpenIssue={(issue) => openIssue(issue.id)}
+            />
           )}
           {section === "cycles" && (
             <CyclesView

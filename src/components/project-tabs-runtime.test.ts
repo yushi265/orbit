@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapViewModel, ProjectViewModel } from "../shared/view-models";
 import { renderApp, type RenderedApp } from "./render-app.test-fixtures";
 import { reviewBootstrap, reviewIssue } from "./review-ui.test-fixtures";
-import { LAST_ISSUES_PROJECT_STORAGE_KEY } from "./project-tabs";
+import { LAST_ISSUES_PROJECT_STORAGE_KEY, PROJECT_HEADER_OPEN_STORAGE_KEY } from "./project-tabs";
 
 // Issues画面をProjectタブ起点にする: タブで出し分け、ヘッダーからProject詳細へ。
 // Project詳細のIssue一覧は「Issuesで開く」リンクに置き換える。
@@ -12,6 +12,7 @@ import { LAST_ISSUES_PROJECT_STORAGE_KEY } from "./project-tabs";
 let dom: JSDOM;
 let app: RenderedApp | undefined;
 let payload: BootstrapViewModel;
+let mobile = false;
 
 function bootstrap(): BootstrapViewModel {
   const base = reviewBootstrap([
@@ -81,9 +82,14 @@ function json(value: unknown, status = 200) {
 
 beforeEach(() => {
   payload = bootstrap();
+  mobile = false;
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/" });
   Object.defineProperty(dom.window, "matchMedia", {
-    value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    value: (query: string) => ({
+      matches: mobile && query === "(max-width: 767px)",
+      addEventListener() {},
+      removeEventListener() {},
+    }),
   });
   Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", {
     value: function (this: HTMLElement, name: string, handler: EventListener) {
@@ -253,6 +259,101 @@ describe("Issues画面のProjectタブ", () => {
     await settle();
     const select = doc().querySelector("#new-issue-project") as HTMLSelectElement;
     expect(select.value).toBe("project-3");
+  });
+});
+
+function touch(target: Element, type: "touchstart" | "touchend", x: number, y = 300) {
+  const event = new dom.window.Event(type, { bubbles: true });
+  const point = [{ clientX: x, clientY: y }];
+  Object.defineProperty(event, "touches", { value: type === "touchstart" ? point : [] });
+  Object.defineProperty(event, "changedTouches", { value: point });
+  target.dispatchEvent(event);
+}
+async function swipe(target: Element, fromX: number, toX: number) {
+  await act(async () => {
+    touch(target, "touchstart", fromX);
+    touch(target, "touchend", toX);
+  });
+  await settle();
+}
+const firstRow = () => doc().querySelector(".issue-row")!;
+
+describe("スマホのファーストビュー", () => {
+  it("[状態遷移] スマホ幅で / を開くと、前回のProjectタブのIssues一覧になる", async () => {
+    mobile = true;
+    dom.window.localStorage.setItem(LAST_ISSUES_PROJECT_STORAGE_KEY, "project-3");
+    await open("/");
+    await vi.waitFor(() => expect(location().pathname).toBe("/issues"));
+    expect((location().search as { project?: string }).project).toBe("project-3");
+    expect(selectedTab()).toBe("Project 3");
+  });
+
+  it("[状態遷移] 開いた後にHomeへ移動したら、Issuesへ引き戻さない", async () => {
+    mobile = true;
+    await open("/");
+    await vi.waitFor(() => expect(location().pathname).toBe("/issues"));
+    await act(async () => navButton("Home").click());
+    await settle();
+    await settle();
+    expect(location().pathname).toBe("/");
+  });
+
+  it("[代表値] PC幅で / を開くとHomeのまま", async () => {
+    await open("/");
+    await settle();
+    expect(location().pathname).toBe("/");
+  });
+});
+
+describe("Projectタブの横スワイプ", () => {
+  it("[状態遷移] 左スワイプで次のタブ、右スワイプで前のタブへ移る", async () => {
+    await open("/issues?project=project-1");
+    await swipe(firstRow(), 300, 150);
+    expect(selectedTab()).toBe("Project 3");
+    expect(dom.window.localStorage.getItem(LAST_ISSUES_PROJECT_STORAGE_KEY)).toBe("project-3");
+    await swipe(firstRow(), 300, 150);
+    expect(selectedTab()).toBe("すべて");
+    await swipe(firstRow(), 150, 300);
+    expect(selectedTab()).toBe("Project 3");
+  });
+
+  it("[境界値] 端のタブではそれ以上進まない", async () => {
+    await open("/issues?project=project-1");
+    await swipe(firstRow(), 150, 300);
+    expect(selectedTab()).toBe("Project 1");
+  });
+
+  it("[代表値] 検索欄の上で始まったスワイプでは切り替えない", async () => {
+    await open("/issues?project=project-1");
+    await swipe(doc().querySelector("#issues-filter-input")!, 300, 150);
+    expect(selectedTab()).toBe("Project 1");
+  });
+});
+
+describe("Projectヘッダーの折りたたみ", () => {
+  const header = () => doc().querySelector("details.project-tab-header") as HTMLDetailsElement;
+
+  it("[代表値] 既定は1行に畳み、名前と進捗だけを見せる", async () => {
+    await open("/issues?project=project-1");
+    expect(header().open).toBe(false);
+    const summary = header().querySelector("summary")!;
+    expect(summary.textContent).toContain("Project 1");
+    expect(summary.textContent).toContain("50%（1/2）");
+    expect(summary.textContent).not.toContain("Projectの詳細");
+  });
+
+  it("[状態遷移] 開いた状態を覚え、次に開いたときも開いている", async () => {
+    await open("/issues?project=project-1");
+    await act(async () => {
+      header().open = true;
+      header().dispatchEvent(new dom.window.Event("toggle"));
+    });
+    await settle();
+    expect(dom.window.localStorage.getItem(PROJECT_HEADER_OPEN_STORAGE_KEY)).toBe("1");
+    await app!.unmount();
+    app = undefined;
+    await open("/issues?project=project-3");
+    expect(header().open).toBe(true);
   });
 });
 

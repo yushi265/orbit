@@ -232,7 +232,7 @@ describe("Home / Project / Inbox workspace UI", () => {
       "1fr",
     );
     expect(declarationsFor(rules, ".project-open-issues", mobile).get("width")).toBe("100%");
-    expect(declarationsFor(rules, ".project-tab-header").get("flex-wrap")).toBe("wrap");
+    expect(declarationsFor(rules, ".project-tab-header-body").get("flex-wrap")).toBe("wrap");
     expect(declarationsFor(rules, ".project-tabs", mobile).get("margin")).toBe("-14px -17px 14px");
   });
 });

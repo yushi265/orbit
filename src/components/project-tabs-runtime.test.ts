@@ -317,6 +317,18 @@ describe("Projectタブの横スワイプ", () => {
     expect(selectedTab()).toBe("Project 3");
   });
 
+  it("[代表値] 一覧の下の余白（本文エリア）でスワイプしても切り替わる", async () => {
+    await open("/issues?project=project-1");
+    await swipe(doc().querySelector("main.content-area")!, 300, 150);
+    expect(selectedTab()).toBe("Project 3");
+  });
+
+  it("[代表値] Issues以外の画面ではスワイプしても何も変わらない", async () => {
+    await open("/");
+    await swipe(doc().querySelector("main.content-area")!, 300, 150);
+    expect(location().pathname).toBe("/");
+  });
+
   it("[境界値] 端のタブではそれ以上進まない", async () => {
     await open("/issues?project=project-1");
     await swipe(firstRow(), 150, 300);

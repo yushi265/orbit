@@ -333,7 +333,6 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 .project-tab-progress > span { display: block; height: 100%; border-radius: 3px; background: #2fa36b; }
 .project-tab-detail-link { margin-left: auto; color: var(--orbit-accent-solid); font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 :root[data-theme="dark"] .project-tab-detail-link { color: var(--orbit-accent); }
-.issues-swipe-area { display: contents; }
 .inbox-triage-count { margin: 0 0 10px; color: var(--orbit-muted); font-size: 12px; }
 @media (max-width: 767px) {
   .home-heading-actions { width: 100%; }

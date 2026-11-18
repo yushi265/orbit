@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import type {
   IssueViewModel,
   ProjectStatusViewModel,
@@ -7,7 +8,7 @@ import type {
 } from "../shared/view-models";
 import { calculateCycleMetrics } from "../shared/cycle-workspace";
 import { formatDateOnly } from "./ui/date-format";
-import { ALL_PROJECTS_TAB, type ProjectTab } from "./project-tabs";
+import { ALL_PROJECTS_TAB, PROJECT_HEADER_OPEN_STORAGE_KEY, type ProjectTab } from "./project-tabs";
 
 export function ProjectTabBar({
   tabs,
@@ -83,26 +84,56 @@ export function ProjectTabHeader({
   );
   const metrics = calculateCycleMetrics(projectIssues, workflowStates);
   const status = projectStatuses.find((item) => item.id === project.statusId);
+  // 一覧を広く見せるため、既定は1行に畳む。開閉は端末ごとに覚える。
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try {
+      setOpen(window.localStorage.getItem(PROJECT_HEADER_OPEN_STORAGE_KEY) === "1");
+    } catch {
+      // 覚えていなければ畳んだまま。
+    }
+  }, []);
+  function toggle(next: boolean) {
+    setOpen(next);
+    try {
+      window.localStorage.setItem(PROJECT_HEADER_OPEN_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // 開閉状態を覚えられなくても表示は切り替える。
+    }
+  }
   return (
-    <section className="project-tab-header" aria-label={`${project.name}の概要`}>
-      <strong className="project-tab-header-name">{project.name}</strong>
-      <span className="project-tab-header-meta">
-        <span className="status-pill">{status?.name ?? "Status"}</span>
-        <span>期限 {formatDateOnly(project.targetAt)}</span>
+    <details
+      className="project-tab-header"
+      aria-label={`${project.name}の概要`}
+      open={open}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        if (next !== open) toggle(next);
+      }}
+    >
+      <summary className="project-tab-header-summary">
+        <span className="project-tab-header-chevron" aria-hidden>
+          ›
+        </span>
+        <strong className="project-tab-header-name">{project.name}</strong>
         <span className="project-tab-progress" aria-hidden>
           <span style={{ width: `${metrics.progressPercent}%` }} />
         </span>
-        <span>
+        <span className="project-tab-header-percent">
           {metrics.progressPercent}%（{metrics.completed}/{metrics.total}）
         </span>
-      </span>
-      <Link
-        className="project-tab-detail-link"
-        to="/projects/$projectId"
-        params={{ projectId: project.id }}
-      >
-        Projectの詳細 →
-      </Link>
-    </section>
+      </summary>
+      <div className="project-tab-header-body">
+        <span className="status-pill">{status?.name ?? "Status"}</span>
+        <span>期限 {formatDateOnly(project.targetAt)}</span>
+        <Link
+          className="project-tab-detail-link"
+          to="/projects/$projectId"
+          params={{ projectId: project.id }}
+        >
+          Projectの詳細 →
+        </Link>
+      </div>
+    </details>
   );
 }

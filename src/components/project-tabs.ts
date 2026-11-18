@@ -79,3 +79,6 @@ export function issuesEntryProjectId(tabs: ProjectTab[], remembered: string | nu
 }
 
 export const LAST_ISSUES_PROJECT_STORAGE_KEY = "orbit.issues.lastProject";
+
+// IssuesのProjectヘッダー（概要カード）を開いたままにするか。
+export const PROJECT_HEADER_OPEN_STORAGE_KEY = "orbit.issues.projectHeaderOpen";

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   IssueViewModel,
   ProjectStatusViewModel,
@@ -25,8 +25,21 @@ export function ProjectTabBar({
     ...tabs,
     { id: ALL_PROJECTS_TAB, name: "すべて", color: "", openCount: totalOpenCount },
   ];
+  // 選択中タブの下線は1本の線を動かして、タブ間をスライドさせる。測れるまでは各タブの下線を使う。
+  const listRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const selected = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!selected || selected.offsetWidth === 0) return setIndicator(null);
+    setIndicator({ left: selected.offsetLeft, width: selected.offsetWidth });
+  }, [selectedId, tabs]);
   return (
-    <div className="project-tabs" role="tablist" aria-label="Project">
+    <div
+      ref={listRef}
+      className={indicator ? "project-tabs has-indicator" : "project-tabs"}
+      role="tablist"
+      aria-label="Project"
+    >
       {items.map((tab) => {
         const selected = tab.id === selectedId;
         return (
@@ -64,6 +77,13 @@ export function ProjectTabBar({
           </button>
         );
       })}
+      {indicator && (
+        <span
+          className="project-tab-indicator"
+          aria-hidden
+          style={{ width: indicator.width, transform: `translateX(${indicator.left}px)` }}
+        />
+      )}
     </div>
   );
 }

@@ -13,6 +13,8 @@ let dom: JSDOM;
 let app: RenderedApp | undefined;
 let payload: BootstrapViewModel;
 let mobile = false;
+let reducedMotion = false;
+let animate: ReturnType<typeof vi.fn>;
 
 function bootstrap(): BootstrapViewModel {
   const base = reviewBootstrap([
@@ -83,10 +85,13 @@ function json(value: unknown, status = 200) {
 beforeEach(() => {
   payload = bootstrap();
   mobile = false;
+  reducedMotion = false;
   dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://orbit.example/" });
   Object.defineProperty(dom.window, "matchMedia", {
     value: (query: string) => ({
-      matches: mobile && query === "(max-width: 767px)",
+      matches:
+        (mobile && query === "(max-width: 767px)") ||
+        (reducedMotion && query === "(prefers-reduced-motion: reduce)"),
       addEventListener() {},
       removeEventListener() {},
     }),
@@ -105,6 +110,8 @@ beforeEach(() => {
     value: (callback: FrameRequestCallback) => dom.window.setTimeout(callback, 0),
   });
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { value: vi.fn() });
+  animate = vi.fn();
+  Object.defineProperty(dom.window.HTMLElement.prototype, "animate", { value: animate });
   vi.stubGlobal("window", dom.window);
   vi.stubGlobal("self", dom.window);
   vi.stubGlobal("scrollTo", vi.fn());
@@ -339,6 +346,40 @@ describe("Projectタブの横スワイプ", () => {
     await open("/issues?project=project-1");
     await swipe(doc().querySelector("#issues-filter-input")!, 300, 150);
     expect(selectedTab()).toBe("Project 1");
+  });
+});
+
+describe("Projectタブ切り替えのスライド", () => {
+  const animatedClasses = () =>
+    animate.mock.contexts.map((element) => (element as HTMLElement).className);
+  const firstOffset = () => (animate.mock.calls[0][0] as Array<{ transform: string }>)[0].transform;
+
+  it("[状態遷移] 右のタブへ移ると、概要と一覧が右からスライドで入る（タブ列と検索欄は動かさない）", async () => {
+    await open("/issues?project=project-1");
+    expect(animate).not.toHaveBeenCalled();
+    await act(async () => tabNamed("Project 3").click());
+    await settle();
+    expect(animate).toHaveBeenCalled();
+    expect(firstOffset()).toBe("translateX(28px)");
+    expect(animatedClasses()).toContain("project-tab-header");
+    expect(animatedClasses().some((name) => name.includes("project-tabs"))).toBe(false);
+    expect(animatedClasses().some((name) => name.includes("toolbar"))).toBe(false);
+  });
+
+  it("[状態遷移] 左のタブへスワイプで戻ると、左からスライドで入る", async () => {
+    await open("/issues?project=project-3");
+    await swipe(firstRow(), 150, 300);
+    expect(selectedTab()).toBe("Project 1");
+    expect(firstOffset()).toBe("translateX(-28px)");
+  });
+
+  it("[代表値] 視差効果を減らす設定ではスライドしない", async () => {
+    reducedMotion = true;
+    await open("/issues?project=project-1");
+    await act(async () => tabNamed("Project 3").click());
+    await settle();
+    expect(selectedTab()).toBe("Project 3");
+    expect(animate).not.toHaveBeenCalled();
   });
 });
 

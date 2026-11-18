@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type TouchEvent as ReactTouchEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -143,7 +144,15 @@ import {
   selectProjectTabs,
 } from "./project-tabs";
 import { ProjectTabBar, ProjectTabHeader } from "./ProjectTabs";
-import { adjacentTabId, isSwipeBlocked, swipeTabStep, type TouchPoint } from "./project-tab-swipe";
+import {
+  TAB_SLIDE_DISTANCE,
+  TAB_SLIDE_DURATION_MS,
+  adjacentTabId,
+  isSwipeBlocked,
+  swipeTabStep,
+  tabSlideDirection,
+  type TouchPoint,
+} from "./project-tab-swipe";
 import { consumeMobileIssuesEntry, isMobileIssuesEntryPending } from "./mobile-entry";
 import { OrbitSelect } from "./orbit-select";
 import { linkifyText } from "./linkified-text";
@@ -761,6 +770,39 @@ function OrbitAppInner(props: Props) {
     // navigate は描画ごとに作り直されるので依存に入れない。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, showCompletedReady, section, initial]);
+
+  // Projectタブが変わったら、概要と一覧を移った向きからスライドで入れる（タップ・スワイプ・キー操作共通）。
+  // 視差効果を減らす設定では動かさない。
+  const previousTabRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const previous = previousTabRef.current;
+    previousTabRef.current = section === "issues" ? projectFilter : null;
+    if (section !== "issues" || previous === null || previous === projectFilter) return;
+    const direction = tabSlideDirection(
+      [...projectTabs.map((tab) => tab.id), ALL_PROJECTS_TAB],
+      previous,
+      projectFilter,
+    );
+    if (!direction) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const offset = direction === "next" ? TAB_SLIDE_DISTANCE : -TAB_SLIDE_DISTANCE;
+    document
+      .querySelectorAll<HTMLElement>(
+        "#main-content .page > :not(.project-tabs):not(.toolbar):not(.cycle-blocking-overlay)",
+      )
+      .forEach((element) => {
+        if (typeof element.animate !== "function") return;
+        element.animate(
+          [
+            { transform: `translateX(${offset}px)`, opacity: 0.35 },
+            { transform: "none", opacity: 1 },
+          ],
+          { duration: TAB_SLIDE_DURATION_MS, easing: "cubic-bezier(.2,.7,.3,1)" },
+        );
+      });
+    // projectTabs の並びは切り替え時点のものを使えばよい。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, projectFilter]);
 
   // IssuesのProjectタブは横スワイプでも切り替えられる（左で次、右で前）。
   const swipeStartRef = useRef<TouchPoint | null>(null);

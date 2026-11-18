@@ -45,3 +45,18 @@ export function isSwipeBlocked(target: Element | null, boundary: Element): boole
   }
   return false;
 }
+
+// Projectタブが変わったとき、一覧をどちらから入れるか。右のタブへ移れば右から（next）、左なら左から（prev）。
+export function tabSlideDirection(
+  tabIds: string[],
+  fromId: string,
+  toId: string,
+): "next" | "prev" | null {
+  const from = tabIds.indexOf(fromId);
+  const to = tabIds.indexOf(toId);
+  if (from < 0 || to < 0 || from === to) return null;
+  return to > from ? "next" : "prev";
+}
+
+export const TAB_SLIDE_DISTANCE = 28;
+export const TAB_SLIDE_DURATION_MS = 220;

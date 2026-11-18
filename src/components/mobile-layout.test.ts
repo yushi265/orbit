@@ -92,12 +92,12 @@ describe("mobile issue detail layout", () => {
     expect(styles.get("resize")).toBe("none");
   });
 
-  it("exposes Cycles in the mobile Menu sheet within a five-column bottom nav", async () => {
+  it("exposes Cycles in the header Menu sheet with a five-column bottom nav", async () => {
     await renderApp("/");
     expect(doc().querySelector(".mobile-nav")?.children).toHaveLength(5);
     expect(doc().querySelector(".mobile-menu-sheet")).toBeNull();
 
-    await act(async () => doc().querySelector<HTMLButtonElement>(".mobile-menu-tab")!.click());
+    await act(async () => doc().querySelector<HTMLButtonElement>(".mobile-menu-button")!.click());
     const sheet = doc().querySelector('.mobile-menu-sheet[role="dialog"]')!;
     expect(sheet).not.toBeNull();
     expect(
@@ -113,6 +113,9 @@ describe("mobile issue detail layout", () => {
       .filter((rule) => rule.selectors.includes(".mobile-nav"))
       .map((rule) => rule.declarations.get("grid-template-columns"));
     expect(everyMobileNavColumns).not.toContain("repeat(7, 1fr)");
+    expect(declarationsFor(rules, ".mobile-menu-button").get("display")).toBe("none");
+    expect(declarationsFor(rules, ".mobile-menu-button", MOBILE).get("display")).toBe("grid");
+    expect(declarationsFor(rules, ".mobile-menu-button", MOBILE).get("min-height")).toBe("44px");
   });
 
   it("[代表値/AC-8] filter sheet controls are mobile-only and desktop keeps the toolbar layout", () => {

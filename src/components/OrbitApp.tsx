@@ -1062,6 +1062,7 @@ function OrbitAppInner(props: Props) {
               <kbd>{modifierLabel} K</kbd>
             </button>
             <div className="avatar">OU</div>
+            <MobileMenuButton section={section} onNavigate={navigate} />
           </div>
         </header>
         <main className="content-area" id="main-content">
@@ -1541,7 +1542,8 @@ function Sidebar({
   );
 }
 
-const mobileMenuSections: Section[] = ["issues", "cycles", "projects", "views", "settings"];
+// スマホの下部タブに無い画面はヘッダーのメニューから開く。
+const mobileMenuSections: Section[] = ["cycles", "projects", "views", "settings"];
 
 function MobileNav({
   section,
@@ -1554,34 +1556,44 @@ function MobileNav({
   onNavigate: (section: Section) => void;
   onCreate: () => void;
 }) {
+  return (
+    <nav className="mobile-nav">
+      <NavItem item="home" active={section === "home"} onClick={() => onNavigate("home")} />
+      <NavItem item="issues" active={section === "issues"} onClick={() => onNavigate("issues")} />
+      <button className="mobile-create" aria-label="Issueを作成" onClick={onCreate}>
+        ＋
+      </button>
+      <NavItem
+        item="inbox"
+        active={section === "inbox"}
+        onClick={() => onNavigate("inbox")}
+        badge={inboxCount}
+      />
+      <NavItem item="search" active={section === "search"} onClick={() => onNavigate("search")} />
+    </nav>
+  );
+}
+
+function MobileMenuButton({
+  section,
+  onNavigate,
+}: {
+  section: Section;
+  onNavigate: (section: Section) => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuActive = mobileMenuSections.includes(section);
   return (
     <>
-      <nav className="mobile-nav">
-        <NavItem item="home" active={section === "home"} onClick={() => onNavigate("home")} />
-        <NavItem
-          item="inbox"
-          active={section === "inbox"}
-          onClick={() => onNavigate("inbox")}
-          badge={inboxCount}
-        />
-        <button className="mobile-create" aria-label="Issueを作成" onClick={onCreate}>
-          ＋
-        </button>
-        <NavItem item="search" active={section === "search"} onClick={() => onNavigate("search")} />
-        <button
-          className={`nav-item mobile-menu-tab ${menuActive ? "active" : ""}`}
-          aria-haspopup="dialog"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen(true)}
-        >
-          <span className="nav-icon" aria-hidden="true">
-            ☰
-          </span>
-          <span>Menu</span>
-        </button>
-      </nav>
+      <button
+        type="button"
+        className="icon-button mobile-menu-button"
+        aria-label="メニュー"
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen(true)}
+      >
+        <span aria-hidden="true">☰</span>
+      </button>
       {menuOpen && (
         <MobileMenuSheet
           section={section}

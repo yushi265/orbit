@@ -139,17 +139,18 @@ async function press(target: Element, init: KeyboardEventInit) {
 }
 const tabLabel = (element: Element) =>
   element.getAttribute("aria-label") ?? element.querySelector("span:nth-child(2)")?.textContent;
-const menuTab = () => q<HTMLButtonElement>(".mobile-menu-tab")!;
+const menuTab = () => q<HTMLButtonElement>(".topbar .mobile-menu-button")!;
 const sheet = () => q('[role="dialog"][aria-label="メニュー"]');
 const filterButton = () => q<HTMLButtonElement>(".filter-sheet-button")!;
 const filterSheet = () => q('[role="dialog"][aria-label="フィルター"]');
 const labelOf = (item: Element) => item.querySelector("span:nth-child(2)")?.textContent;
 
 describe("mobile bottom navigation", () => {
-  it("[代表値/AC-1] 下部タブは Home / Inbox / Create / Search / Menu の順に5つ", async () => {
+  it("[代表値/AC-1] 下部タブは Home / Issues / Create / Inbox / Search の順に5つ（Menuはヘッダー）", async () => {
     await render();
     const items = [...q(".mobile-nav")!.children];
-    expect(items.map(tabLabel)).toEqual(["Home", "Inbox", "Issueを作成", "Search", "Menu"]);
+    expect(items.map(tabLabel)).toEqual(["Home", "Issues", "Issueを作成", "Inbox", "Search"]);
+    expect(q(".mobile-nav .mobile-menu-button")).toBeNull();
     expect(items[2].classList.contains("mobile-create")).toBe(true);
   });
   it.each([
@@ -179,7 +180,7 @@ describe("mobile bottom navigation", () => {
 });
 
 describe("mobile Menu sheet", () => {
-  it("[代表値/AC-2/AC-3] Menuタブでシートが開き、項目は Issues から Settings の順で最初へフォーカス", async () => {
+  it("[代表値/AC-2/AC-3] ヘッダーのメニューでシートが開き、項目は Cycles から Settings の順で最初へフォーカス", async () => {
     await render();
     expect(sheet()).toBeNull();
     expect(menuTab().getAttribute("aria-haspopup")).toBe("dialog");
@@ -189,10 +190,10 @@ describe("mobile Menu sheet", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(menuTab().getAttribute("aria-expanded")).toBe("true");
     const items = [...dialog.querySelectorAll(".nav-item")];
-    expect(items.map(labelOf)).toEqual(["Issues", "Cycles", "Projects", "Views", "Settings"]);
+    expect(items.map(labelOf)).toEqual(["Cycles", "Projects", "Views", "Settings"]);
     expect(doc().activeElement).toBe(items[0]);
   });
-  it.each(["Issues", "Cycles", "Projects", "Views", "Settings"])(
+  it.each(["Cycles", "Projects", "Views", "Settings"])(
     "[同値分割/AC-2] 項目 %s を押すと移動してシートが閉じる",
     async (name) => {
       const router = await render();
@@ -207,7 +208,7 @@ describe("mobile Menu sheet", () => {
       expect(sheet()).toBeNull();
     },
   );
-  it("[状態遷移/AC-3] Escapeで閉じてMenuタブへフォーカスが戻る", async () => {
+  it("[状態遷移/AC-3] Escapeで閉じてメニューボタンへフォーカスが戻る", async () => {
     await render();
     await click(menuTab());
     await press(doc().activeElement!, {});
@@ -253,9 +254,9 @@ describe("mobile Menu sheet", () => {
   );
 });
 
-describe("aria-current and selected Menu tab", () => {
-  const menuSections = ["issues", "cycles", "projects", "views", "settings"];
-  const tabSections = ["home", "inbox", "search"];
+describe("aria-current in bottom tabs and header menu", () => {
+  const menuSections = ["cycles", "projects", "views", "settings"];
+  const tabSections = ["home", "issues", "inbox", "search"];
   it.each([...tabSections, ...menuSections] as Section[])(
     "[デシジョンテーブル/AC-4] 現在の画面 %s",
     async (current) => {
@@ -263,7 +264,6 @@ describe("aria-current and selected Menu tab", () => {
       const label = current[0].toUpperCase() + current.slice(1);
       const tabs = [...q(".mobile-nav")!.querySelectorAll("[aria-current]")].map(labelOf);
       expect(tabs).toEqual(tabSections.includes(current) ? [label] : []);
-      expect(menuTab().classList.contains("active")).toBe(menuSections.includes(current));
       expect(menuTab().hasAttribute("aria-current")).toBe(false);
       const sidebar = [...q(".sidebar")!.querySelectorAll("[aria-current]")].map(labelOf);
       expect(sidebar).toEqual([label]);

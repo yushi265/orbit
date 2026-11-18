@@ -318,6 +318,9 @@ input[type="date"]:focus { border-color: var(--orbit-accent); box-shadow: 0 0 0 
 .project-tabs::-webkit-scrollbar { display: none; }
 .project-tab { min-height: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; padding: 0 2px 10px; border: 0; border-bottom: 2px solid transparent; color: var(--orbit-muted); background: transparent; font-size: 13px; white-space: nowrap; }
 .project-tab[aria-selected="true"] { border-color: var(--orbit-accent); color: var(--orbit-text, #1d2838); font-weight: 700; }
+.project-tabs { position: relative; }
+.project-tabs.has-indicator .project-tab[aria-selected="true"] { border-color: transparent; }
+.project-tab-indicator { position: absolute; bottom: 0; left: 0; height: 2px; border-radius: 1px; background: var(--orbit-accent); pointer-events: none; transition: transform .22s cubic-bezier(.2,.7,.3,1), width .22s cubic-bezier(.2,.7,.3,1); }
 .project-tab-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 3px; }
 .project-tab-count { min-width: 20px; padding: 2px 6px; border-radius: 999px; color: var(--orbit-muted); background: var(--orbit-surface-raised, #f0f2f5); font-size: 12px; font-weight: 400; text-align: center; }
 .project-tab-header { margin-bottom: 12px; border: 1px solid var(--orbit-border, #e7ebef); border-radius: 10px; background: var(--orbit-surface, #fff); }

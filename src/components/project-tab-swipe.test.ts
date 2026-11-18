@@ -6,6 +6,7 @@ import {
   adjacentTabId,
   isSwipeBlocked,
   swipeTabStep,
+  tabSlideDirection,
 } from "./project-tab-swipe";
 
 // IssuesのProjectタブを横スワイプで切り替える判定。
@@ -76,5 +77,19 @@ describe("isSwipeBlocked", () => {
     expect(isSwipeBlocked(doc.getElementById("cell"), area)).toBe(true);
     row.style.overflowX = "hidden";
     expect(isSwipeBlocked(doc.getElementById("cell"), area)).toBe(false);
+  });
+});
+
+describe("tabSlideDirection", () => {
+  const ids = ["p1", "p2", "all"];
+  it.each([
+    ["右のタブへ", "p1", "p2", "next"],
+    ["2つ右へ", "p1", "all", "next"],
+    ["左のタブへ", "all", "p2", "prev"],
+    ["同じタブ", "p2", "p2", null],
+    ["移動元がタブに無い", "gone", "p2", null],
+    ["移動先がタブに無い", "p1", "gone", null],
+  ] as const)("[デシジョンテーブル] %s → %s", (_label, from, to, expected) => {
+    expect(tabSlideDirection(ids, from, to)).toBe(expected);
   });
 });

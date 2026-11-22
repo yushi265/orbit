@@ -74,4 +74,17 @@ describe("Inbox振り分け一覧のレスポンシブ", () => {
       ).toBe("3");
     },
   );
+
+  it("[境界値] mobile（767px以下）ではIssues一覧と同じく期限・説明・Labelを隠す", () => {
+    const rules = parseStyleRules();
+    const mobile = "(max-width: 767px)";
+    expect(declarationsFor(rules, ".issue-table .issue-row .due-cell", mobile).get("display")).toBe(
+      "none",
+    );
+    for (const extra of [".issue-description", ".issue-labels"]) {
+      expect(
+        declarationsFor(rules, `.issue-table .issue-main ${extra}`, mobile).get("display"),
+      ).toBe("none");
+    }
+  });
 });

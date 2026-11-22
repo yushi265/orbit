@@ -27,8 +27,8 @@ const rowAndHeaderColumns = (scope: string, media: string | null = null) => [
 ];
 const NOT_MANUAL = ".issue-table:not(.manual-order)";
 const MANUAL = ".issue-table.manual-order";
-// Inbox振り分け一覧（Projectを2段目で選ぶ）を除いた Issues 一覧。
-const ISSUES_LIST = ".issue-table:not(.inbox-triage-list)";
+// mobile の1行表示は Issues 一覧と Inbox 振り分け一覧の両方に効かせる。
+const ANY_LIST = ".issue-table";
 
 describe("responsive issue layout contract", () => {
   it("[境界値] mobileのIssue一覧は本文幅を確保し、期限を出さず1行に収める", () => {
@@ -44,11 +44,11 @@ describe("responsive issue layout contract", () => {
     expect(dateInput.get("max-width")).toBe("100%");
     expect(dateInput.get("font-size")).toBe("11px");
 
-    // mobile の Issues 一覧だけは期限を隠して1行にする（期限は行タップで開く詳細で見る）。
-    expect(
-      declarationsFor(rules, `${ISSUES_LIST} .issue-row .due-cell`, MOBILE).get("display"),
-    ).toBe("none");
-    const title = declarationsFor(rules, `${ISSUES_LIST} .issue-main strong`, MOBILE);
+    // mobile の一覧（Issues・Inbox）は期限を隠して1行にする（期限は行タップで開く詳細で見る）。
+    expect(declarationsFor(rules, `${ANY_LIST} .issue-row .due-cell`, MOBILE).get("display")).toBe(
+      "none",
+    );
+    const title = declarationsFor(rules, `${ANY_LIST} .issue-main strong`, MOBILE);
     expect(title.get("white-space")).toBe("nowrap");
     expect(title.get("text-overflow")).toBe("ellipsis");
     expect(title.get("display")).toBe("block");
@@ -59,12 +59,12 @@ describe("responsive issue layout contract", () => {
       ".issue-child-progress",
     ]) {
       expect(
-        declarationsFor(rules, `${ISSUES_LIST} .issue-main ${extra}`, MOBILE).get("display"),
+        declarationsFor(rules, `${ANY_LIST} .issue-main ${extra}`, MOBILE).get("display"),
       ).toBe("none");
     }
   });
 
-  it("[境界値] 期限を隠すのはmobileのIssues一覧だけで、tablet以上とInbox振り分けでは隠さない", () => {
+  it("[境界値] 期限を隠すのはmobileだけで、tablet以上では隠さない（InboxもIssuesと同じ）", () => {
     const hiddenDueRules = rules.filter(
       (rule) =>
         rule.selectors.some((selector) => selector.includes(".due-cell")) &&
@@ -73,7 +73,7 @@ describe("responsive issue layout contract", () => {
     );
     expect(hiddenDueRules.map((rule) => rule.media)).toEqual([MOBILE]);
     expect(hiddenDueRules.flatMap((rule) => rule.selectors)).toEqual([
-      `${ISSUES_LIST} .issue-row .due-cell`,
+      `${ANY_LIST} .issue-row .due-cell`,
     ]);
   });
 

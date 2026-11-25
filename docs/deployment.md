@@ -126,3 +126,22 @@ rollbackはRunが終了した境界で**Worker Versionだけ**を切り替え、
 切替後はブラウザをrefreshして旧版のUIへ揃える。新旧のタブが混在すると旧APIが追加enumを拒否するため、旧UIで新機能を操作し続けない。過去の新request keyを旧fallback内容で再利用した場合の`409 IDEMPOTENCY_KEY_REUSED`は既存の競合検出であり、異なる内容を同じkeyへ上書きしない。
 
 D1の復元期限・Time Travelはアプリの30日Trash期限とは別管理である。障害でDB自体の復旧が必要な場合は、利用者の更新を保持できる復旧対象と手順を別途確認する。
+
+## 8. 毎朝のダイジェストメール
+
+毎朝7:30（JST、Cron `30 22 * * *` UTC）に、期限切れ・今日期限・今のCycleの未完了Issueを1通のメールで送る（[FEAT-daily-digest-email](./spec/FEAT-daily-digest-email/index.md)）。Cloudflare Email Sendingを使い、Workers Freeでは確認済みの宛先アドレスにだけ送れる。
+
+`EMAIL` binding・Cron・`ORBIT_APP_URL`は`wrangler.jsonc`の`env.production`にある（`wrangler.local.jsonc`のローカル運用ではCronもメール送信も動かない）。次の準備が済むまでは、Cronが動いても送らずに`daily-digest skipped: missing-config: ...`をログに出すだけになる。
+
+1. Cloudflareダッシュボード > Compute > Email Service > Email Sending > Onboard Domain で`okogelab.com`を登録する（`cf-bounce`サブドメインのMX・SPF・DKIMが自動で入る。既存のルートMXは変わらない）。
+2. Email Routing > Destination addresses で、受け取りたいアドレスを確認済みにする（Workers Freeは確認済みアドレスにしか送れない）。
+3. Macのorbitリポジトリで送信元と宛先をSecretに登録する（アドレスはリポジトリに書かない）。送る相手のデータは認証と同じ既存Secret `OWNER_USER_ID` で決まる。
+
+   ```bash
+   pnpm exec wrangler secret put ORBIT_DIGEST_FROM --env production   # 例: orbit@okogelab.com
+   pnpm exec wrangler secret put ORBIT_DIGEST_TO --env production     # 2で確認済みにしたアドレス
+   ```
+
+4. ダッシュボードのWorker > Settings > Trigger EventsでCronが`30 22 * * *`になっていることを確認し、翌朝にWorkers Logsで`daily-digest sent`または`skipped`を確認する。
+
+送信に失敗した日はCron実行が失敗になり、ログに`daily-digest send failed: <エラーコード>`が出る。`E_RECIPIENT_PLAN_RESTRICTED`は宛先が未確認、`E_SENDER_DOMAIN_NOT_AVAILABLE`は1のドメイン登録が未完了を意味する。止めたいときは`wrangler secret delete ORBIT_DIGEST_TO --env production`で宛先を消す。

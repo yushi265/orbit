@@ -3,7 +3,7 @@
   "name": "orbit",
   "compatibility_date": "2026-08-24",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   "observability": { "enabled": true },
   "d1_databases": [
     {
@@ -13,6 +13,7 @@
       "migrations_dir": "drizzle"
     }
   ],
+  "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "APP_ENV": "development"
   },
@@ -21,8 +22,11 @@
       "name": "orbit",
       "workers_dev": true,
       "routes": [{ "pattern": "orbit.okogelab.com", "custom_domain": true }],
+      "triggers": { "crons": ["30 22 * * *"] },
+      "send_email": [{ "name": "EMAIL" }],
       "vars": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "ORBIT_APP_URL": "https://orbit.okogelab.com"
       },
       "d1_databases": [
         {

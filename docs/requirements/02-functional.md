@@ -165,6 +165,8 @@ MVP推奨ショートカット:
 | NOTIF-03 | 通知から対象Issue、Cycleまたは関連画面へ移動できる | モバイルでは戻る操作でInbox位置を復元する |
 | NOTIF-04 | 通知種別ごとにON/OFFできる | ユーザー設定へ保存する |
 
+> 2026-11-25: 期限切れ・今日期限・Cycle未完了は、毎朝7:30（JST）のメール1通で知らせる（[FEAT-daily-digest-email](../spec/FEAT-daily-digest-email/index.md)）。Inbox通知（NOTIF-01〜04）は引き続き保留。
+
 ## 6.9 Settings・監査・データ管理
 
 - Profile、Workflow、Cycle、Label、Project status、通知、テーマ、Background processingを設定できる

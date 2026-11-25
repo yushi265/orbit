@@ -104,6 +104,13 @@ curl -sS "${H[@]}" -H "X-Requested-With: XMLHttpRequest" -H "Idempotency-Key: $(
   -X POST "$ORBIT_URL/api/v1/issues/<issueId>?action=archive"   # restore / trash も同じ
 ```
 
+Projectも同じ形です。`action`は`archive`（省略時も同じ）・`restore`・`delete`。`delete`は確認なしで消え、そのProjectに入っていたIssue（アーカイブ済み・ゴミ箱内を含む）はProjectなしとして残ります。画面から元に戻す手段はありません。
+
+```bash
+curl -sS "${H[@]}" -H "X-Requested-With: XMLHttpRequest" -H "Idempotency-Key: $(uuidgen)" \
+  -X POST "$ORBIT_URL/api/v1/projects/<projectId>?action=archive"   # restore / delete も同じ
+```
+
 ## リポジトリ内から使う
 
 Claude Code / Codexからは`orbit-api`スキル（`.claude/skills/orbit-api/`）と`scripts/orbit-api.mjs`を使います。環境変数`ORBIT_URL` / `ORBIT_CF_CLIENT_ID` / `ORBIT_CF_CLIENT_SECRET`を設定すると、更新系の必須ヘッダーと`idempotencyKey`を自動で付けます。

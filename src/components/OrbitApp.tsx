@@ -42,7 +42,7 @@ import {
   type ViewSearch,
 } from "./saved-views";
 import type { IssueQuery } from "../shared/contracts/issues";
-import { NO_PROJECT_OPTION, projectIdFromSelection } from "./issue-project";
+import { NO_PROJECT_OPTION, projectIdFromSelection, selectableProjects } from "./issue-project";
 import { calculateCycleBreakdown, type CycleBreakdown } from "./cycle-breakdown";
 import {
   BURNDOWN_HEIGHT,
@@ -71,7 +71,7 @@ import {
   writeCollapsedParents,
   type IssueHierarchyRow,
 } from "./issue-hierarchy";
-import { beforeProjectIdForMove } from "./project-workspace";
+import { beforeProjectIdForMove, splitArchivedProjects } from "./project-workspace";
 import { priorityFromSelection } from "./issue-priority";
 import { hasIssueTitle, shouldSubmitIssueOnEnter } from "./issue-composer";
 import { isImeComposing } from "./ime";
@@ -2548,9 +2548,9 @@ export function IssuesView({
             {bulkField === "project" && (
               <>
                 <option value={NO_PROJECT_OPTION}>Projectなし</option>
-                {projects.map((project) => (
+                {selectableProjects(projects).map(({ project, archived }) => (
                   <option value={project.id} key={project.id}>
-                    {project.name}
+                    {archived ? `${project.name}（アーカイブ済み）` : project.name}
                   </option>
                 ))}
               </>
@@ -3042,9 +3042,9 @@ function IssueRow({
             }
           >
             <option value="">Projectなし</option>
-            {projects.map((project) => (
+            {selectableProjects(projects, issue.projectId).map(({ project, archived }) => (
               <option value={project.id} key={project.id}>
-                {project.name}
+                {archived ? `${project.name}（アーカイブ済み）` : project.name}
               </option>
             ))}
           </select>
@@ -4375,9 +4375,13 @@ export function ProjectsView({
   const [targetDraft, setTargetDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const projectMutationKey = useMutationKey();
+  const projectActionKey = useMutationKey();
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
-  const projectOrderKey = projects.map((project) => project.id).join(",");
+  const { active: activeProjects, archived: archivedProjects } = splitArchivedProjects(projects);
+  const projectOrderKey = activeProjects.map((project) => project.id).join(",");
   const [orderFocus, setOrderFocus] = useState<{
     projectId: string;
     direction: "up" | "down";
@@ -4397,7 +4401,7 @@ export function ProjectsView({
     setOrderFocus(null);
   }, [orderFocus, projectReorderBusy, projectOrderKey]);
   function moveProject(projectId: string, direction: "up" | "down") {
-    const move = beforeProjectIdForMove(projects, projectId, direction);
+    const move = beforeProjectIdForMove(activeProjects, projectId, direction);
     if (!move) return;
     setOrderFocus({
       projectId,
@@ -4437,6 +4441,8 @@ export function ProjectsView({
     );
     setEditing(false);
     setError(null);
+    setDeleteOpen(false);
+    setDeleteError(null);
   }, [
     selectedProject?.id,
     selectedProject?.name,
@@ -4515,6 +4521,33 @@ export function ProjectsView({
     }
   }
 
+  // アーカイブ・元に戻す・削除。成功したら最新を読み込む（削除は一覧へ戻ってから）。
+  async function runProjectAction(action: "archive" | "restore" | "delete") {
+    if (!selectedProject || saving) return;
+    setSaving(true);
+    setError(null);
+    setDeleteError(null);
+    const key = projectActionKey.keyFor(`${action}:${selectedProject.id}`);
+    try {
+      await apiPost(`/api/v1/projects/${selectedProject.id}?action=${action}`, {
+        idempotencyKey: key,
+      });
+      projectActionKey.reset();
+      if (action === "delete") {
+        setDeleteOpen(false);
+        await router.navigate({ to: "/projects" });
+      }
+      await onRefresh();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status !== 423) projectActionKey.reset();
+      const message = caught instanceof ApiError ? caught.message : "Projectの操作に失敗しました。";
+      if (action === "delete") setDeleteError(message);
+      else setError(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (projectId && selectedProject) {
     return (
       <div className="page project-detail-page">
@@ -4554,6 +4587,18 @@ export function ProjectsView({
             <p className="subheading">
               {selectedProject.description || "このProjectの作業をまとめて管理します。"}
             </p>
+            {selectedProject.archivedAt !== null && (
+              <div className="project-archived-notice" role="status">
+                <span>このProjectはアーカイブ済みです</span>
+                <button
+                  className="button secondary"
+                  onClick={() => void runProjectAction("restore")}
+                  disabled={saving}
+                >
+                  元に戻す
+                </button>
+              </div>
+            )}
             <div className="project-detail-properties">
               <span className="status-pill">
                 {projectStatuses.find((status) => status.id === selectedProject.statusId)?.name ??
@@ -4577,6 +4622,25 @@ export function ProjectsView({
               disabled={saving}
             >
               {editing ? "取消" : "Projectを編集"}
+            </button>
+            {selectedProject.archivedAt === null && (
+              <button
+                className="button ghost"
+                onClick={() => void runProjectAction("archive")}
+                disabled={saving}
+              >
+                アーカイブ
+              </button>
+            )}
+            <button
+              className="button ghost danger"
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteOpen(true);
+              }}
+              disabled={saving}
+            >
+              削除
             </button>
           </div>
         </div>
@@ -4675,6 +4739,123 @@ export function ProjectsView({
         >
           Issuesで開く（未完了{countOpenIssues(projectIssues, workflowStates)}件）→
         </Link>
+        {deleteOpen && (
+          <Modal
+            title="Projectを削除しますか？"
+            onClose={() => {
+              if (!saving) setDeleteOpen(false);
+            }}
+          >
+            <p className="cycle-confirm-message">
+              「{selectedProject.name}」を削除します。このProjectのIssue{" "}
+              {
+                issues.filter(
+                  (issue) =>
+                    issue.userId === selectedProject.userId &&
+                    issue.projectId === selectedProject.id &&
+                    !issue.deletedAt,
+                ).length
+              }
+              件はProjectなしとして残ります。削除は元に戻せません。
+            </p>
+            {deleteError && (
+              <div className="detail-live-error" role="alert">
+                {deleteError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button ghost"
+                data-modal-autofocus
+                disabled={saving}
+                onClick={() => setDeleteOpen(false)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                disabled={saving}
+                onClick={() => void runProjectAction("delete")}
+              >
+                削除する
+              </button>
+            </div>
+          </Modal>
+        )}
+      </div>
+    );
+  }
+
+  // index が null のカードはアーカイブ済み（並べ替えボタンなし・印つき）。
+  function renderProjectCard(project: Project, index: number | null) {
+    const projectIssues = issues.filter(
+      (issue) =>
+        issue.userId === project.userId && issue.projectId === project.id && !issue.deletedAt,
+    );
+    return (
+      <div className="project-card-item" data-project-id={project.id} key={project.id}>
+        <Link
+          className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
+          data-project-id={project.id}
+          to="/projects/$projectId"
+          params={{ projectId: project.id }}
+          onClick={(event) => {
+            if (saving) {
+              event.preventDefault();
+              return;
+            }
+            setSelectedProjectId(project.id);
+          }}
+        >
+          <div className="project-card-top">
+            <span className="project-icon" style={{ background: project.color }}>
+              {project.icon}
+            </span>
+            {index === null ? (
+              <span className="project-archived-badge">アーカイブ済み</span>
+            ) : (
+              <span className="priority-badge high">{priorityLabel[project.priority]}</span>
+            )}
+          </div>
+          <h2>{project.name}</h2>
+          <p>{project.description || "説明はまだありません。"}</p>
+          <div className="project-progress">
+            <div className="progress-line">
+              <span
+                style={{
+                  width: `${calculateCycleMetrics(projectIssues, workflowStates).progressPercent}%`,
+                }}
+              />
+            </div>
+            <span>
+              {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
+            </span>
+          </div>
+        </Link>
+        {index !== null && (
+          <div className="project-order-actions">
+            <button
+              type="button"
+              className="project-order-button"
+              aria-label={`${project.name}を上へ移動`}
+              disabled={saving || projectReorderBusy || index === 0}
+              onClick={() => moveProject(project.id, "up")}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="project-order-button"
+              aria-label={`${project.name}を下へ移動`}
+              disabled={saving || projectReorderBusy || index === activeProjects.length - 1}
+              onClick={() => moveProject(project.id, "down")}
+            >
+              ↓
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -4687,70 +4868,7 @@ export function ProjectsView({
         </button>
       </div>
       <div className="project-grid">
-        {projects.map((project, index) => {
-          const projectIssues = issues.filter(
-            (issue) =>
-              issue.userId === project.userId && issue.projectId === project.id && !issue.deletedAt,
-          );
-          return (
-            <div className="project-card-item" data-project-id={project.id} key={project.id}>
-              <Link
-                className={`project-card ${selectedProjectId === project.id ? "selected" : ""}`}
-                data-project-id={project.id}
-                to="/projects/$projectId"
-                params={{ projectId: project.id }}
-                onClick={(event) => {
-                  if (saving) {
-                    event.preventDefault();
-                    return;
-                  }
-                  setSelectedProjectId(project.id);
-                }}
-              >
-                <div className="project-card-top">
-                  <span className="project-icon" style={{ background: project.color }}>
-                    {project.icon}
-                  </span>
-                  <span className="priority-badge high">{priorityLabel[project.priority]}</span>
-                </div>
-                <h2>{project.name}</h2>
-                <p>{project.description || "説明はまだありません。"}</p>
-                <div className="project-progress">
-                  <div className="progress-line">
-                    <span
-                      style={{
-                        width: `${calculateCycleMetrics(projectIssues, workflowStates).progressPercent}%`,
-                      }}
-                    />
-                  </div>
-                  <span>
-                    {projectIssues.length} Issues · {formatDateOnly(project.targetAt)}まで
-                  </span>
-                </div>
-              </Link>
-              <div className="project-order-actions">
-                <button
-                  type="button"
-                  className="project-order-button"
-                  aria-label={`${project.name}を上へ移動`}
-                  disabled={saving || projectReorderBusy || index === 0}
-                  onClick={() => moveProject(project.id, "up")}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="project-order-button"
-                  aria-label={`${project.name}を下へ移動`}
-                  disabled={saving || projectReorderBusy || index === projects.length - 1}
-                  onClick={() => moveProject(project.id, "down")}
-                >
-                  ↓
-                </button>
-              </div>
-            </div>
-          );
-        })}
+        {activeProjects.map((project, index) => renderProjectCard(project, index))}
         {projects.length === 0 && (
           <EmptyState
             title="Projectはまだありません"
@@ -4759,6 +4877,14 @@ export function ProjectsView({
           />
         )}
       </div>
+      {archivedProjects.length > 0 && (
+        <details className="project-archived-section">
+          <summary>アーカイブ済み（{archivedProjects.length}）</summary>
+          <div className="project-grid">
+            {archivedProjects.map((project) => renderProjectCard(project, null))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -8033,9 +8159,9 @@ export function IssueDetailPanel({
                   }}
                 >
                   <option value="">Projectなし</option>
-                  {projects.map((project) => (
+                  {selectableProjects(projects, projectIdDraft).map(({ project, archived }) => (
                     <option value={project.id} key={project.id}>
-                      {project.name}
+                      {archived ? `${project.name}（アーカイブ済み）` : project.name}
                     </option>
                   ))}
                 </select>
@@ -8364,9 +8490,9 @@ export function IssueComposer({
                   onChange={(event) => setProjectId(event.target.value)}
                 >
                   <option value="">Projectなし</option>
-                  {projects.map((project) => (
+                  {selectableProjects(projects, projectId).map(({ project, archived }) => (
                     <option value={project.id} key={project.id}>
-                      {project.name}
+                      {archived ? `${project.name}（アーカイブ済み）` : project.name}
                     </option>
                   ))}
                 </select>

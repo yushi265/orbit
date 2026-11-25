@@ -12,3 +12,13 @@ export function beforeProjectIdForMove(
   if (index === ordered.length - 1) return null;
   return { beforeProjectId: ordered[index + 2]?.id ?? null };
 }
+
+/** Projects一覧用。順を保ってアーカイブ済みとそれ以外に分ける。 */
+export function splitArchivedProjects<T extends { archivedAt: number | null }>(
+  projects: ReadonlyArray<T>,
+): { active: T[]; archived: T[] } {
+  return {
+    active: projects.filter((project) => !project.archivedAt),
+    archived: projects.filter((project) => Boolean(project.archivedAt)),
+  };
+}

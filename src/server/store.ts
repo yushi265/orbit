@@ -2644,7 +2644,77 @@ export class OrbitStore {
     this.recordActivity(userId, "project", id, "archived", idempotencyKey, null, {
       archivedAt: project.archivedAt,
     });
+    this.recordOutbox(userId, "project.archived", `project.archived:${id}:${idempotencyKey}`, {
+      projectId: id,
+    });
     this.recordReceipt(userId, "project.archive", idempotencyKey, { id }, project);
+    return project;
+  }
+
+  restoreProject(userId: string, id: string, idempotencyKey: string): Project {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Project>(userId, "project.restore", idempotencyKey, { id });
+    if (existing) return existing;
+    const project = this.projects.get(id);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    if (project.archivedAt !== null) {
+      const archivedAt = project.archivedAt;
+      project.archivedAt = null;
+      project.updatedAt = this.clock();
+      this.recordActivity(
+        userId,
+        "project",
+        id,
+        "restored",
+        idempotencyKey,
+        { archivedAt },
+        {
+          archivedAt: null,
+        },
+      );
+      this.recordOutbox(userId, "project.restored", `project.restored:${id}:${idempotencyKey}`, {
+        projectId: id,
+      });
+    }
+    this.recordReceipt(userId, "project.restore", idempotencyKey, { id }, project);
+    return project;
+  }
+
+  // 削除したProjectのIssueは残し、Projectだけ外す（アーカイブ済み・ゴミ箱内も含む）。
+  deleteProject(userId: string, id: string, idempotencyKey: string): Project {
+    this.assertUnlocked(userId);
+    const existing = this.checkReceipt<Project>(userId, "project.delete", idempotencyKey, { id });
+    if (existing) return existing;
+    const project = this.projects.get(id);
+    if (!project || project.userId !== userId || project.deletedAt) throw notFound();
+    const now = this.clock();
+    project.deletedAt = now;
+    project.updatedAt = now;
+    let detachedIssueCount = 0;
+    for (const issue of this.issues.values()) {
+      if (issue.userId !== userId || issue.projectId !== id) continue;
+      issue.projectId = null;
+      issue.version += 1;
+      issue.updatedAt = now;
+      detachedIssueCount += 1;
+    }
+    this.recordActivity(
+      userId,
+      "project",
+      id,
+      "deleted",
+      idempotencyKey,
+      { deletedAt: null },
+      {
+        deletedAt: now,
+        detachedIssueCount,
+      },
+    );
+    this.recordOutbox(userId, "project.deleted", `project.deleted:${id}`, {
+      projectId: id,
+      detachedIssueCount,
+    });
+    this.recordReceipt(userId, "project.delete", idempotencyKey, { id }, project);
     return project;
   }
 

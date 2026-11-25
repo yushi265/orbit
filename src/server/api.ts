@@ -447,6 +447,48 @@ export async function archiveProject(request: Request, projectId: string): Promi
   );
 }
 
+export async function restoreProject(request: Request, projectId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) =>
+    json(
+      {
+        project: owner.store.restoreProject(
+          owner.userId,
+          projectId,
+          requireIdempotencyKey(request),
+        ),
+      },
+      200,
+      requestId,
+    ),
+  );
+}
+
+export async function deleteProject(request: Request, projectId: string): Promise<Response> {
+  return withOwner(request, async ({ owner, requestId }) =>
+    json(
+      {
+        project: owner.store.deleteProject(owner.userId, projectId, requireIdempotencyKey(request)),
+      },
+      200,
+      requestId,
+    ),
+  );
+}
+
+const projectActions = { archive: archiveProject, restore: restoreProject, delete: deleteProject };
+
+// actionなしは従来どおりアーカイブ。
+export async function postProjectAction(request: Request, projectId: string): Promise<Response> {
+  const action = new URL(request.url).searchParams.get("action") ?? "archive";
+  if (Object.hasOwn(projectActions, action))
+    return projectActions[action as keyof typeof projectActions](request, projectId);
+  return withOwner(request, async () => {
+    throw validationError({
+      action: ["actionはarchive・restore・deleteのいずれかを指定してください。"],
+    });
+  });
+}
+
 export async function listCycles(request: Request): Promise<Response> {
   return withOwner(request, async ({ owner, requestId }) =>
     json({ items: owner.store.listCycles(owner.userId) }, 200, requestId),

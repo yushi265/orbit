@@ -1,12 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { describe, expect, it } from "vitest";
 import { OrbitStore } from "../../server/store";
-import {
-  listStoreSnapshotUserIds,
-  readStoreSnapshot,
-  SnapshotVersionConflict,
-  writeStoreSnapshot,
-} from "./store-snapshot";
+import { readStoreSnapshot, SnapshotVersionConflict, writeStoreSnapshot } from "./store-snapshot";
 
 type Row = { userId: string; version: number; stateJson: string; updatedAt: number };
 
@@ -111,42 +106,5 @@ describe("store snapshot repository", () => {
     await expect(
       writeStoreSnapshot(database as unknown as D1Database, "owner-a", 0, snapshotWithBigInt, 1),
     ).rejects.toThrow();
-  });
-});
-
-class ListD1 {
-  readonly queries: string[] = [];
-  constructor(private readonly results: unknown[]) {}
-
-  prepare(query: string) {
-    this.queries.push(query);
-    return {
-      all: async () => ({ results: this.results }),
-    };
-  }
-}
-
-describe("listStoreSnapshotUserIds", () => {
-  it("[代表値] snapshotが1件ならそのuser_idを返し、SELECTだけを発行する", async () => {
-    const database = new ListD1([{ userId: "owner-a" }]);
-    expect(await listStoreSnapshotUserIds(database as unknown as D1Database)).toEqual(["owner-a"]);
-    expect(database.queries).toHaveLength(1);
-    expect(database.queries[0]).toMatch(/^SELECT user_id AS userId FROM orbit_store_snapshots/);
-    expect(database.queries[0]).toContain("LIMIT 2");
-  });
-
-  it("[境界値] 0件は空配列、2件は2要素を返す", async () => {
-    expect(await listStoreSnapshotUserIds(new ListD1([]) as unknown as D1Database)).toEqual([]);
-    expect(
-      await listStoreSnapshotUserIds(
-        new ListD1([{ userId: "a" }, { userId: "b" }]) as unknown as D1Database,
-      ),
-    ).toEqual(["a", "b"]);
-  });
-
-  it("[異常系] user_idが文字列でない行は例外にする", async () => {
-    await expect(
-      listStoreSnapshotUserIds(new ListD1([{ userId: 1 }]) as unknown as D1Database),
-    ).rejects.toThrow("Invalid D1 snapshot row");
   });
 });

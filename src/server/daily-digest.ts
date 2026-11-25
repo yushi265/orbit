@@ -1,5 +1,5 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import { listStoreSnapshotUserIds, readStoreSnapshot } from "../db/repositories/store-snapshot";
+import { readStoreSnapshot } from "../db/repositories/store-snapshot";
 import { calendarDateKeyInTimeZone, issueDueDateKey } from "../shared/issue-dates";
 import type { Issue, Priority } from "./model";
 import { OrbitStore } from "./store";
@@ -36,11 +36,18 @@ export interface DailyDigestEnv {
   ORBIT_DIGEST_FROM?: string;
   ORBIT_DIGEST_TO?: string;
   ORBIT_APP_URL?: string;
+  OWNER_USER_ID?: string;
 }
 
 export type DailyDigestResult =
   | { status: "sent"; counts: DailyDigestCounts }
-  | { status: "skipped"; reason: "missing-config" | "snapshot-count" | "empty" };
+  | { status: "skipped"; reason: "missing-config" | "snapshot-missing" | "empty" };
+
+// 保存済みの dueAt が Date で表せない値でも、その1件のせいでダイジェスト全体を止めない。
+function dueDateKey(dueAt: number | null): string | null {
+  if (dueAt === null || !Number.isFinite(new Date(dueAt).getTime())) return null;
+  return issueDueDateKey(dueAt);
+}
 
 function shortDate(dateKey: string): string {
   const [, month, date] = dateKey.split("-");
@@ -66,8 +73,8 @@ function renderSection(
   if (issues.length === 0) return [];
   const lines = [`■ ${heading}（${issues.length}）`];
   for (const issue of issues.slice(0, SECTION_LIMIT)) {
-    const due =
-      withDue && issue.dueAt !== null ? `（期限 ${shortDate(issueDueDateKey(issue.dueAt))}）` : "";
+    const dueKey = withDue ? dueDateKey(issue.dueAt) : null;
+    const due = dueKey ? `（期限 ${shortDate(dueKey)}）` : "";
     lines.push(`- ${issue.identifier} ${issue.title}${due}`, `  ${appUrl}/issues/${issue.id}`);
   }
   if (issues.length > SECTION_LIMIT) lines.push(`- ほか${issues.length - SECTION_LIMIT}件`);
@@ -106,7 +113,7 @@ export function buildDailyDigest(
   const dueToday: Issue[] = [];
   const cycle: Issue[] = [];
   for (const issue of open) {
-    const due = issue.dueAt === null ? null : issueDueDateKey(issue.dueAt);
+    const due = dueDateKey(issue.dueAt);
     if (due !== null && due < today) overdue.push(issue);
     else if (due === today) dueToday.push(issue);
     else if (activeCycle && issue.cycleId === activeCycle.id) cycle.push(issue);
@@ -153,25 +160,20 @@ export async function runDailyDigest(
     "ORBIT_DIGEST_FROM",
     "ORBIT_DIGEST_TO",
     "ORBIT_APP_URL",
+    "OWNER_USER_ID",
   ] as const;
   const missing = required.filter((key) => !env[key]);
   const { DB: database, EMAIL: email, ORBIT_DIGEST_FROM: from, ORBIT_DIGEST_TO: to } = env;
-  const appUrl = env.ORBIT_APP_URL;
-  if (missing.length > 0 || !database || !email || !from || !to || !appUrl) {
+  const { ORBIT_APP_URL: appUrl, OWNER_USER_ID: userId } = env;
+  if (missing.length > 0 || !database || !email || !from || !to || !appUrl || !userId) {
     log(`daily-digest skipped: missing-config: ${missing.join(",")}`);
     return { status: "skipped", reason: "missing-config" };
   }
 
-  const userIds = await listStoreSnapshotUserIds(database);
-  if (userIds.length !== 1) {
-    log(`daily-digest skipped: snapshot-count=${userIds.length}`);
-    return { status: "skipped", reason: "snapshot-count" };
-  }
-  const [userId] = userIds;
   const row = await readStoreSnapshot(database, userId);
   if (!row) {
-    log("daily-digest skipped: snapshot-count=0");
-    return { status: "skipped", reason: "snapshot-count" };
+    log("daily-digest skipped: snapshot-missing");
+    return { status: "skipped", reason: "snapshot-missing" };
   }
   const store = OrbitStore.fromSnapshot(decodeStoreSnapshot(row.snapshot), undefined, userId);
   const digest = buildDailyDigest(store, userId, now, appUrl);
@@ -183,8 +185,10 @@ export async function runDailyDigest(
   try {
     await email.send({ from, to, subject: digest.subject, text: digest.text });
   } catch (error) {
-    log(`daily-digest send failed: ${errorCode(error)}`);
-    throw error;
+    // 元の例外はメッセージに宛先を含みうるので、コードだけの例外に置き換えて Cron を失敗にする。
+    const message = `daily-digest send failed: ${errorCode(error)}`;
+    log(message);
+    throw new Error(message);
   }
   const { counts } = digest;
   log(`daily-digest sent: overdue=${counts.overdue} today=${counts.today} cycle=${counts.cycle}`);

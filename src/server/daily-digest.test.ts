@@ -124,6 +124,21 @@ describe("buildDailyDigest", () => {
     expect(text.includes("- ほか1件")).toBe(summarized);
   });
 
+  it("[異常系] Dateで表せない期限のIssueがあっても他のIssueを送り、その期限は無いものとして扱う", () => {
+    const { store, active, issue } = setup();
+    const broken = issue({ title: "壊れた期限", cycleId: active.id });
+    const healthy = issue({ title: "正常", dueAt: day(11, 26) });
+    const snapshot = store.toSnapshot();
+    snapshot.issues.find((item) => item.id === broken.id)!.dueAt = 9_000_000_000_000_000;
+    const restored = OrbitStore.fromSnapshot(snapshot, () => NOW, "owner");
+
+    const digest = buildDailyDigest(restored, "owner", NOW, APP_URL)!;
+
+    expect(digest.counts).toEqual({ overdue: 0, today: 1, cycle: 1 });
+    expect(digest.text).toContain(`- ${healthy.identifier} 正常`);
+    expect(digest.text).toContain(`- ${broken.identifier} 壊れた期限\n`);
+  });
+
   it("[代表値] 該当0件ならnullを返す", () => {
     const { store, issue } = setup();
     issue({ title: "期限なし" });
@@ -133,6 +148,7 @@ describe("buildDailyDigest", () => {
 
 class DigestD1 {
   readonly queries: string[] = [];
+  readonly boundValues: unknown[][] = [];
   constructor(private readonly rows: Map<string, string>) {}
 
   prepare(query: string) {
@@ -141,6 +157,7 @@ class DigestD1 {
     const statement = {
       bind: (...next: unknown[]) => {
         values = next;
+        this.boundValues.push(next);
         return statement;
       },
       all: async () => ({ results: [...this.rows.keys()].map((userId) => ({ userId })) }),
@@ -168,6 +185,7 @@ function digestEnv(overrides: Partial<DailyDigestEnv> = {}, userIds = ["owner"])
     ORBIT_DIGEST_FROM: "orbit@example.test",
     ORBIT_DIGEST_TO: "me@example.test",
     ORBIT_APP_URL: APP_URL,
+    OWNER_USER_ID: "owner",
     ...overrides,
   };
   const lines: string[] = [];
@@ -194,44 +212,43 @@ describe("runDailyDigest", () => {
     expect(lines).toEqual(["daily-digest sent: overdue=0 today=1 cycle=0"]);
   });
 
-  it.each(["DB", "EMAIL", "ORBIT_DIGEST_FROM", "ORBIT_DIGEST_TO", "ORBIT_APP_URL"] as const)(
-    "[異常系] %s が無ければ送らずキー名だけをログに出す",
-    async (key) => {
-      const { env, send, lines, log } = digestEnv({ [key]: undefined });
+  it.each([
+    "DB",
+    "EMAIL",
+    "ORBIT_DIGEST_FROM",
+    "ORBIT_DIGEST_TO",
+    "ORBIT_APP_URL",
+    "OWNER_USER_ID",
+  ] as const)("[異常系] %s が無ければ送らずキー名だけをログに出す", async (key) => {
+    const { env, send, lines, log } = digestEnv({ [key]: undefined });
 
-      const result = await runDailyDigest(env, NOW, log);
+    const result = await runDailyDigest(env, NOW, log);
 
-      expect(result).toEqual({ status: "skipped", reason: "missing-config" });
-      expect(send).not.toHaveBeenCalled();
-      expect(lines).toEqual([`daily-digest skipped: missing-config: ${key}`]);
-    },
-  );
+    expect(result).toEqual({ status: "skipped", reason: "missing-config" });
+    expect(send).not.toHaveBeenCalled();
+    expect(lines).toEqual([`daily-digest skipped: missing-config: ${key}`]);
+  });
 
   it.each([
-    ["0件", []],
-    ["2件", ["owner", "other"]],
-  ])("[境界値] snapshotが%sなら送らない", async (_label, userIds) => {
+    ["snapshotが無い", []],
+    ["OWNER_USER_ID以外のsnapshotしか無い", ["old-owner"]],
+  ])("[異常系] %sなら送らない", async (_label, userIds) => {
     const { env, send, lines, log } = digestEnv({}, userIds);
 
     expect(await runDailyDigest(env, NOW, log)).toEqual({
       status: "skipped",
-      reason: "snapshot-count",
+      reason: "snapshot-missing",
     });
     expect(send).not.toHaveBeenCalled();
-    expect(lines).toEqual([`daily-digest skipped: snapshot-count=${userIds.length}`]);
+    expect(lines).toEqual(["daily-digest skipped: snapshot-missing"]);
   });
 
-  it("[異常系] 一覧取得後にsnapshotが読めなければ送らない", async () => {
-    const { env, send, lines, log } = digestEnv({
-      DB: new DigestD1(new Map([["owner", ""]])) as unknown as D1Database,
-    });
+  it("[代表値] OWNER_USER_IDのsnapshotだけを読み、他のOwnerのsnapshotがあっても送る", async () => {
+    const { env, send, database, log } = digestEnv({}, ["old-owner", "owner"]);
 
-    expect(await runDailyDigest(env, NOW, log)).toEqual({
-      status: "skipped",
-      reason: "snapshot-count",
-    });
-    expect(send).not.toHaveBeenCalled();
-    expect(lines).toEqual(["daily-digest skipped: snapshot-count=0"]);
+    expect((await runDailyDigest(env, NOW, log)).status).toBe("sent");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(database.boundValues).toEqual([["owner"]]);
   });
 
   it("[代表値] 該当0件の日は送らない", async () => {
@@ -255,7 +272,11 @@ describe("runDailyDigest", () => {
       EMAIL: { send: vi.fn(async () => Promise.reject(failure)) },
     });
 
-    await expect(runDailyDigest(env, NOW, log)).rejects.toBe(failure);
+    const thrown = await runDailyDigest(env, NOW, log).catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBe(failure);
+    expect((thrown as Error).message).toBe("daily-digest send failed: E_RECIPIENT_PLAN_RESTRICTED");
+    expect((thrown as Error).cause).toBeUndefined();
     expect(lines).toEqual(["daily-digest send failed: E_RECIPIENT_PLAN_RESTRICTED"]);
     expect(lines.join("\n")).not.toContain("example.test");
     expect(lines.join("\n")).not.toContain("秘密のタイトル");
@@ -266,7 +287,9 @@ describe("runDailyDigest", () => {
       EMAIL: { send: vi.fn(async () => Promise.reject(new Error("boom"))) },
     });
 
-    await expect(runDailyDigest(env, NOW, log)).rejects.toThrow("boom");
+    await expect(runDailyDigest(env, NOW, log)).rejects.toThrow(
+      /^daily-digest send failed: unknown$/,
+    );
     expect(lines).toEqual(["daily-digest send failed: unknown"]);
   });
 });

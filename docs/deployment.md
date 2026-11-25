@@ -135,7 +135,7 @@ D1の復元期限・Time Travelはアプリの30日Trash期限とは別管理で
 
 1. Cloudflareダッシュボード > Compute > Email Service > Email Sending > Onboard Domain で`okogelab.com`を登録する（`cf-bounce`サブドメインのMX・SPF・DKIMが自動で入る。既存のルートMXは変わらない）。
 2. Email Routing > Destination addresses で、受け取りたいアドレスを確認済みにする（Workers Freeは確認済みアドレスにしか送れない）。
-3. Macのorbitリポジトリで送信元と宛先をSecretに登録する（アドレスはリポジトリに書かない）。
+3. Macのorbitリポジトリで送信元と宛先をSecretに登録する（アドレスはリポジトリに書かない）。送る相手のデータは認証と同じ既存Secret `OWNER_USER_ID` で決まる。
 
    ```bash
    pnpm exec wrangler secret put ORBIT_DIGEST_FROM --env production   # 例: orbit@okogelab.com

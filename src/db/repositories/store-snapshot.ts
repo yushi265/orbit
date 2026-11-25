@@ -66,3 +66,13 @@ export async function writeStoreSnapshot(
   if (Number(result.meta.changes) !== 1) throw new SnapshotVersionConflict();
   return nextVersion;
 }
+
+export async function listStoreSnapshotUserIds(database: D1Database): Promise<string[]> {
+  const { results } = await database
+    .prepare("SELECT user_id AS userId FROM orbit_store_snapshots ORDER BY user_id LIMIT 2")
+    .all<{ userId: unknown }>();
+  return results.map((row) => {
+    if (typeof row.userId !== "string") throw new Error("Invalid D1 snapshot row");
+    return row.userId;
+  });
+}

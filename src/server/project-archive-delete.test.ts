@@ -28,6 +28,17 @@ function counts(store: OrbitStore) {
   };
 }
 
+describe("Projectのアーカイブ（archive）", () => {
+  it("[代表値] Outboxにproject.archivedを1件出す", () => {
+    const { store, a } = setup();
+    const before = counts(store);
+    store.archiveProject(OWNER, a.id, "arch-a");
+    const outbox = store.outbox.slice(before.outbox);
+    expect(outbox.map((item) => item.type)).toEqual(["project.archived"]);
+    expect(outbox[0].payload).toEqual({ projectId: a.id });
+  });
+});
+
 describe("Projectの復元（restore）", () => {
   it("[状態遷移] アーカイブ済み → restore: archivedAtがnullに戻り、positionは変わらない", () => {
     const { store, tick, a } = setup();

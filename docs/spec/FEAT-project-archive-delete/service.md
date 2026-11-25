@@ -20,7 +20,7 @@
 
 | 操作 | 名前 | 具体値 |
 |---|---|---|
-| 変更なし | `OrbitStore.archiveProject(userId, id, idempotencyKey)` | 既存のまま |
+| 変更 | `OrbitStore.archiveProject(userId, id, idempotencyKey)` | 既存の動作に加え、`recordOutbox(userId, "project.archived", `project.archived:${id}:${key}`, { projectId: id })`を出す（復元・削除とOutboxで揃えるため。PRレビューで追加） |
 | 追加 | `OrbitStore.restoreProject(userId, id, idempotencyKey): Project` | 下記 |
 | 追加 | `OrbitStore.deleteProject(userId, id, idempotencyKey): Project` | 下記 |
 | 追加 | Handler `restoreProject(request, projectId)` / `deleteProject(request, projectId)` / `postProjectAction(request, projectId)`（`src/server/api.ts`） | `postProjectAction`は`action`クエリで`archiveProject` / `restoreProject` / `deleteProject`へ振り分け（`action`なしは`archiveProject`）。不明な値は`withOwner`の中で`validationError`。形は既存の`postIssueAction`と同じ |
@@ -76,3 +76,4 @@
 | S7 | 代表値 | 削除のActivity `after.detachedIssueCount`とOutbox各1件 | AC-4 |
 | S8 | 代表値 | 同じキーの再送（restore / delete）は初回応答・不変 | AC-4 |
 | S9 | デシジョンテーブル | HTTP: 不明action 400 / キーなし 400 / 他Owner 404 / ロック中 423 で不変 | AC-5 |
+| S10 | 代表値 | archiveでOutbox `project.archived`が1件 | AC-1 |

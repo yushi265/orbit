@@ -2644,6 +2644,9 @@ export class OrbitStore {
     this.recordActivity(userId, "project", id, "archived", idempotencyKey, null, {
       archivedAt: project.archivedAt,
     });
+    this.recordOutbox(userId, "project.archived", `project.archived:${id}:${idempotencyKey}`, {
+      projectId: id,
+    });
     this.recordReceipt(userId, "project.archive", idempotencyKey, { id }, project);
     return project;
   }

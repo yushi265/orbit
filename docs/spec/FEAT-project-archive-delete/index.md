@@ -89,4 +89,5 @@ ui（Project詳細のボタン・確認ダイアログ）→ `POST /api/v1/proje
 - 削除したProjectのIssueは「Projectなし」として残す（Gate 1・2026-11-24。他案「Issueもゴミ箱へ」「Issueがある間は削除不可」は不採用）。
 - 削除の取り消しを画面に置かない理由: 確認ダイアログで十分で、ゴミ箱画面をProjectにも作るのは今の利用規模に見合わない（YAGNI）。
 - `DELETE`メソッドではなく`?action=delete`にする理由: 既存のProject・Issueのアーカイブ／復元／ゴミ箱が`POST ?action=`で揃っており、外部botの呼び方も同じにできる。
+- PRレビュー（2026-11-25）でアーカイブにもOutbox `project.archived`を追加。削除で外れたIssueは個別に通知せず（AC-4のまま）、APIでアーカイブ済みProjectをIssueに指定できることと合わせて`external-api.md`に明記した。
 - 未決事項なし。
